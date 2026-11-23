@@ -24,17 +24,17 @@ A principal declared in [`aouda.json`](declared-access.md) declares how it authe
 survives a wipe without seeding:
 
 - **A derived key**, `"derivedKey": { "version": 1 }`. The key is computed from the file's one **key root** (`"keyRoot": { "file": … }`
-  or `{ "env": … }` at the top of the file, never a literal) and the principal's auth database, name and version: after a wipe, a fresh
-  machine or a CI run the same root gives the same key, and nothing is stored to restore. `aouda keys derive` prints it once for the
-  client's secret store. To rotate one principal's key, bump its `version` and reload: the old key is refused at once and its open
-  sessions end. To rotate the root, declare the new one as `keyRoot` and the old one as `"previousKeyRoot"`: keys of both are accepted
-  until you remove the previous one.
+ or `{ "env": … }` at the top of the file, never a literal) and the principal's auth database, name and version: after a wipe, a fresh
+ machine or a CI run the same root gives the same key, and nothing is stored to restore. `aouda keys derive` prints it once for the
+ client's secret store. To rotate one principal's key, bump its `version` and reload: the old key is refused at once and its open
+ sessions end. To rotate the root, declare the new one as `keyRoot` and the old one as `"previousKeyRoot"`: keys of both are accepted
+ until you remove the previous one.
 - **A stored key**, `"keys": [ { "id": "aouda_…", "sha256": "…" } ]`: the public id and the SHA-256 of a key generated elsewhere — never
-  the key. A whole key written into `id` is refused ("this file now contains a secret: rotate the key").
+ the key. A whole key written into `id` is refused ("this file now contains a secret: rotate the key").
 - **An OIDC trust** (a CI job, a cluster's workload identity): `"oidc": [ { "issuer", "audience", "subject", "claims"? } ]`. One token
-  must never match two principals: two trusts of different principals that one token could match are refused.
+ must never match two principals: two trusts of different principals that one token could match are refused.
 - **A password seed** for a person, `"password": { "file" | "env" | "hash" }` on a principal named by its email: it creates the
-  password when the principal is created (after a wipe, again), with a forced change at the first sign-in, and is never applied again.
+ password when the principal is created (after a wipe, again), with a forced change at the first sign-in, and is never applied again.
 
 **Revoking a declared key** (an incident) works at runtime and stays: every start and reload warns `DECLARED_OBJECT_OVERRIDDEN`, and for a
 derived key names the version to declare next. A wipe loses the revocation — the same root derives the same key again — so the lasting
@@ -52,7 +52,7 @@ The identities file, `Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, `Aouda:A
 
 ```json
 { "version": 1, "keyRoot": { "env": "AOUDA_KEY_ROOT" },
-  "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
+ "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
 ```
 
 There is no converter. A `{ "hash": "sha256:<hex>" }` secret has no counterpart: a stored key is `{ "id": "aouda_…", "sha256": "…" }` from `aouda keys new`, or a derived key from `aouda keys derive`. `aouda reload` applies a changed principal without a restart.

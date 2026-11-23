@@ -17,7 +17,7 @@ Application Auth uses server-level notification services:
 | Service | Used for | Provider when configured | Default (no provider) |
 |---------|----------|--------------------------|------------------------|
 | **Email** (`IEmailService`) | Password reset OTP, invite emails (`sendInviteEmail`) | [SendGrid](#3-email-sendgrid), [Capture](#5-capture-provider-local-outbox--studio) (recommended local), or [Console](#6-console-provider-cli--event-viewer-interim) | `NullEmailService` — logs a warning, **does not send** |
-| **SMS** (`ISmsService`) | MFA phone OTP (`POST .../auth/mfa/challenge` for `type: phone`) | [GatewayAPI](#4-sms-gatewayapi), [Capture](#5-capture-provider-local-outbox--studio) (recommended local), or [Console](#6-console-provider-cli--event-viewer-interim) | `NullSmsService` — logs a warning, **does not send** |
+| **SMS** (`ISmsService`) | MFA phone OTP (`POST.../auth/mfa/challenge` for `type: phone`) | [GatewayAPI](#4-sms-gatewayapi), [Capture](#5-capture-provider-local-outbox--studio) (recommended local), or [Console](#6-console-provider-cli--event-viewer-interim) | `NullSmsService` — logs a warning, **does not send** |
 
 **Important:**
 
@@ -26,14 +26,14 @@ Application Auth uses server-level notification services:
 - OTPs are **never** stored in plain text on disk. With the default null provider, OTPs **do not** appear in server logs (only "email not sent" / "SMS not sent" warnings).
 - With the **`capture` provider** (Studio/API-settable, recommended for Windows Service / local Studio testing), OTPs are written to a bounded **in-memory outbox** and Warning logs — retrieve via Studio or `GET /admin/notifications/outbox`. See [§5](#5-capture-provider-local-outbox--studio).
 - With the **`console` provider** (env-only interim for CLI/CI/Event Viewer), OTPs and full message content are written to server stdout — see [§6](#6-console-provider-cli--event-viewer-interim).
-- Admin password override (`PUT .../admin/users/{id}/password`) remains available for bootstrap without OTP.
+- Admin password override (`PUT.../admin/users/{id}/password`) remains available for bootstrap without OTP.
 
 **What needs which channel:**
 
 | Feature | Email | SMS |
 |---------|:-----:|:---:|
 | Self-service password reset (`request-password-reset`) | Required | — |
-| Invite / first-time password (`sendInviteEmail`, `POST .../invite`) | Required | — |
+| Invite / first-time password (`sendInviteEmail`, `POST.../invite`) | Required | — |
 | MFA TOTP (authenticator app) | — | — |
 | MFA phone factor | — | Required |
 
@@ -51,25 +51,25 @@ For local development, place `appsettings.json` in the directory from which you 
 
 ```json
 {
-  "Aouda": {
-    "DataPath": "./data",
-    "Port": 5433,
-    "Auth": {
-      "Email": {
-        "Provider": "sendgrid",
-        "ApiKey": "SG.xxxxxxxxxxxx",
-        "FromAddress": "noreply@yourdomain.com",
-        "FromName": "Your App",
-        "InviteUrl": "https://app.yourdomain.com/set-password",
-        "PasswordResetUrl": "https://app.yourdomain.com/set-password"
-      },
-      "Sms": {
-        "Provider": "gatewayapi",
-        "ApiKey": "your-gatewayapi-token",
-        "Sender": "YourApp"
-      }
-    }
-  }
+ "Aouda": {
+ "DataPath": "./data",
+ "Port": 5433,
+ "Auth": {
+ "Email": {
+ "Provider": "sendgrid",
+ "ApiKey": "SG.xxxxxxxxxxxx",
+ "FromAddress": "noreply@yourdomain.com",
+ "FromName": "Your App",
+ "InviteUrl": "https://app.yourdomain.com/set-password",
+ "PasswordResetUrl": "https://app.yourdomain.com/set-password"
+ },
+ "Sms": {
+ "Provider": "gatewayapi",
+ "ApiKey": "your-gatewayapi-token",
+ "Sender": "YourApp"
+ }
+ }
+ }
 }
 ```
 
@@ -77,21 +77,21 @@ For local development, place `appsettings.json` in the directory from which you 
 
 ```json
 {
-  "Aouda": {
-    "DataPath": "./data",
-    "Port": 5433,
-    "Auth": {
-      "Email": {
-        "Provider": "capture",
-        "FromName": "Aouda Dev",
-        "InviteUrl": "http://localhost:3000/set-password",
-        "PasswordResetUrl": "http://localhost:3000/reset-password"
-      },
-      "Sms": {
-        "Provider": "capture"
-      }
-    }
-  }
+ "Aouda": {
+ "DataPath": "./data",
+ "Port": 5433,
+ "Auth": {
+ "Email": {
+ "Provider": "capture",
+ "FromName": "Aouda Dev",
+ "InviteUrl": "http://localhost:3000/set-password",
+ "PasswordResetUrl": "http://localhost:3000/reset-password"
+ },
+ "Sms": {
+ "Provider": "capture"
+ }
+ }
+ }
 }
 ```
 
@@ -128,16 +128,16 @@ ASP.NET Core nested configuration uses `__` (double underscore):
 
 ```bash
 docker run -p 5433:5433 -v aouda-data:/data \
-  -e Aouda__Auth__Email__Provider=sendgrid \
-  -e Aouda__Auth__Email__ApiKey=SG.xxx \
-  -e Aouda__Auth__Email__FromAddress=noreply@yourdomain.com \
-  -e "Aouda__Auth__Email__FromName=Your App" \
-  -e Aouda__Auth__Email__InviteUrl=https://app.yourdomain.com/set-password \
-  -e Aouda__Auth__Email__PasswordResetUrl=https://app.yourdomain.com/set-password \
-  -e Aouda__Auth__Sms__Provider=gatewayapi \
-  -e Aouda__Auth__Sms__ApiKey=your-token \
-  -e Aouda__Auth__Sms__Sender=YourApp \
-  ghcr.io/aoudadb/aouda-server
+ -e Aouda__Auth__Email__Provider=sendgrid \
+ -e Aouda__Auth__Email__ApiKey=SG.xxx \
+ -e Aouda__Auth__Email__FromAddress=noreply@yourdomain.com \
+ -e "Aouda__Auth__Email__FromName=Your App" \
+ -e Aouda__Auth__Email__InviteUrl=https://app.yourdomain.com/set-password \
+ -e Aouda__Auth__Email__PasswordResetUrl=https://app.yourdomain.com/set-password \
+ -e Aouda__Auth__Sms__Provider=gatewayapi \
+ -e Aouda__Auth__Sms__ApiKey=your-token \
+ -e Aouda__Auth__Sms__Sender=YourApp \
+ ghcr.io/aoudadb/aouda-server
 ```
 
 Restart the server after changing notification configuration.
@@ -172,8 +172,8 @@ Email content depends on whether `InviteUrl` / `PasswordResetUrl` are configured
 
 | Flow | Trigger | Subject | Body |
 |------|---------|---------|------|
-| Password reset | `POST .../auth/request-password-reset` | `Reset your {FromName} password` | Link to reset page + manual-entry code + 15-minute expiry note |
-| Invite | `POST .../admin/users` without `password` (auto), `sendInviteEmail: true`, or `POST .../admin/users/{id}/invite` | `You've been invited to {FromName}` | Link to set-password page + manual-entry code + 15-minute expiry note |
+| Password reset | `POST.../auth/request-password-reset` | `Reset your {FromName} password` | Link to reset page + manual-entry code + 15-minute expiry note |
+| Invite | `POST.../admin/users` without `password` (auto), `sendInviteEmail: true`, or `POST.../admin/users/{id}/invite` | `You've been invited to {FromName}` | Link to set-password page + manual-entry code + 15-minute expiry note |
 
 Example invite email body:
 
@@ -196,7 +196,7 @@ This code expires in 15 minutes. If you did not expect this invitation, ignore t
 | Password reset | `Reset your password` | `Your password reset code is: {otp}` + expiry note |
 | Invite | `You've been invited — set your password` | `You've been invited. Use this code to set your password: {otp}` + expiry note |
 
-Both flows use the same 6-digit OTP and `POST .../auth/reset-password` to complete the password change.
+Both flows use the same 6-digit OTP and `POST.../auth/reset-password` to complete the password change.
 
 ### 3.2 SendGrid setup checklist
 
@@ -225,7 +225,7 @@ With no provider configured, `request-password-reset` still returns `200 { "ok":
 NullEmailService: password reset email not sent to 'user@example.com' (no email provider configured). Configure Aouda:Auth:Email:Provider=sendgrid for delivery, or Provider=console to log OTP locally (e.g. Event Viewer under Windows Service).
 ```
 
-You cannot complete the customer reset flow without SendGrid, `capture`, `console`, or an admin override (`PUT .../admin/users/{id}/password`). The null default is intentional (anti-enumeration and security).
+You cannot complete the customer reset flow without SendGrid, `capture`, `console`, or an admin override (`PUT.../admin/users/{id}/password`). The null default is intentional (anti-enumeration and security).
 
 ### 3.4 Set-password deep link (app URL configuration)
 
@@ -234,16 +234,16 @@ Out of the box, invite and password-reset emails contain only a bare 6-digit OTP
 #### How it works
 
 1. Aouda generates the OTP and appends it as query parameters to your configured URL:
-   ```
-   {InviteUrl}?otp={otp}&email={url-encoded-email}
-   ```
-   Example: `https://app.yourdomain.com/set-password?otp=984094&email=user%40example.com`
+ ```
+ {InviteUrl}?otp={otp}&email={url-encoded-email}
+ ```
+ Example: `https://app.yourdomain.com/set-password?otp=984094&email=user%40example.com`
 
 2. Aouda sends the email with both the clickable link **and** the bare code (so the user can still complete the flow if their email client or corporate security gateway strips or follows the link).
 
 3. Your app's set-password page reads `otp` and `email` from the query string to pre-fill the form.
 
-4. When the user submits, your page calls `POST .../auth/reset-password` with the anon key — no secret is required on the page itself.
+4. When the user submits, your page calls `POST.../auth/reset-password` with the anon key — no secret is required on the page itself.
 
 #### Configuration
 
@@ -251,14 +251,14 @@ Add to Aouda's server config (both URLs often point to the same page):
 
 ```json
 {
-  "Aouda": {
-    "Auth": {
-      "Email": {
-        "InviteUrl": "https://app.yourdomain.com/set-password",
-        "PasswordResetUrl": "https://app.yourdomain.com/set-password"
-      }
-    }
-  }
+ "Aouda": {
+ "Auth": {
+ "Email": {
+ "InviteUrl": "https://app.yourdomain.com/set-password",
+ "PasswordResetUrl": "https://app.yourdomain.com/set-password"
+ }
+ }
+ }
 }
 ```
 
@@ -270,9 +270,9 @@ Add to Aouda's server config (both URLs often point to the same page):
 
 1. **Read** `otp` and `email` from the query string on page load and pre-fill the form inputs.
 2. **On submit**: call `POST /api/databases/{db}/auth/reset-password` with no credential (the route is public):
-   ```json
-   { "email": "user@example.com", "otp": "984094", "newPassword": "NewPassword123!" }
-   ```
+ ```json
+ { "email": "user@example.com", "otp": "984094", "newPassword": "NewPassword123!" }
+ ```
 3. On success, Aouda returns a token pair — `aal2` when the user has no active MFA factor (**BL-795, 0.3.0**), `aal1` when they do. Sign the user in and redirect to your app.
 4. If MFA is enrolled, the token's `aal` claim is `aal1` — redirect to your MFA challenge page.
 
@@ -301,17 +301,17 @@ Phone numbers must be **E.164** at enrolment (for example `+447911123456`).
 1. Create a GatewayAPI account and obtain an API token.
 2. Configure an allowed sender name matching `Aouda:Auth:Sms:Sender`.
 3. Set configuration (§2) and restart the server.
-4. Enrol a phone factor (`POST .../auth/mfa/enroll` with `type: "phone"`), then `POST .../auth/mfa/challenge` and confirm SMS delivery.
+4. Enrol a phone factor (`POST.../auth/mfa/enroll` with `type: "phone"`), then `POST.../auth/mfa/challenge` and confirm SMS delivery.
 
 ### 4.3 Local development without SMS
 
 **Option A — Capture provider (recommended)**
 
-Set SMS provider to `capture` in Studio or env. After `POST .../auth/mfa/challenge`, copy the OTP from the Studio outbox or `GET /admin/notifications/outbox?channel=sms`. See [§5](#5-capture-provider-local-outbox--studio).
+Set SMS provider to `capture` in Studio or env. After `POST.../auth/mfa/challenge`, copy the OTP from the Studio outbox or `GET /admin/notifications/outbox?channel=sms`. See [§5](#5-capture-provider-local-outbox--studio).
 
 **Option B — Console provider (CLI / Event Viewer interim)**
 
-Set `Aouda:Auth:Sms:Provider` to `console`. After `POST .../auth/mfa/challenge`, read the OTP from server stdout — lines prefixed with `[Aouda Auth — Console SMS]`. See [§6](#6-console-provider-cli--event-viewer-interim).
+Set `Aouda:Auth:Sms:Provider` to `console`. After `POST.../auth/mfa/challenge`, read the OTP from server stdout — lines prefixed with `[Aouda Auth — Console SMS]`. See [§6](#6-console-provider-cli--event-viewer-interim).
 
 **Option C — Null provider (default)**
 
@@ -354,19 +354,19 @@ Local Windows Service installs often run with `ASPNETCORE_ENVIRONMENT=Production
 
 ```json
 {
-  "Aouda": {
-    "Auth": {
-      "Email": {
-        "Provider": "capture",
-        "FromName": "Aouda Dev",
-        "InviteUrl": "http://localhost:3000/set-password",
-        "PasswordResetUrl": "http://localhost:3000/reset-password"
-      },
-      "Sms": {
-        "Provider": "capture"
-      }
-    }
-  }
+ "Aouda": {
+ "Auth": {
+ "Email": {
+ "Provider": "capture",
+ "FromName": "Aouda Dev",
+ "InviteUrl": "http://localhost:3000/set-password",
+ "PasswordResetUrl": "http://localhost:3000/reset-password"
+ },
+ "Sms": {
+ "Provider": "capture"
+ }
+ }
+ }
 }
 ```
 
@@ -430,19 +430,19 @@ Email and SMS console providers are independent — you can enable one or both:
 
 ```json
 {
-  "Aouda": {
-    "Auth": {
-      "Email": {
-        "Provider": "console",
-        "FromName": "Aouda Dev",
-        "InviteUrl": "http://localhost:3000/set-password",
-        "PasswordResetUrl": "http://localhost:3000/reset-password"
-      },
-      "Sms": {
-        "Provider": "console"
-      }
-    }
-  }
+ "Aouda": {
+ "Auth": {
+ "Email": {
+ "Provider": "console",
+ "FromName": "Aouda Dev",
+ "InviteUrl": "http://localhost:3000/set-password",
+ "PasswordResetUrl": "http://localhost:3000/reset-password"
+ },
+ "Sms": {
+ "Provider": "console"
+ }
+ }
+ }
 }
 ```
 
@@ -456,29 +456,29 @@ Works with all server startup paths: `aouda start`, Docker, `aouda dev server`, 
 
 ```text
 info: Aouda.Engine.Auth.Notifications.ConsoleEmailService[0]
-      [Aouda Auth — Console Email] password reset | To: alice@example.com | Subject: Reset your Aouda Dev password
-      You requested a password reset for your Aouda Dev account.
+ [Aouda Auth — Console Email] password reset | To: alice@example.com | Subject: Reset your Aouda Dev password
+ You requested a password reset for your Aouda Dev account.
 
-      Reset your password here:
-      http://localhost:3000/reset-password?otp=482391&email=alice%40example.com
+ Reset your password here:
+ http://localhost:3000/reset-password?otp=482391&email=alice%40example.com
 
-      If the link does not open, visit the page and enter this code:
-      482391
-      ...
+ If the link does not open, visit the page and enter this code:
+ 482391
+...
 ```
 
 **SMS (MFA phone challenge):**
 
 ```text
 info: Aouda.Engine.Auth.Notifications.ConsoleSmsService[0]
-      [Aouda Auth — Console SMS] To: +447911123456 | Your Aouda verification code is: 987654. Expires in 10 minutes.
+ [Aouda Auth — Console SMS] To: +447911123456 | Your Aouda verification code is: 987654. Expires in 10 minutes.
 ```
 
 Search server output for `[Aouda Auth — Console Email]` or `[Aouda Auth — Console SMS]` to find codes quickly.
 
 ### 6.4 Windows Service / Event Viewer
 
-When Aouda runs as a **Windows Service**, there is no interactive console. Warning-level logs (including console-provider OTP lines) still appear in **Event Viewer → Windows Logs → Application** under the Aouda / .NET Runtime source — the same place you already see `NullEmailService` warnings when no provider is configured.
+When Aouda runs as a **Windows Service**, there is no interactive console. Warning-level logs (including console-provider OTP lines) still appear in **Event Viewer → Windows Logs → Application** under the Aouda /.NET Runtime source — the same place you already see `NullEmailService` warnings when no provider is configured.
 
 For Studio-visible OTP capture on a Windows Service, prefer **`capture`** ([§5](#5-capture-provider-local-outbox--studio)) over Event Viewer scraping.
 
@@ -514,28 +514,28 @@ Prerequisites: Aouda CLI, an auth database, and signup enabled if the curl below
 
 ```powershell
 # 1. Server directory with appsettings.json (§2.1)
-#    For local testing without SendGrid, use Provider: "capture" (§5) or "console" (§6)
+# For local testing without SendGrid, use Provider: "capture" (§5) or "console" (§6)
 cd C:\dev\aouda-derive
-aouda start --port 5433 --data-dir .\data
+aouda start --port 5433 --data-dir.\data
 
 # 2. First operator: aouda start --dev-admin, or a declared principal. See getting-started/auth.md
 # 3. Declare the auth database and the link. Signup must be enabled for the curl below.
 
 # 4. Sign up or admin-create a user
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signup `
-  -H "Content-Type: application/json" `
-  -d '{ "email": "alice@example.com", "password": "SecurePass123!" }'
+ -H "Content-Type: application/json" `
+ -d '{ "email": "alice@example.com", "password": "SecurePass123!" }'
 
 # 5. Request reset (email must be configured — sendgrid, capture, or console)
 curl -X POST http://localhost:5433/api/databases/myapp/auth/request-password-reset `
-  -H "Content-Type: application/json" `
-  -d '{ "email": "alice@example.com" }'
+ -H "Content-Type: application/json" `
+ -d '{ "email": "alice@example.com" }'
 
 # 6. Read OTP from email (SendGrid), Studio outbox / GET /admin/notifications/outbox (capture),
-#    or server console (console provider), then reset
+# or server console (console provider), then reset
 curl -X POST http://localhost:5433/api/databases/myapp/auth/reset-password `
-  -H "Content-Type: application/json" `
-  -d '{ "email": "alice@example.com", "otp": "482391", "newPassword": "NewSecure456!" }'
+ -H "Content-Type: application/json" `
+ -d '{ "email": "alice@example.com", "otp": "482391", "newPassword": "NewSecure456!" }'
 ```
 
 With `PasswordResetUrl` configured, the email (or console log) will contain a link like
@@ -561,12 +561,12 @@ Example (app repo):
 
 ```json
 {
-  "AoudaAuth": {
-    "Authority": "http://localhost:5433/api/databases/myapp",
-    "Audience": "_auth",
-    "ServerUrl": "http://localhost:5433",
-    "DatabaseName": "myapp"
-  }
+ "AoudaAuth": {
+ "Authority": "http://localhost:5433/api/databases/myapp",
+ "Audience": "_auth",
+ "ServerUrl": "http://localhost:5433",
+ "DatabaseName": "myapp"
+ }
 }
 ```
 

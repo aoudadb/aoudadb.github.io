@@ -181,32 +181,25 @@ Invariants:
 - Strict policy checks both mutable and sealed data tiers.
 - BestEffort disables cross-tier checks, but does not disable in-batch duplicate detection.
 - A key names one logical row on a `Strict` table only (**BL-791, 0.3.0**). On `Recent` and `BestEffort` a table can hold
-  two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
-  `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
-  every copy of a matched key held in a segment.) On a `Strict` table a key is meant to have one live copy, and an insert or upsert keeps it so. A table **switched to
-  `Strict` while it holds a key twice keeps both copies** until a keyed DELETE or UPDATE collapses them: the next DELETE or UPDATE
-  of that key removes **every** live copy that existed when it committed, live and after a crash or a point-in-time restore
-  (**BL-1628, BL-558, next train**; before, a `DELETE … WHERE Id = 4` answered success and the row stayed readable). Two shapes are
-  still collapsed only by a crash's replay, not by the live write (**BL-1668**, open): a duplicate that sits only in segments because the
-  table was flushed and reopened after the ALTER, and a `MergeAsync` over a duplicated buffer, which replaces one copy and leaves the
-  other. The ALTER does not refuse a table that holds duplicates (BL-1674). Under `BestEffort` an UPDATE or DELETE applies to **every** live copy its `where` matches — a
-  `where` on the key alone matches all of them — in every tier, and a crash replays exactly that (**BL-557**, proved by
-  `Durability1S09BestEffortEveryCopyTests`; the rule above is unchanged).
-- **Changing a table's mode away from `Strict` is safe under writes** (**BL-939, next train**): the ALTER waits for the table's writes in
-  flight (up to 60 s), flushes the table, then switches — and is refused (a retryable conflict, nothing changed) if the writes do not
-  finish or the flush fails. A write that read the old mode while the change began is answered `409 WRITE_CONFLICT` ("… read its key
-  mode as 'Strict', and a change of that mode began before the write was admitted …"; nothing applied; retry). On a table that names
-  its rows by logged id (no key, or a key that is not `Strict`), a DELETE, UPDATE, MERGE or upsert over buffered rows whose logged ids are not
-  known, when flushing them was refused, is answered `409 WRITE_CONFLICT` too ("… logged ids are not known …"). A schema apply reports such a refused
-  change as a **failed apply entry** with the message, not as an HTTP error.
+ two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
+ `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
+ every copy of a matched key held in a segment.) On a `Strict` table a key is meant to have one live copy, and an insert or upsert keeps it so. A table **switched to
+ `Strict` while it holds a key twice keeps both copies** until a keyed DELETE or UPDATE collapses them: the next DELETE or UPDATE
+ of that key removes **every** live copy that existed when it committed, live and after a crash or a point-in-time restore: the ALTER waits for the table's writes in
+ flight (up to 60 s), flushes the table, then switches — and is refused (a retryable conflict, nothing changed) if the writes do not
+ finish or the flush fails. A write that read the old mode while the change began is answered `409 WRITE_CONFLICT` ("… read its key
+ mode as 'Strict', and a change of that mode began before the write was admitted …"; nothing applied; retry). On a table that names
+ its rows by logged id (no key, or a key that is not `Strict`), a DELETE, UPDATE, MERGE or upsert over buffered rows whose logged ids are not
+ known, when flushing them was refused, is answered `409 WRITE_CONFLICT` too ("… logged ids are not known …"). A schema apply reports such a refused
+ change as a **failed apply entry** with the message, not as an HTTP error.
 - Crash recovery honours the same rule (**BL-823, 0.3.0**). On `Recent` and `BestEffort` tables a DELETE, UPDATE or upsert logs
-  the rows it marked — a buffered row by its logged id, a sealed one by segment and row — and the replay after a crash marks exactly
-  those copies. Before, the log held only keys, so with two live copies of a key, deleting or updating one of them (or upserting the
-  key) and crashing before the next checkpoint removed the other copy too. A `Strict` table still logs its deletes by key.
+ the rows it marked — a buffered row by its logged id, a sealed one by segment and row — and the replay after a crash marks exactly
+ those copies. Before, the log held only keys, so with two live copies of a key, deleting or updating one of them (or upserting the
+ key) and crashing before the next checkpoint removed the other copy too. A `Strict` table still logs its deletes by key.
 - A deleted or updated row stays deleted after a crash, in every tier (**BL-891, 0.3.0**). Replay re-marks a keyed delete's
-  copies in hot segments as well as in the write buffer and cold segments (a hot copy used to come back), and only in segments
-  that existed when the delete committed — so a key deleted and then written again, or bulk loaded again (**BL-924**), keeps its
-  new row.
+ copies in hot segments as well as in the write buffer and cold segments (a hot copy used to come back), and only in segments
+ that existed when the delete committed — so a key deleted and then written again, or bulk loaded again (**BL-924**), keeps its
+ new row.
 - Preload runs before first insert after open to reduce first-write latency spikes.
 
 ---
@@ -219,23 +212,23 @@ High-level runtime flow:
 2. `EnsureKeyIndex` initializes key index state if needed.
 3. `EnforcePrimaryKeyUniquenessAsync` computes PK keys for incoming rows.
 4. Policy path:
-   - `BestEffort`: only in-batch check.
-   - `Recent`: `L2` check.
-   - `Strict`: `L2` + sealed-segment path (`L1 -> L0 -> L3/fallback`).
+ - `BestEffort`: only in-batch check.
+ - `Recent`: `L2` check.
+ - `Strict`: `L2` + sealed-segment path (`L1 -> L0 -> L3/fallback`).
 5. On duplicate:
-   - strict gate on: throw.
-   - strict gate off: increment latent counter and continue.
+ - strict gate on: throw.
+ - strict gate off: increment latent counter and continue.
 6. On commit, key entries are inserted into L2.
 
 Reads (**BL-647, 0.1.39**). When a query's filter pins full primary keys, the query engine
 narrows its inputs before scanning:
 - The unflushed buffer contributes only the rows L2 locates for those keys, instead of being walked.
 - Every segment proven to hold none of the keys is skipped. The proof uses L2 hot partitions, zone
-  maps on each key column, page blooms and L3. Only a `Strict` table writes the leading-key page
-  bloom (**ColumnarRead, 0.3.0**: now also for a segment of fewer than 13 rows).
+ maps on each key column, page blooms and L3. Only a `Strict` table writes the leading-key page
+ bloom (**ColumnarRead, 0.3.0**: now also for a segment of fewer than 13 rows).
 - (**ColumnarRead S17, 0.3.0**) In a cold segment that may hold a key, the read decodes only the
-  rows the key map located, not the segment; the segment's bloom is held in memory rather than read
-  from its file on every read.
+ rows the key map located, not the segment; the segment's bloom is held in memory rather than read
+ from its file on every read.
 
 The scan then runs as before, and the full filter is still evaluated on every row it reads. Results
 are therefore identical to an unnarrowed read; only the work changes. A segment that cannot be ruled
@@ -252,9 +245,9 @@ Seal/open path:
 - `HraCompactor` writes `pk_index.spr` for PK tables on non-delta seals.
 - Strict PK tables additionally write `pk_keymap.dat/.idx`.
 - `OpenAsync` calls `PreloadPrimaryKeyIndexes`, which:
-  - rebuilds key index for HRA rows,
-  - loads `pk_index.spr` if present, otherwise lazy-builds from zone maps,
-  - loads `pk_keymap` indexes for strict tables when files exist.
+ - rebuilds key index for HRA rows,
+ - loads `pk_index.spr` if present, otherwise lazy-builds from zone maps,
+ - loads `pk_keymap` indexes for strict tables when files exist.
 
 ### 2.8.1 Critical path walk-throughs
 
@@ -273,8 +266,8 @@ Seal/open path:
 3. Insert in freeze window still sees those keys via `LookupKeyLocation`.
 4. `CompleteFreezeFlush` clears frozen partition after persistence/registration.
 5. A hot segment a flush has registered but not yet published is not counted by the `Strict` check; until the publish the
-   frozen copy answers, so a key deleted there can be inserted again at once. A frozen hit is judged against the buffer it
-   came from, and looked up again if that flush completed in between (**BL-899, 0.3.0**).
+ frozen copy answers, so a key deleted there can be inserted again at once. A frozen hit is judged against the buffer it
+ came from, and looked up again if that flush completed in between (**BL-899, 0.3.0**).
 
 **Path C: Startup preload**
 1. `AoudaEngine.OpenAsync` obtains snapshot.
@@ -315,7 +308,7 @@ Precedence notes:
 
 ### API coverage matrix
 
-| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Configure PK uniqueness policy | `TableOptions.PkUniqueness`, `CreateTableAsync(... pkUniqueness)` | Not exposed in this repo | Not direct | Implemented | Set at table creation. |
 | Insert with policy checks | `InsertRowsAsync` | Indirect client behavior | `/api/databases/{db}/tables/{table}/rows:insert` path uses server engine | Implemented | Enforced in engine API. |
@@ -333,17 +326,17 @@ Precedence notes:
 
 ```csharp
 await engine.CreateTableAsync(
-    "events",
-    new[]
-    {
-        ("id", DataType.Int64, EncoderPreference.Auto, false, 1, (int?)null, (int?)null, (PartitionFunction?)null),
-        ("v", DataType.String, EncoderPreference.Auto, false, (int?)null, (int?)null, (int?)null, (PartitionFunction?)null),
-    },
-    pkUniqueness: PkUniquenessMode.Strict);
+ "events",
+ new
+ {
+ ("id", DataType.Int64, EncoderPreference.Auto, false, 1, (int?)null, (int?)null, (PartitionFunction?)null),
+ ("v", DataType.String, EncoderPreference.Auto, false, (int?)null, (int?)null, (int?)null, (PartitionFunction?)null),
+ },
+ pkUniqueness: PkUniquenessMode.Strict);
 
-await engine.InsertRowsAsync("events", new[]
+await engine.InsertRowsAsync("events", new
 {
-    new Dictionary<string, object?> { ["id"] = 1L, ["v"] = "first" }
+ new Dictionary<string, object?> { ["id"] = 1L, ["v"] = "first" }
 });
 
 var pkDiag = await engine.GetPkStructuresDiagnosticsAsync("events");
@@ -418,9 +411,9 @@ Recovery expectations:
 - L1/L3 files are loaded at open when present.
 - Missing/corrupt files are warning-logged; lookup falls back where possible.
 - (**BL-823, 0.3.0**) The WAL's keyed-delete, merge and delete-by-identity frames are format 2. A log holding an older build's
-  frame of those kinds past its checkpoint (a crash with deletes or upserts not yet checkpointed) is refused at open, naming both
-  formats: open it once with the build that wrote it and close it cleanly, or restore from a backup. A cleanly closed database is
-  unaffected. See [Storage — troubleshooting](storage.md#214-troubleshooting-by-symptom).
+ frame of those kinds past its checkpoint (a crash with deletes or upserts not yet checkpointed) is refused at open, naming both
+ formats: open it once with the build that wrote it and close it cleanly, or restore from a backup. A cleanly closed database is
+ unaffected. See [Storage — troubleshooting](storage.md#214-troubleshooting-by-symptom).
 
 ---
 

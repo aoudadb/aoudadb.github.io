@@ -40,17 +40,17 @@ If your question is "What is implemented vs missing?", jump to:
 Partitioning and multitenancy exist to make a single Aouda deployment practical for many independent workloads without giving up correctness or operational control.
 
 - User problem solved:
-  - Isolate tenant/workload data with partition keys and explicit query scoping rules.
-  - Host multiple logical databases under one server process while preserving isolation.
-  - Keep read/write APIs explicit about the database boundary (no accidental cross-database routing).
+ - Isolate tenant/workload data with partition keys and explicit query scoping rules.
+ - Host multiple logical databases under one server process while preserving isolation.
+ - Keep read/write APIs explicit about the database boundary (no accidental cross-database routing).
 - Operational outcomes:
-  - Better storage layout for skewed tenant distributions (`Auto`, `Shared`, `Dedicated`).
-  - Per-database lifecycle, memory budgets, health, and metrics.
+ - Better storage layout for skewed tenant distributions (`Auto`, `Shared`, `Dedicated`).
+ - Per-database lifecycle, memory budgets, health, and metrics.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Scope boundaries:
-  - This document covers partition key modeling, partition storage/routing/enforcement, database isolation/routing, and partition-level authorization interactions.
-  - It does not claim fully shipped "all-language parity" for every advanced admin/security surface.
-  - It does not claim all retrospective-partitioning phase-2 strategies are production-wired.
+ - This document covers partition key modeling, partition storage/routing/enforcement, database isolation/routing, and partition-level authorization interactions.
+ - It does not claim fully shipped "all-language parity" for every advanced admin/security surface.
+ - It does not claim all retrospective-partitioning phase-2 strategies are production-wired.
 
 ## 2.2 Discovery and navigation map
 
@@ -67,7 +67,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | How partitioning and multidb fit together conceptually | `2.7 Core concepts and mental model` |
 | Runtime implementation paths | `2.8 How Aouda implements it` |
 | Full setting and option surface | `2.10 Configuration and settings reference` |
-| .NET / TypeScript / HTTP coverage | `2.11 API and CLI coverage reference` |
+|.NET / TypeScript / HTTP coverage | `2.11 API and CLI coverage reference` |
 | Operator guidance and diagnostics | `2.13 Operations and observability`, `2.14 Troubleshooting by symptom` |
 | Explicit undone work | `2.18 Known gaps and undone work` |
 
@@ -83,72 +83,72 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ### Source map
 
 - Task/report evidence:
-  - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure-Report.md`
-  - `docs/tasks/P4/P4-EpicF-Task2-PartitionQueryEnforcement-Report.md`
-  - `docs/tasks/P4/P4-EpicF-Task3-AutoPromotionSharedPartitions-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
-  - `docs/tasks/P6/P6-EpicA-Task2-DatabaseRegistryAndMetadata-Report.md`
-  - `docs/tasks/P6/P6-EpicA-Task3-DatabaseManager-Report.md`
-  - `docs/tasks/P6/P6-EpicB-Task1-ServerStartupAndDatabaseScopedRoutes-Report.md`
-  - `docs/tasks/P6/P6-EpicB-Task3-ServerConfigurationForMultipleDatabases-Report.md`
-  - `docs/tasks/P6/P6-EpicC-Task1-WireProtocolDatabaseField-Report.md`
-  - `docs/tasks/P6/P6-EpicC-Task2-CSharpClientMultiDatabase-Report.md`
-  - `docs/tasks/P6/P6-EpicF-Task1-PerDatabaseMemoryBudgets-Report.md`
-  - `docs/tasks/P6/P6-EpicF-Task2-PerDatabaseMonitoringAndMetrics-Report.md`
-  - `docs/tasks/P7/P7-Task8-MultiDatabaseScenarios-Report.md`
-  - `docs/tasks/P12/P12-TaskG1-PLSFlagAndConfiguration-Report.md`
-  - `docs/tasks/P12/P12-TaskG2-PlsEnforcement-TokenClaimToPartitionRouting-Report.md`
+ - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure-Report.md`
+ - `docs/tasks/P4/P4-EpicF-Task2-PartitionQueryEnforcement-Report.md`
+ - `docs/tasks/P4/P4-EpicF-Task3-AutoPromotionSharedPartitions-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
+ - `docs/tasks/P6/P6-EpicA-Task2-DatabaseRegistryAndMetadata-Report.md`
+ - `docs/tasks/P6/P6-EpicA-Task3-DatabaseManager-Report.md`
+ - `docs/tasks/P6/P6-EpicB-Task1-ServerStartupAndDatabaseScopedRoutes-Report.md`
+ - `docs/tasks/P6/P6-EpicB-Task3-ServerConfigurationForMultipleDatabases-Report.md`
+ - `docs/tasks/P6/P6-EpicC-Task1-WireProtocolDatabaseField-Report.md`
+ - `docs/tasks/P6/P6-EpicC-Task2-CSharpClientMultiDatabase-Report.md`
+ - `docs/tasks/P6/P6-EpicF-Task1-PerDatabaseMemoryBudgets-Report.md`
+ - `docs/tasks/P6/P6-EpicF-Task2-PerDatabaseMonitoringAndMetrics-Report.md`
+ - `docs/tasks/P7/P7-Task8-MultiDatabaseScenarios-Report.md`
+ - `docs/tasks/P12/P12-TaskG1-PLSFlagAndConfiguration-Report.md`
+ - `docs/tasks/P12/P12-TaskG2-PlsEnforcement-TokenClaimToPartitionRouting-Report.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md` (history: the limiter it describes is gone, **BL-1227, 0.9.0**)
-  - `docs/tasks/P14/P14-TaskS4-EnhancedPLS.md`
+ - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md` (history: the limiter it describes is gone, **BL-1227, 0.9.0**)
+ - `docs/tasks/P14/P14-TaskS4-EnhancedPLS.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Design references:
-  - `docs/decisions/0009-partitioning-multitenancy.md`
+ - `docs/decisions/0009-partitioning-multitenancy.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Core code:
-  - `src/Aouda.Engine.Catalog/Policies.cs`
-  - `src/Aouda.Engine.Catalog/CatalogModels.cs`
-  - `src/Aouda.Engine.Api/Query/PartitionEnforcer.cs`
-  - `src/Aouda.Engine.Api/Query/PartitionKeyExtractor.cs`
-  - `src/Aouda.Engine.Api/TableQuery.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionVolumeTracker.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionPromoter.cs`
-  - `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs`
-  - `src/Aouda.Engine.Api/DatabaseManager.cs`
-  - `src/Aouda.Server/Controllers/DatabasesController.cs`
-  - `src/Aouda.Server/Controllers/QueryController.cs`
-  - `src/Aouda.Server/Controllers/TablesController.cs`
+ - `src/Aouda.Engine.Catalog/Policies.cs`
+ - `src/Aouda.Engine.Catalog/CatalogModels.cs`
+ - `src/Aouda.Engine.Api/Query/PartitionEnforcer.cs`
+ - `src/Aouda.Engine.Api/Query/PartitionKeyExtractor.cs`
+ - `src/Aouda.Engine.Api/TableQuery.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionVolumeTracker.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionPromoter.cs`
+ - `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs`
+ - `src/Aouda.Engine.Api/DatabaseManager.cs`
+ - `src/Aouda.Server/Controllers/DatabasesController.cs`
+ - `src/Aouda.Server/Controllers/QueryController.cs`
+ - `src/Aouda.Server/Controllers/TablesController.cs`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `src/Aouda.Protocol/Messages.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
-  - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
-  - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
+ - `src/Aouda.Protocol/Messages.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
+ - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
 - Client code:
-  - `.NET`: `src/Aouda.Client/RemoteTableQuery.cs`
-  - TypeScript: `../aouda-client-ts/src/client.ts`, `../aouda-client-ts/src/query-builder.ts`, `../aouda-client-ts/src/tables.ts`, `../aouda-client-ts/src/databases.ts`
+ - `.NET`: `src/Aouda.Client/RemoteTableQuery.cs`
+ - TypeScript: `../aouda-client-ts/src/client.ts`, `../aouda-client-ts/src/query-builder.ts`, `../aouda-client-ts/src/tables.ts`, `../aouda-client-ts/src/databases.ts`
 - Test evidence:
-  - `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`
-  - `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`
-  - `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`
-  - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
+ - `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`
+ - `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`
+ - `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`
+ - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs`
+ - `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs`
 
 ## 2.3 Defaults and zero-config behavior
 
 If you create a table/database without tuning partition or multidb options:
 
 - Partitioning:
-  - No partition key means standard non-partitioned storage path.
-  - If partitioned, `PartitionOptions` defaults are active (`StorageMode = Auto`, `RequirePartitionFilter = true`, promotion thresholds enabled). Out-of-order (late) rows need no setting: they are flushed like any other row and visible at once.
+ - No partition key means standard non-partitioned storage path.
+ - If partitioned, `PartitionOptions` defaults are active (`StorageMode = Auto`, `RequirePartitionFilter = true`, promotion thresholds enabled). Out-of-order (late) rows need no setting: they are flushed like any other row and visible at once.
 - Query safety:
-  - Partition-filter enforcement is on by default for partitioned tables unless explicitly disabled.
+ - Partition-filter enforcement is on by default for partitioned tables unless explicitly disabled.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Multitenancy:
-  - Database-scoped HTTP routes are the default API shape.
-  - Database creation defaults to durability `strict` (WAL written through; **Lead S26, 0.6.0**), replication mode `Replicate`, default temperature `Auto`.
-  - Per-database memory cap is unlimited unless configured (`MaxMemoryShareBytes = null`).
+ - Database-scoped HTTP routes are the default API shape.
+ - Database creation defaults to durability `strict` (WAL written through; **Lead S26, 0.6.0**), replication mode `Replicate`, default temperature `Auto`.
+ - Per-database memory cap is unlimited unless configured (`MaxMemoryShareBytes = null`).
 
 | Setting / behavior | Default | Allowed values | Practical impact |
 |---|---|---|---|
@@ -189,7 +189,7 @@ does one thing, for every credential, on every admin-listener surface: it waives
 sees**:
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  changes nothing.
+ changes nothing.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Where it is accepted:
@@ -199,8 +199,8 @@ Where it is accepted:
 | HTTP query and count | `"crossPartitionAccess": true` on the body | |
 | Named query: execute and each batch item | `"crossPartitionAccess": true`, **per call** | A named-query *definition* cannot set it. In a batch each item asks for itself; there is no batch-wide flag |
 | WebSocket and long-poll subscribe, table or named query | `"cross_partition_access": true` on the `subscribe` message | Waives the guard for the snapshot |
-| .NET client | `.WithCrossPartitionAccess()` on a table query (it reaches `SubscribeAsync` too), `SubscribeOptions.CrossPartitionAccess`, `NamedQueriesApi.ExecuteAsync(…, crossPartitionAccess)`, `NamedQueryBatchInput(…, crossPartitionAccess)` | The builder or the options ask; neither cancels the other |
-| TypeScript client | `withCrossPartitionAccess()` on a table query (it reaches `subscribe()` too), `SubscribeOptions.crossPartitionAccess`, `NamedQueryExecuteOptions`, `NamedQuerySubscribeOptions`, `NamedQueryBatchItem.crossPartitionAccess` | Sent only when `true` |
+|.NET client | `.WithCrossPartitionAccess` on a table query (it reaches `SubscribeAsync` too), `SubscribeOptions.CrossPartitionAccess`, `NamedQueriesApi.ExecuteAsync(…, crossPartitionAccess)`, `NamedQueryBatchInput(…, crossPartitionAccess)` | The builder or the options ask; neither cancels the other |
+| TypeScript client | `withCrossPartitionAccess` on a table query (it reaches `subscribe` too), `SubscribeOptions.crossPartitionAccess`, `NamedQueryExecuteOptions`, `NamedQuerySubscribeOptions`, `NamedQueryBatchItem.crossPartitionAccess` | Sent only when `true` |
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 A server that predates this release ignores the field on a subscribe or a named-query call and answers `PARTITION_FILTER_REQUIRED`.
@@ -208,14 +208,14 @@ A server that predates this release ignores the field on a subscribe or a named-
 **What the error tells you, per surface** (the engine's message, then the surface's own remedy):
 
 - *Table subscribe, admin listener:* "…On a subscription, set cross_partition_access on the subscribe message (the SDKs'
-  WithCrossPartitionAccess() / SubscribeOptions.CrossPartitionAccess send it); it waives this guard only — the rows are still the
-  credential's grants."
+ WithCrossPartitionAccess / SubscribeOptions.CrossPartitionAccess send it); it waives this guard only — the rows are still the
+ credential's grants."
 - *Named-query call or subscribe, admin listener:* "Named query '<name>' binds no partition key: pass crossPartitionAccess with the call
-  (cross_partition_access on the subscribe message), or bind the partition key in the definition's where clause. The flag waives this
-  guard only — the rows are still the credential's grants."
+ (cross_partition_access on the subscribe message), or bind the partition key in the definition's where clause. The flag waives this
+ guard only — the rows are still the credential's grants."
 - *Data-plane listener:* "crossPartitionAccess is not accepted on the data-plane listener (the browser tier, ADR 0009)." followed by the
-  remedy that works there: bind the partition key in the named query's own where clause, or configure partition-level security on the
-  table so the caller's partition is injected.
+ remedy that works there: bind the partition key in the named query's own where clause, or configure partition-level security on the
+ table so the caller's partition is injected.
 
 ### Live subscriptions on a partitioned table
 
@@ -231,7 +231,7 @@ The common shape is a table partitioned by the user's own id:
 
 ```jsonc
 // RoomMembers, partition key: UserId
-{ "namedQueries": { "rooms.mine": { "table": "RoomMembers" } } }   // fails at first subscribe
+{ "namedQueries": { "rooms.mine": { "table": "RoomMembers" } } } // fails at first subscribe
 ```
 
 **First check whether this table should be partitioned at all.** A membership, roster, inbox or
@@ -247,21 +247,21 @@ the partition value **is** the caller's identity, and you need Option A or Optio
 
 ```jsonc
 {
-  "tables": {
-    "RoomMembers": {
-      "partitionKey": [{ "column": "UserId" }],
-    }
-  }
+ "tables": {
+ "RoomMembers": {
+ "partitionKey": [{ "column": "UserId" }],
+ }
+ }
 }
 ```
 
 Three things that are easy to get wrong here:
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  way to say the same thing and is not needed alongside it.
+ way to say the same thing and is not needed alongside it.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  requires one (*"Partition-level security can only be enabled on tables with a partition key."*). Option A is about the
-  partitioned layout this section starts from, so keep the key there.
+ requires one (*"Partition-level security can only be enabled on tables with a partition key."*). Option A is about the
+ partitioned layout this section starts from, so keep the key there.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -273,11 +273,11 @@ subscribe:
 
 ```jsonc
 {
-  "tables": {
-    "RoomMembers": {
-      "clusterColumns": ["JoinedAt"],
-    }
-  }
+ "tables": {
+ "RoomMembers": {
+ "clusterColumns": ["JoinedAt"],
+ }
+ }
 }
 ```
 
@@ -291,7 +291,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 not a claim about the table's physical layout. That is what lets a "user belongs to many rooms" app keep
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Without one of these three, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess()` — a query-builder method. On the admin listener a named query takes the flag **per call** (`crossPartitionAccess` on the call or batch item, `cross_partition_access` on its subscribe) and a table subscribe takes `cross_partition_access`, and the error names whichever applies (**BL-1227, 0.9.0**; see [the flag](#the-crosspartitionaccess-flag-a-cost-waiver-never-a-grant)). A browser-tier caller cannot use it: the data-plane listener ignores it, so those three options are the only ways to a runnable definition there.
+Without one of these three, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess` — a query-builder method. On the admin listener a named query takes the flag **per call** (`crossPartitionAccess` on the call or batch item, `cross_partition_access` on its subscribe) and a table subscribe takes `cross_partition_access`, and the error names whichever applies (**BL-1227, 0.9.0**; see [the flag](#the-crosspartitionaccess-flag-a-cost-waiver-never-a-grant)). A browser-tier caller cannot use it: the data-plane listener ignores it, so those three options are the only ways to a runnable definition there.
 
 #### Which one you want
 
@@ -310,8 +310,8 @@ See [Access control](../auth/authorization.md) for identity sources and how the 
 ### A subscription that spans partitions
 
 (**BL-1227, 0.9.0**) A `subscribe` on a partitioned table with no filter on its partition key is refused with `PARTITION_FILTER_REQUIRED`, as a query is. To
-subscribe across partitions on purpose, set **`cross_partition_access: true`** on the `subscribe` message (`.WithCrossPartitionAccess()`
-or `SubscribeOptions.CrossPartitionAccess` in the .NET client, `withCrossPartitionAccess()` or `SubscribeOptions.crossPartitionAccess` in
+subscribe across partitions on purpose, set **`cross_partition_access: true`** on the `subscribe` message (`.WithCrossPartitionAccess`
+or `SubscribeOptions.CrossPartitionAccess` in the.NET client, `withCrossPartitionAccess` or `SubscribeOptions.crossPartitionAccess` in
 the TypeScript client; a named-query subscribe takes it the same way). The flag waives the guard for the snapshot and nothing else, so
 what the subscription sees is decided by the credential's grants:
 
@@ -335,26 +335,26 @@ match — *before* that segment is opened — whenever the predicate constrains 
 or `in` (including a constrained prefix of a composite partition key):
 
 - **This is exact, not a probabilistic narrowing.** A segment that is eliminated is a proven non-match,
-  not a low-probability one — the same guarantee whether the table is in `Dedicated` storage (one
-  directory per key) or `Auto`/`Shared` storage (a hash bucket shared by many keys).
+ not a low-probability one — the same guarantee whether the table is in `Dedicated` storage (one
+ directory per key) or `Auto`/`Shared` storage (a hash bucket shared by many keys).
 - **A range predicate (`gt`, `lt`, `between`, and similar) never eliminates a hash bucket.** Hashing
-  destroys the ordering a range comparison depends on, so a shared-bucket table gets no extra pruning from
-  a range condition on the partition key — this is a correctness property of hashing, not a current
-  limitation. Only an `eq`/`in`-constrained key can eliminate a bucket.
+ destroys the ordering a range comparison depends on, so a shared-bucket table gets no extra pruning from
+ a range condition on the partition key — this is a correctness property of hashing, not a current
+ limitation. Only an `eq`/`in`-constrained key can eliminate a bucket.
 - **A key that is promoted to its own dedicated directory while a query is already running is still
-  found.** Pruning always consults the table's current routing state, never a value fixed when the query
-  started.
+ found.** Pruning always consults the table's current routing state, never a value fixed when the query
+ started.
 - **A promoted key's earlier rows stay in its shared bucket** (**ColumnarRead, 0.3.0**). Promotion
-  no longer migrates a key's historical rows into its dedicated directory; only rows written after the
-  promotion land there. The bucket's rows are still read, so a query on that key returns both.
+ no longer migrates a key's historical rows into its dedicated directory; only rows written after the
+ promotion land there. The bucket's rows are still read, so a query on that key returns both.
 - **Every key type prunes** (**BL-1194, 0.9.0**). An `eq` or `in` on a `Guid`, `UInt16`, `UInt32`,
-  `UInt64` or `Float32` partition key used to read every partition (the rows were right, the read was
-  not narrowed); it now reads only the partitions its values name, like a string or integer key. One
-  exception, on purpose: a floating-point key's `-0.0` and `0.0` are two partitions that compare equal,
-  so an equality on a zero reads every partition rather than guess which one holds its rows.
+ `UInt64` or `Float32` partition key used to read every partition (the rows were right, the read was
+ not narrowed); it now reads only the partitions its values name, like a string or integer key. One
+ exception, on purpose: a floating-point key's `-0.0` and `0.0` are two partitions that compare equal,
+ so an equality on a zero reads every partition rather than guess which one holds its rows.
 - An `eq` or `in` on a key column with a time function prunes by the function's partition name (the day, hour, minute, week, month, or year the writer stored), and a query for one timestamp reads that partition's rows and still drops every other cold partition (**BL-1205, 0.9.0**).
 - This is a distinct mechanism from cluster-column pruning (physical column statistics on non-partition
-  columns) — the two operate on different inputs and are reported separately (see `2.13`).
+ columns) — the two operate on different inputs and are reported separately (see `2.13`).
 
 **What this changes in practice:** a single-key lookup on a partitioned table used to scan every segment
 in the table regardless of storage mode. It now reads only the one partition directory (`Dedicated`) or
@@ -372,26 +372,26 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 ### Available now
 
 - Partition key model:
-  - Composite partition keys via `PartitionKeyOrder`.
-  - Partition metadata persisted in catalog models.
+ - Composite partition keys via `PartitionKeyOrder`.
+ - Partition metadata persisted in catalog models.
 - Partition storage/routing:
-  - `PartitionStorage` modes (`Auto`, `Dedicated`, `Shared`).
-  - Nested partition directory routing and shared-bucket hashing (`XxHash64`).
-  - Auto-promotion pipeline with queue/in-progress tracking and WAL hooks.
+ - `PartitionStorage` modes (`Auto`, `Dedicated`, `Shared`).
+ - Nested partition directory routing and shared-bucket hashing (`XxHash64`).
+ - Auto-promotion pipeline with queue/in-progress tracking and WAL hooks.
 - Partition query enforcement:
-  - Partition-filter required by default for partitioned tables.
-  - Explicit cross-partition flag (a cost waiver, **BL-1227, 0.9.0**) in the protocol and both SDKs' fluent APIs, on queries, named queries and subscriptions.
+ - Partition-filter required by default for partitioned tables.
+ - Explicit cross-partition flag (a cost waiver, **BL-1227, 0.9.0**) in the protocol and both SDKs' fluent APIs, on queries, named queries and subscriptions.
 - Multi-database architecture:
-  - `DatabaseRegistry` persisted metadata under server scope.
-  - `DatabaseManager` runtime engine-per-database orchestration.
-  - Database-scoped server routes (`/api/databases/{db}/...`) for data and schema operations.
-  - Required `database` field in database-scoped protocol messages.
+ - `DatabaseRegistry` persisted metadata under server scope.
+ - `DatabaseManager` runtime engine-per-database orchestration.
+ - Database-scoped server routes (`/api/databases/{db}/...`) for data and schema operations.
+ - Required `database` field in database-scoped protocol messages.
 - Per-database operations:
-  - Per-db options (`MaxMemoryShareBytes`, temperature default, WAL, replication mode) through startup config and create-db API.
-  - Per-db memory coordination and server memory view.
-  - Per-db monitoring/health surfaces from P6.
+ - Per-db options (`MaxMemoryShareBytes`, temperature default, WAL, replication mode) through startup config and create-db API.
+ - Per-db memory coordination and server memory view.
+ - Per-db monitoring/health surfaces from P6.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - Unified enforcer dispatches by `AuthorizationMode`.
+ - Unified enforcer dispatches by `AuthorizationMode`.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Planned / proposed
@@ -422,7 +422,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Shared-bucket routing + nested dedicated paths | Yes | No | No | `PartitionRouter.cs` + P4 F1 report | Dedicated path supports multi-level directories |
 | Auto-promotion shared -> dedicated | Yes | No | No | P4 F3 report + `PartitionVolumeTracker.cs` + `PartitionPromoter.cs` | Queue/in-progress/wal-callback flow implemented |
 | Partition-filter-required query guard | Yes | No | No | P4 F2 report + `PartitionEnforcer.cs` + `TableQuery.cs` | Default safety on partitioned tables |
-| Explicit cross-partition query opt-in (a cost waiver, **BL-1227, 0.9.0**) | Yes | No | No | `QueryMessage.CrossPartitionAccess`, `.WithCrossPartitionAccess()` in the engine and both SDKs; per call on named queries; `cross_partition_access` on `subscribe` | Never widens what a credential sees |
+| Explicit cross-partition query opt-in (a cost waiver, **BL-1227, 0.9.0**) | Yes | No | No | `QueryMessage.CrossPartitionAccess`, `.WithCrossPartitionAccess` in the engine and both SDKs; per call on named queries; `cross_partition_access` on `subscribe` | Never widens what a credential sees |
 | Retrospective partitioning baseline | Yes | Yes | No | P4 BL005 report + policy model | Strategy surface exists; some strategy fields remain phase-2 intent |
 | Multi-database registry and lifecycle state machine | Yes | No | No | P6 A2 report + `DatabaseRegistry.cs` | Persistent registry with create/drop transitions |
 | Multi-engine routing per database | Yes | No | No | P6 A3 report + `DatabaseManager.cs` | One active engine per active database |
@@ -436,39 +436,39 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ## 2.7 Core concepts and mental model
 
 - Database boundary:
-  - A Aouda server hosts multiple named databases; each database has its own catalog/tables/WAL area and runtime engine instance.
+ - A Aouda server hosts multiple named databases; each database has its own catalog/tables/WAL area and runtime engine instance.
 - Partition boundary:
-  - A partitioned table groups rows by one or more partition key columns (`PartitionKeyOrder`).
+ - A partitioned table groups rows by one or more partition key columns (`PartitionKeyOrder`).
 - Storage mode:
-  - `Dedicated`: each partition gets its own directory.
-  - `Shared`: partitions hash to shared buckets.
-  - `Auto`: starts shared and promotes high-volume partitions to dedicated.
+ - `Dedicated`: each partition gets its own directory.
+ - `Shared`: partitions hash to shared buckets.
+ - `Auto`: starts shared and promotes high-volume partitions to dedicated.
 - Partition key values (**BL-1184, 0.9.0**):
-  - Every value of the key columns is a partition, including null (of any type) and the empty string, and each reads back as
-    itself. Before, an empty-string key was taken for "no partition" (a `Dedicated` table keyed `""` became unreadable after its
-    first cold merge), the string `"_null_"` shared null's partition, a null of a number key shared the partition of 0, and a `|`
-    inside a value of a composite key moved the split.
-  - Under `partitions/`, a partition's directory is its key, one level per key column. A null is `_null_`, the empty string
-    `_empty_`, and `%`, `|`, `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, control characters, a leading `_` and a trailing dot or space are
-    written as `%XX` (UTF-8). Ordinary values (tickers, numbers, the time functions' dates) are written as they are.
-  - (**BL-1189, 0.9.0**) A key is the value the column stores, however a write gives it. A bulk load keyed a key column by
-    the value as sent, so a `DateTime` for a `Timestamp` or `Date` key landed in a partition named by its text
-    (`01/02/2026 03:04:05`, to the second; an ISO-8601 string by the string) rather than the one an insert of the same value uses,
-    and an equality on the key did not find those rows; with a time function, a `DateTimeOffset` was truncated on its own clock
-    (`01:00+02:00` on 2 January into `2026-01-02`, where an insert of it lands in `2026-01-01`) and an ISO-8601 string was refused. It
-    now keys them by the stored value (UTC ticks, days). A `UInt64` key's values above the `Int64` range were named by their signed
-    bits (`18446744073709551615` as `-1`). A `Double` key's `-0.0` and `0.0` are two partitions; an equality on either now reads both,
-    as the comparison says it should, where a cold read found only one. The same holds for an equality whose constant is of another
-    type than the key (`Key = 1` on a `Bool` key, a `double` on a `UInt64` or `Int64` key): it reads every partition rather than the
-    one named by the constant's text, which a cold read could miss.
-  - A data directory of any other catalog format than the build's is refused at start with both versions named, and there is no migration (export with the build that wrote it, load into a fresh directory). The current format is stated in [Storage](storage.md#27-core-concepts-and-mental-model).
+ - Every value of the key columns is a partition, including null (of any type) and the empty string, and each reads back as
+ itself. Before, an empty-string key was taken for "no partition" (a `Dedicated` table keyed `""` became unreadable after its
+ first cold merge), the string `"_null_"` shared null's partition, a null of a number key shared the partition of 0, and a `|`
+ inside a value of a composite key moved the split.
+ - Under `partitions/`, a partition's directory is its key, one level per key column. A null is `_null_`, the empty string
+ `_empty_`, and `%`, `|`, `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, control characters, a leading `_` and a trailing dot or space are
+ written as `%XX` (UTF-8). Ordinary values (tickers, numbers, the time functions' dates) are written as they are.
+ - (**BL-1189, 0.9.0**) A key is the value the column stores, however a write gives it. A bulk load keyed a key column by
+ the value as sent, so a `DateTime` for a `Timestamp` or `Date` key landed in a partition named by its text
+ (`01/02/2026 03:04:05`, to the second; an ISO-8601 string by the string) rather than the one an insert of the same value uses,
+ and an equality on the key did not find those rows; with a time function, a `DateTimeOffset` was truncated on its own clock
+ (`01:00+02:00` on 2 January into `2026-01-02`, where an insert of it lands in `2026-01-01`) and an ISO-8601 string was refused. It
+ now keys them by the stored value (UTC ticks, days). A `UInt64` key's values above the `Int64` range were named by their signed
+ bits (`18446744073709551615` as `-1`). A `Double` key's `-0.0` and `0.0` are two partitions; an equality on either now reads both,
+ as the comparison says it should, where a cold read found only one. The same holds for an equality whose constant is of another
+ type than the key (`Key = 1` on a `Bool` key, a `double` on a `UInt64` or `Int64` key): it reads every partition rather than the
+ one named by the constant's text, which a cold read could miss.
+ - A data directory of any other catalog format than the build's is refused at start with both versions named, and there is no migration (export with the build that wrote it, load into a fresh directory). The current format is stated in [Storage](storage.md#27-core-concepts-and-mental-model).
 - Query safety boundary:
-  - Partitioned-table queries usually must include full partition-key equality filters unless explicit cross-partition access is requested.
+ - Partitioned-table queries usually must include full partition-key equality filters unless explicit cross-partition access is requested.
 - Security boundary:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Runtime invariants:
-  - Route database must match body database for scoped request DTOs.
-  - Partition enforcement decisions occur before table query execution.
+ - Route database must match body database for scoped request DTOs.
+ - Partition enforcement decisions occur before table query execution.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Should this table have a partition key? (P45)
@@ -542,11 +542,11 @@ table only when a recent window of every sensor is still many segments and every
 **What you give up by not partitioning: less than you would guess.**
 
 - **Pruning still happens.** `clusterColumns` gives segment elimination from per-segment min/max
-  statistics on a physical column — a "last 50 messages in this room" or "this month's rows" read skips
-  the segments that provably cannot contain a match. It is best-effort rather than exact, but on a table
-  that fails the first line above, the whole table is a handful of segments anyway.
+ statistics on a physical column — a "last 50 messages in this room" or "this month's rows" read skips
+ the segments that provably cannot contain a match. It is best-effort rather than exact, but on a table
+ that fails the first line above, the whole table is a handful of segments anyway.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  value source — see [Live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table).
+ value source — see [Live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table).
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **What you avoid:** `RequirePartitionFilter`. On an unpartitioned table there is no guard, so a named
@@ -604,39 +604,39 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 Core modules:
 
 - Partition metadata and defaults:
-  - `src/Aouda.Engine.Catalog/Policies.cs`
-  - `src/Aouda.Engine.Catalog/CatalogModels.cs`
+ - `src/Aouda.Engine.Catalog/Policies.cs`
+ - `src/Aouda.Engine.Catalog/CatalogModels.cs`
 - Query enforcement:
-  - `src/Aouda.Engine.Api/Query/PartitionEnforcer.cs`
-  - `src/Aouda.Engine.Api/Query/PartitionKeyExtractor.cs`
-  - `src/Aouda.Engine.Api/TableQuery.cs`
+ - `src/Aouda.Engine.Api/Query/PartitionEnforcer.cs`
+ - `src/Aouda.Engine.Api/Query/PartitionKeyExtractor.cs`
+ - `src/Aouda.Engine.Api/TableQuery.cs`
 - Partition storage/autopromotion:
-  - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionVolumeTracker.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionPromoter.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionVolumeTracker.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionPromoter.cs`
 - Multidb engine orchestration:
-  - `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs`
-  - `src/Aouda.Engine.Api/DatabaseManager.cs`
-  - `src/Aouda.Server/Controllers/DatabasesController.cs`
+ - `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs`
+ - `src/Aouda.Engine.Api/DatabaseManager.cs`
+ - `src/Aouda.Server/Controllers/DatabasesController.cs`
 - Security and query endpoint integration:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `src/Aouda.Server/Controllers/QueryController.cs`
-  - `src/Aouda.Server/Controllers/TablesController.cs`
+ - `src/Aouda.Server/Controllers/QueryController.cs`
+ - `src/Aouda.Server/Controllers/TablesController.cs`
 - Protocol/DTO contracts:
-  - `src/Aouda.Protocol/Messages.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Protocol/Messages.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
 ### Walk-through A: Partitioned query enforcement path
 
-1. Entry point: `TableQuery.ToResultAsync()` / `ToColumnarAsync()` / `AggregateAsync()`.
-2. `ValidatePartitionEnforcement()` resolves predicate and calls `PartitionEnforcer.Validate(...)`.
+1. Entry point: `TableQuery.ToResultAsync` / `ToColumnarAsync` / `AggregateAsync`.
+2. `ValidatePartitionEnforcement` resolves predicate and calls `PartitionEnforcer.Validate(...)`.
 3. Decision branches:
-   - Not partitioned -> valid.
-   - `RequirePartitionFilter == false` -> valid.
-   - `crossPartitionAccess == true` -> valid cross-partition.
-   - Otherwise requires equality or `in` filters for all partition key columns (`in` lowers to OR-of-equality). A composite prefix does not satisfy the guard for row-reading queries. A key-only DISTINCT (partition-key columns only, one key constrained) is the one exception — see [partition-filter rule](#partition-filter-rule-p40). Test anchors also: `tests/Aouda.Engine.Api.Tests/Query/PartitionFilterRuleTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`.
+ - Not partitioned -> valid.
+ - `RequirePartitionFilter == false` -> valid.
+ - `crossPartitionAccess == true` -> valid cross-partition.
+ - Otherwise requires equality or `in` filters for all partition key columns (`in` lowers to OR-of-equality). A composite prefix does not satisfy the guard for row-reading queries. A key-only DISTINCT (partition-key columns only, one key constrained) is the one exception — see [partition-filter rule](#partition-filter-rule-p40). Test anchors also: `tests/Aouda.Engine.Api.Tests/Query/PartitionFilterRuleTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`.
 4. Failure path throws `PartitionFilterRequiredException`.
 5. Observability: cross-partition executions increment `Perf.CrossPartitionQueries`.
 6. Test anchors: `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`.
@@ -646,28 +646,28 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 1. Entry path: writes/query signals are recorded in `PartitionVolumeTracker`.
 2. `PartitionPromoter.ShouldPromote(...)` evaluates row/byte thresholds when storage mode is `Auto`.
 3. Promotion is queued; `BeginPromotionAsync(...)` transitions state:
-   - removes queue entry,
-   - creates dedicated directory path,
-   - records in-progress state,
-   - calls `OnBeginPromotion` WAL callback when configured.
+ - removes queue entry,
+ - creates dedicated directory path,
+ - records in-progress state,
+ - calls `OnBeginPromotion` WAL callback when configured.
 4. `CompletePromotionAsync(...)` persists completion via callback and updates counters.
 5. State mutation outcome: partition can be treated as dedicated in catalog/router. Rows the key received before
-   the promotion stay in the shared bucket and are still read; the historical row migration is removed
-   (**ColumnarRead, 0.3.0**).
+ the promotion stay in the shared bucket and are still read; the historical row migration is removed
+ (**ColumnarRead, 0.3.0**).
 6. Test anchors: partition promotion behavior covered by P4 Task3 report and storage/path integration tests including `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`.
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 1. Entry point: `POST /api/databases/{db}/query` in `QueryController.ExecuteQuery`.
 2. Controller validates request shape:
-   - body `database` required,
-   - body `database` must match route `{db}`.
+ - body `database` required,
+ - body `database` must match route `{db}`.
 3. Engine resolution: `DatabaseManager` resolves `{db}` engine.
 4. Security scope:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 5. Cross-partition and grant path:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-   - `crossPartitionAccess` waives the partition-filter guard only: there is no limiter and no audit row for the flag itself.
+ - `crossPartitionAccess` waives the partition-filter guard only: there is no limiter and no audit row for the flag itself.
 6. Query translation and execution proceeds through `TableQuery`.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
@@ -676,10 +676,10 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 1. Entry point: `POST /api/databases` in `DatabasesController.CreateDatabase`.
 2. Request validation parses replication mode, default temperature, memory constraints.
 3. `DatabaseManager.CreateDatabaseAsync(...)` runs lifecycle under mutation lock:
-   - registry create (`Creating -> Active`) with persisted metadata,
-   - directory layout creation,
-   - engine open using derived budget options,
-   - engine registration in manager and server budget coordinator.
+ - registry create (`Creating -> Active`) with persisted metadata,
+ - directory layout creation,
+ - engine open using derived budget options,
+ - engine registration in manager and server budget coordinator.
 4. Optional auth-linking path can bind application DB to auth DB.
 5. Response returns database metadata and options.
 6. Test anchors: `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs`, P6/P7 reports.
@@ -696,7 +696,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ## 2.10 Configuration and settings reference (complete surface)
 
-{: .note }
+{:.note }
 **Precedence:** [Server configuration](server-configuration.md) — startup config (code defaults, optional appsettings, `AOUDA_*`, CLI).
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
@@ -706,7 +706,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | `CreateTableRequest.initialBucketCount` / `TableDefinition.initialBucketCount` (P45) | int? | `null` (engine derives `16` or `128` — see `2.7`) | `>= 1`; `Auto`/`Shared` only | table create payload / declarative schema | **Immutable after table creation.** Declaring it alongside `partitionStorage: "Dedicated"` is rejected — a dedicated table has no bucket count. A differing value against an *existing* table is reported as drift by `aouda schema diff` and never auto-applied. |
 | `CreateTableRequest.promotionRowThreshold` / `TableDefinition.promotionRowThreshold` (P45) | long? | `null` (engine uses `10_000_000`) | `>= 0` | table create payload / declarative schema | Mutable after creation — takes effect at the next promotion check. |
 | `CreateTableRequest.promotionByteThreshold` / `TableDefinition.promotionByteThreshold` (P45) | long? | `null` (engine uses `1_000_000_000`) | `>= 0` | table create payload / declarative schema | Mutable after creation — takes effect at the next promotion check. |
-| `CreateTableRequest.pkUniqueness` / `TableDefinition.pkUniqueness` (P45) | string? | `null` (engine uses `Strict`) | `Strict`, `Recent`, `BestEffort` | table create payload / declarative schema | Not partition-key-scoped — valid on any table. Mutable after creation — takes effect on the next insert; an ALTER **from** `Strict` first waits for the table's writes in flight (up to 60 s) and flushes the table, and is refused (retryable, nothing changed) if it cannot (**BL-939, next train**); see [Primary-key indexing](pk-indexing.md). (A bulk-load job's `pkUniquenessOverride` was never applied, and is refused from **Lead S27a, 0.6.0**; a job's own check is `validation`.) |
+| `CreateTableRequest.pkUniqueness` / `TableDefinition.pkUniqueness` (P45) | string? | `null` (engine uses `Strict`) | `Strict`, `Recent`, `BestEffort` | table create payload / declarative schema | Not partition-key-scoped — valid on any table. Mutable after creation — takes effect on the next insert; an ALTER **from** `Strict` first waits for the table's writes in flight (up to 60 s) and flushes the table, and is refused (retryable, nothing changed) if it cannot; see [Primary-key indexing](pk-indexing.md). (A bulk-load job's `pkUniquenessOverride` was never applied, and is refused from **Lead S27a, 0.6.0**; a job's own check is `validation`.) |
 | `PartitionOptions.StorageMode` | enum | `Auto` | `Auto`, `Dedicated`, `Shared` | catalog policy | Core partition routing mode |
 | `PartitionOptions.RequirePartitionFilter` | bool | `true` | `true/false` | catalog policy | Query guard for partitioned tables |
 | `PartitionOptions.PromotionRowThreshold` | long | `10_000_000` | `>= 0` | catalog policy | Auto-promotion row trigger |
@@ -729,35 +729,35 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 Precedence and operational notes:
 
 - Precedence:
-  - Route `{db}` plus required body `database` define request scope at runtime.
-  - Table-level partition settings override database defaults for table behavior.
-  - Request-level `crossPartitionAccess` waives the partition-filter requirement and nothing else: it never widens what the credential is authorized to see (**BL-1227, 0.9.0**).
+ - Route `{db}` plus required body `database` define request scope at runtime.
+ - Table-level partition settings override database defaults for table behavior.
+ - Request-level `crossPartitionAccess` waives the partition-filter requirement and nothing else: it never widens what the credential is authorized to see (**BL-1227, 0.9.0**).
 - Dynamic vs restart-required:
-  - The `databases` of `aouda.json` are read at start (**BL-1463, 0.16.0**; before, the `Aouda:Databases` settings, now refused): treat a change to an operational field as restart-required, and a new database, a schema file and roles as `aouda reload`able. The `Aouda:PlsCrossPartitionRateLimit` keys no longer exist (**BL-1227, 0.9.0**); a leftover key in a config file is ignored.
-  - Table partition options and table auth mode updates are runtime API operations.
+ - The `databases` of `aouda.json` are read at start (**BL-1463, 0.16.0**; before, the `Aouda:Databases` settings, now refused): treat a change to an operational field as restart-required, and a new database, a schema file and roles as `aouda reload`able. The `Aouda:PlsCrossPartitionRateLimit` keys no longer exist (**BL-1227, 0.9.0**); a leftover key in a config file is ignored.
+ - Table partition options and table auth mode updates are runtime API operations.
 - Safety-gated settings:
-  - Database name validation rejects invalid/reserved names.
-  - Route/body database mismatch is rejected.
-  - Partitioned query without required filter is rejected unless `crossPartitionAccess` waives the guard.
+ - Database name validation rejects invalid/reserved names.
+ - Route/body database mismatch is rejected.
+ - Partitioned query without required filter is rejected unless `crossPartitionAccess` waives the guard.
 - Deprecated/reserved:
-  - `PartitionOptions.Migration` and its phase-2 fields were removed (**WorkloadCore S17, 0.3.0**).
+ - `PartitionOptions.Migration` and its phase-2 fields were removed (**WorkloadCore S17, 0.3.0**).
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-### .NET example (database-scoped query with explicit cross-partition access)
+###.NET example (database-scoped query with explicit cross-partition access)
 
 ```csharp
 var client = new AoudaClient(new AoudaClientOptions
 {
-    ServerUrl = "http://localhost:5000",
-    DatabaseName = "appdb",
+ ServerUrl = "http://localhost:5000",
+ DatabaseName = "appdb",
 });
 
 var rows = await client
-    .GetTable("orders")
-    .WithCrossPartitionAccess()
-    .Where("status", "eq", "open")
-    .ToListAsync();
+.GetTable("orders")
+.WithCrossPartitionAccess
+.Where("status", "eq", "open")
+.ToListAsync;
 ```
 
 Expected result: query can run on a partitioned table without explicit partition key filter because cross-partition access is explicitly requested.
@@ -768,17 +768,17 @@ Common mistake: using cross-partition access for all app traffic; this should st
 
 ```typescript
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5000",
-  database: "appdb",
+ serverUrl: "http://localhost:5000",
+ database: "appdb",
 });
 
 await client.databases.create("tenantdb", { maxMemoryShareBytes: 536870912 });
 
 const orders = await client
-  .table("orders")
-  .where("tenant_id", "=", "tenant-a")
-  .where("status", "=", "open")
-  .execute();
+.table("orders")
+.where("tenant_id", "=", "tenant-a")
+.where("status", "=", "open")
+.execute;
 ```
 
 Expected result: request is sent to `/api/databases/appdb/query` with explicit `database` in body and partition-safe filter.
@@ -787,10 +787,10 @@ To read across partitions deliberately, add the flag (**BL-1227, 0.9.0** for its
 
 ```typescript
 const all = await client
-  .table("orders")
-  .withCrossPartitionAccess()
-  .where("status", "=", "open")
-  .execute();
+.table("orders")
+.withCrossPartitionAccess
+.where("status", "=", "open")
+.execute;
 ```
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -802,14 +802,14 @@ POST /api/databases/appdb/tables
 Content-Type: application/json
 
 {
-  "database": "appdb",
-  "name": "orders",
-  "columns": [
-    { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
-    { "name": "tenant_id", "type": "String", "partitionKeyOrder": 1 },
-    { "name": "status", "type": "String" }
-  ],
-  "partitionStorage": "Auto",
+ "database": "appdb",
+ "name": "orders",
+ "columns": [
+ { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
+ { "name": "tenant_id", "type": "String", "partitionKeyOrder": 1 },
+ { "name": "status", "type": "String" }
+ ],
+ "partitionStorage": "Auto",
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
 }
 ```
@@ -819,13 +819,13 @@ POST /api/databases/appdb/query
 Content-Type: application/json
 
 {
-  "database": "appdb",
-  "table": "orders",
-  "where": {
-    "and": [
-      { "column": "tenant_id", "op": "eq", "value": "tenant-a" }
-    ]
-  }
+ "database": "appdb",
+ "table": "orders",
+ "where": {
+ "and": [
+ { "column": "tenant_id", "op": "eq", "value": "tenant-a" }
+ ]
+ }
 }
 ```
 
@@ -835,13 +835,13 @@ Common mistake: omitting `database` in request body or mismatching route/body da
 
 ### A) API coverage matrix
 
-| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Create partitioned table (partition key + storage mode) | Table create DTOs / schema APIs | `tables.createTable(...)` with partition fields | `POST /api/databases/{db}/tables` | Implemented | End-to-end available |
-| Query partitioned table with required filters | Fluent query APIs | `table(...).where(...).execute()` | `POST /api/databases/{db}/query` | Implemented | Guarded by server/engine partition enforcement |
-| Explicit cross-partition opt-in (a cost waiver; **BL-1227, 0.9.0**) | `.WithCrossPartitionAccess()` (`RemoteTableQuery`, `TableQuery`; it reaches `SubscribeAsync`), `SubscribeOptions.CrossPartitionAccess`, named-query execute / batch input | `withCrossPartitionAccess()`, `SubscribeOptions.crossPartitionAccess`, `NamedQueryExecuteOptions` / `NamedQuerySubscribeOptions` / per-item `crossPartitionAccess` | `crossPartitionAccess = true` (query, named-query call and batch item); `cross_partition_access` on `subscribe` | Implemented | Ignored on the data-plane listener |
+| Query partitioned table with required filters | Fluent query APIs | `table(...).where(...).execute` | `POST /api/databases/{db}/query` | Implemented | Guarded by server/engine partition enforcement |
+| Explicit cross-partition opt-in (a cost waiver; **BL-1227, 0.9.0**) | `.WithCrossPartitionAccess` (`RemoteTableQuery`, `TableQuery`; it reaches `SubscribeAsync`), `SubscribeOptions.CrossPartitionAccess`, named-query execute / batch input | `withCrossPartitionAccess`, `SubscribeOptions.crossPartitionAccess`, `NamedQueryExecuteOptions` / `NamedQuerySubscribeOptions` / per-item `crossPartitionAccess` | `crossPartitionAccess = true` (query, named-query call and batch item); `cross_partition_access` on `subscribe` | Implemented | Ignored on the data-plane listener |
 | Database CRUD | `.Databases` client surface (P6 C2) | `client.databases.list/create/get/drop` | `/api/databases` endpoints | Implemented | Database-scoped operations shipped |
-| Database-scoped data/schema routes | .NET client routes with `DatabaseName` | Client paths built from configured `database` | `/api/databases/{db}/...` | Implemented | Flat route era replaced |
+| Database-scoped data/schema routes |.NET client routes with `DatabaseName` | Client paths built from configured `database` | `/api/databases/{db}/...` | Implemented | Flat route era replaced |
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### B) Missing API matrix
@@ -904,27 +904,27 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 Monitor first:
 
 - Database lifecycle and routing:
-  - DB create/drop success/failure rates
-  - database resolution errors (`DatabaseNotFound`/mismatch paths)
+ - DB create/drop success/failure rates
+ - database resolution errors (`DatabaseNotFound`/mismatch paths)
 - Partitioning behavior:
-  - partition promotion queue depth / in-progress counts
-  - dedicated partition growth and promotion byte counters
-  - **(P45)** per-query segment counts: how many segments were eliminated by partition key, how many by
-    hash bucket, and — when neither fired — why (no partition-key filter, a range predicate on the
-    partition key, or an unsupported predicate shape). A slow query on a partitioned table is
-    self-diagnosing from these counts alone. The reason is never set for a scan made under explicit
-    cross-partition access — that is an intentional unfiltered read, not a missed optimization.
-  - **(P45)** segment-discovery cache hit/miss counts — repeated queries against an unchanged table stop
-    paying the filesystem-walk cost after the first one; a concurrent flush, commit, or promotion is
-    visible to the very next query regardless of the cache.
+ - partition promotion queue depth / in-progress counts
+ - dedicated partition growth and promotion byte counters
+ - **(P45)** per-query segment counts: how many segments were eliminated by partition key, how many by
+ hash bucket, and — when neither fired — why (no partition-key filter, a range predicate on the
+ partition key, or an unsupported predicate shape). A slow query on a partitioned table is
+ self-diagnosing from these counts alone. The reason is never set for a scan made under explicit
+ cross-partition access — that is an intentional unfiltered read, not a missed optimization.
+ - **(P45)** segment-discovery cache hit/miss counts — repeated queries against an unchanged table stop
+ paying the filesystem-walk cost after the first one; a concurrent flush, commit, or promotion is
+ visible to the very next query regardless of the cache.
 - Query enforcement and grants:
-  - partition-filter-required rejections
-  - cross-partition counts (`Perf.CrossPartitionQueries`)
+ - partition-filter-required rejections
+ - cross-partition counts (`Perf.CrossPartitionQueries`)
 - Security-audit signals:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Per-database resource signals:
-  - server memory endpoint per-db snapshots
-  - per-db metrics/health endpoints from P6 monitoring work
+ - server memory endpoint per-db snapshots
+ - per-db metrics/health endpoints from P6 monitoring work
 
 Recovery expectations:
 
@@ -983,99 +983,99 @@ Last verification date (UTC): `2026-09-10`.
 
 - BL-044 (open):
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - User impact: complex grouped predicates can hit unsupported/less ergonomic partition-security behavior.
+ - User impact: complex grouped predicates can hit unsupported/less ergonomic partition-security behavior.
 - Retrospective partitioning phase-2 strategy gap:
-  - `Eager`/`Blocking` strategy fields are defined but not documented as fully shipped behavior.
-  - User impact: treat these as reserved/planned rather than production-ready guarantees.
+ - `Eager`/`Blocking` strategy fields are defined but not documented as fully shipped behavior.
+ - User impact: treat these as reserved/planned rather than production-ready guarantees.
 - `initialBucketCount` has no rebalancer (P45):
-  - The bucket count is fixed for the life of a table; there is no automated way to change it once data
-    has been written under it.
-  - User impact: a customer who under- or over-provisions a table's bucket count must migrate to a new
-    table under a different name — the same manual route already used for a `Dedicated`-mode table stuck
-    with the wrong storage mode. See [Choosing partition storage mode](bulk-load.md#choosing-partition-storage-mode).
+ - The bucket count is fixed for the life of a table; there is no automated way to change it once data
+ has been written under it.
+ - User impact: a customer who under- or over-provisions a table's bucket count must migrate to a new
+ table under a different name — the same manual route already used for a `Dedicated`-mode table stuck
+ with the wrong storage mode. See [Choosing partition storage mode](bulk-load.md#choosing-partition-storage-mode).
 - Partial-bucket accrual across `:commit` is deferred (P45, `BL-381`):
-  - A commit-per-batch bulk-load client still caps its largest possible segment at the batch size divided
-    by the routing keys it spans, even with steady-state coalescing and spill-and-merge both in place.
-  - User impact: for that client shape, prefer fewer, longer bulk-load sessions (see [Sizing a
-    session](bulk-load.md#sizing-a-session-fewer-longer-one-commit)) over relying on this to be fixed
-    automatically.
+ - A commit-per-batch bulk-load client still caps its largest possible segment at the batch size divided
+ by the routing keys it spans, even with steady-state coalescing and spill-and-merge both in place.
+ - User impact: for that client shape, prefer fewer, longer bulk-load sessions (see [Sizing a
+ session](bulk-load.md#sizing-a-session-fewer-longer-one-commit)) over relying on this to be fixed
+ automatically.
 - The 64 KB page-size default is validated on one measured shape (P45):
-  - The default was chosen by measuring a ten-`Int64`-column segment; a table with wide `String` columns
-    will cut pages at a different row count for the same byte target.
-  - User impact: the default is a reasonable starting point, not a universal optimum — it stays
-    configurable for a table where measurement shows it should move.
+ - The default was chosen by measuring a ten-`Int64`-column segment; a table with wide `String` columns
+ will cut pages at a different row count for the same byte target.
+ - User impact: the default is a reasonable starting point, not a universal optimum — it stays
+ configurable for a table where measurement shows it should move.
 
 ## 2.19 References
 
 - ADRs:
-  - `docs/decisions/0009-partitioning-multitenancy.md`, including its "Amendment (P45 S01 — pruning is
-    exact, and what the schema can now declare)" section — the normative source for the pruning
-    guarantees and declarable fields on this page
+ - `docs/decisions/0009-partitioning-multitenancy.md`, including its "Amendment (P45 S01 — pruning is
+ exact, and what the schema can now declare)" section — the normative source for the pruning
+ guarantees and declarable fields on this page
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - P45 — Query Pruning and Segment Shape:
-  - `docs/tasks/P45/P45-PruningAndShape-Overview.md`
-  - `docs/dev/Partitioning-Ingest-And-Pruning-Analysis.md` — the engineering analysis this phase
-    implements (internal; the material on this page is its public restatement)
+ - `docs/tasks/P45/P45-PruningAndShape-Overview.md`
+ - `docs/dev/Partitioning-Ingest-And-Pruning-Analysis.md` — the engineering analysis this phase
+ implements (internal; the material on this page is its public restatement)
 - Task docs/reports:
-  - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure.md`
-  - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure-Report.md`
-  - `docs/tasks/P4/P4-EpicF-Task2-PartitionQueryEnforcement.md`
-  - `docs/tasks/P4/P4-EpicF-Task2-PartitionQueryEnforcement-Report.md`
-  - `docs/tasks/P4/P4-EpicF-Task3-AutoPromotionSharedPartitions.md`
-  - `docs/tasks/P4/P4-EpicF-Task3-AutoPromotionSharedPartitions-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning.md`
-  - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
-  - `docs/tasks/P6/P6-MultiDatabase-Analysis-And-Tasks.md`
-  - `docs/tasks/P6/P6-EpicA-Task2-DatabaseRegistryAndMetadata-Report.md`
-  - `docs/tasks/P6/P6-EpicA-Task3-DatabaseManager-Report.md`
-  - `docs/tasks/P6/P6-EpicB-Task1-ServerStartupAndDatabaseScopedRoutes-Report.md`
-  - `docs/tasks/P6/P6-EpicB-Task3-ServerConfigurationForMultipleDatabases-Report.md`
-  - `docs/tasks/P6/P6-EpicC-Task1-WireProtocolDatabaseField-Report.md`
-  - `docs/tasks/P6/P6-EpicC-Task2-CSharpClientMultiDatabase-Report.md`
-  - `docs/tasks/P6/P6-EpicF-Task1-PerDatabaseMemoryBudgets-Report.md`
-  - `docs/tasks/P6/P6-EpicF-Task2-PerDatabaseMonitoringAndMetrics-Report.md`
-  - `docs/tasks/P7/P7-Task8-MultiDatabaseScenarios-Report.md`
-  - `docs/tasks/P12/P12-TaskG1-PLSFlagAndConfiguration-Report.md`
-  - `docs/tasks/P12/P12-TaskG2-PlsEnforcement-TokenClaimToPartitionRouting-Report.md`
-  - `docs/tasks/P12/P12-TaskG3-PlsCrossPartitionAccessControl-Report.md`
-  - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md` (history: the limiter is gone, **BL-1227, 0.9.0**)
+ - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure.md`
+ - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure-Report.md`
+ - `docs/tasks/P4/P4-EpicF-Task2-PartitionQueryEnforcement.md`
+ - `docs/tasks/P4/P4-EpicF-Task2-PartitionQueryEnforcement-Report.md`
+ - `docs/tasks/P4/P4-EpicF-Task3-AutoPromotionSharedPartitions.md`
+ - `docs/tasks/P4/P4-EpicF-Task3-AutoPromotionSharedPartitions-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning.md`
+ - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
+ - `docs/tasks/P6/P6-MultiDatabase-Analysis-And-Tasks.md`
+ - `docs/tasks/P6/P6-EpicA-Task2-DatabaseRegistryAndMetadata-Report.md`
+ - `docs/tasks/P6/P6-EpicA-Task3-DatabaseManager-Report.md`
+ - `docs/tasks/P6/P6-EpicB-Task1-ServerStartupAndDatabaseScopedRoutes-Report.md`
+ - `docs/tasks/P6/P6-EpicB-Task3-ServerConfigurationForMultipleDatabases-Report.md`
+ - `docs/tasks/P6/P6-EpicC-Task1-WireProtocolDatabaseField-Report.md`
+ - `docs/tasks/P6/P6-EpicC-Task2-CSharpClientMultiDatabase-Report.md`
+ - `docs/tasks/P6/P6-EpicF-Task1-PerDatabaseMemoryBudgets-Report.md`
+ - `docs/tasks/P6/P6-EpicF-Task2-PerDatabaseMonitoringAndMetrics-Report.md`
+ - `docs/tasks/P7/P7-Task8-MultiDatabaseScenarios-Report.md`
+ - `docs/tasks/P12/P12-TaskG1-PLSFlagAndConfiguration-Report.md`
+ - `docs/tasks/P12/P12-TaskG2-PlsEnforcement-TokenClaimToPartitionRouting-Report.md`
+ - `docs/tasks/P12/P12-TaskG3-PlsCrossPartitionAccessControl-Report.md`
+ - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md` (history: the limiter is gone, **BL-1227, 0.9.0**)
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `docs/tasks/P14/P14-TaskS4-EnhancedPLS.md`
+ - `docs/tasks/P14/P14-TaskS4-EnhancedPLS.md`
 - Backlog:
-  - `docs/BACKLOG.md` (`BL-044`)
+ - `docs/BACKLOG.md` (`BL-044`)
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Code:
-  - `src/Aouda.Engine.Catalog/Policies.cs`
-  - `src/Aouda.Engine.Catalog/CatalogModels.cs`
-  - `src/Aouda.Engine.Api/Query/PartitionEnforcer.cs`
-  - `src/Aouda.Engine.Api/Query/PartitionKeyExtractor.cs`
-  - `src/Aouda.Engine.Api/TableQuery.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionVolumeTracker.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionPromoter.cs`
-  - `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs`
-  - `src/Aouda.Engine.Api/DatabaseManager.cs`
-  - `src/Aouda.Server/Controllers/DatabasesController.cs`
-  - `src/Aouda.Server/Controllers/QueryController.cs`
-  - `src/Aouda.Server/Controllers/TablesController.cs`
+ - `src/Aouda.Engine.Catalog/Policies.cs`
+ - `src/Aouda.Engine.Catalog/CatalogModels.cs`
+ - `src/Aouda.Engine.Api/Query/PartitionEnforcer.cs`
+ - `src/Aouda.Engine.Api/Query/PartitionKeyExtractor.cs`
+ - `src/Aouda.Engine.Api/TableQuery.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionVolumeTracker.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionPromoter.cs`
+ - `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs`
+ - `src/Aouda.Engine.Api/DatabaseManager.cs`
+ - `src/Aouda.Server/Controllers/DatabasesController.cs`
+ - `src/Aouda.Server/Controllers/QueryController.cs`
+ - `src/Aouda.Server/Controllers/TablesController.cs`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `src/Aouda.Protocol/Messages.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
-  - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
-  - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
-  - `src/Aouda.Client/RemoteTableQuery.cs`
-  - `../aouda-client-ts/src/client.ts`
-  - `../aouda-client-ts/src/query-builder.ts`
-  - `../aouda-client-ts/src/tables.ts`
-  - `../aouda-client-ts/src/databases.ts`
+ - `src/Aouda.Protocol/Messages.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
+ - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
+ - `src/Aouda.Client/RemoteTableQuery.cs`
+ - `../aouda-client-ts/src/client.ts`
+ - `../aouda-client-ts/src/query-builder.ts`
+ - `../aouda-client-ts/src/tables.ts`
+ - `../aouda-client-ts/src/databases.ts`
 - Tests:
-  - `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`
-  - `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`
-  - `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`
-  - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
+ - `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`
+ - `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`
+ - `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`
+ - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `tests/Aouda.Protocol.Tests/SerializationTests.cs`
-  - `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs`
+ - `tests/Aouda.Protocol.Tests/SerializationTests.cs`
+ - `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs`
 
 ## 2.20 What is missing from this document? (meta completeness)
 

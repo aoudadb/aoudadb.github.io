@@ -26,21 +26,21 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ## Prerequisites
 
-1. **Schema file in repo**  
-   `aouda.schema.json` (and optional overlays like `aouda.schema.prod.json`) at the repo root or discoverable by walk-up from the workflow working directory.
+1. **Schema file in repo**
+ `aouda.schema.json` (and optional overlays like `aouda.schema.prod.json`) at the repo root or discoverable by walk-up from the workflow working directory.
 
-2. **Aouda server endpoints**  
-   Staging and production (or a single server with different databases) reachable from the runner. Use **secrets** for URLs and any auth (e.g. `AOUDA_STAGING_SERVER`, `AOUDA_PROD_SERVER`, `AOUDA_DATABASE`).
+2. **Aouda server endpoints**
+ Staging and production (or a single server with different databases) reachable from the runner. Use **secrets** for URLs and any auth (e.g. `AOUDA_STAGING_SERVER`, `AOUDA_PROD_SERVER`, `AOUDA_DATABASE`).
 
-3. **CLI available in CI**  
-   - **.NET**: Install `Aouda.Cli` as a .NET tool or use a step that runs `dotnet tool install Aouda.Cli` then `dotnet aouda`.
-   - **TypeScript**: Use `npx @aouda/client` (Node.js job); no global install needed.
+3. **CLI available in CI**
+ - **.NET**: Install `Aouda.Cli` as a.NET tool or use a step that runs `dotnet tool install Aouda.Cli` then `dotnet aouda`.
+ - **TypeScript**: Use `npx @aouda/client` (Node.js job); no global install needed.
 
 ---
 
-## GitHub Actions: .NET Variant
+## GitHub Actions:.NET Variant
 
-Use this if your repo is .NET or you prefer the `dotnet aouda` CLI.
+Use this if your repo is.NET or you prefer the `dotnet aouda` CLI.
 
 - **On PR**: Run `dotnet aouda schema diff` against the PR branch’s schema file and the **staging** server (or a dedicated “plan” database). Capture the plan output and post it as a PR comment (e.g. with `peter-evans/create-or-update-comment` or similar).
 - **On push to main**: Run `dotnet aouda schema apply` against **staging** so that staging always matches the schema in `main`.
@@ -54,50 +54,50 @@ Posts the schema plan as a PR comment so reviewers can see exactly what will cha
 name: Schema — PR diff comment
 
 on:
-  pull_request:
-    paths:
-      - "aouda.schema*.json"
+ pull_request:
+ paths:
+ - "aouda.schema*.json"
 
 jobs:
-  schema-diff:
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
+ schema-diff:
+ runs-on: ubuntu-latest
+ permissions:
+ pull-requests: write
 
-    steps:
-      - uses: actions/checkout@v4
+ steps:
+ - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.x"
+ - name: Setup.NET
+ uses: actions/setup-dotnet@v4
+ with:
+ dotnet-version: "8.x"
 
-      - name: Install Aouda CLI
-        run: dotnet tool install Aouda.Cli -g
+ - name: Install Aouda CLI
+ run: dotnet tool install Aouda.Cli -g
 
-      - name: Run schema diff
-        id: diff
-        env:
-          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
-          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
-        run: |
-          PLAN=$(dotnet aouda schema diff --access 2>&1 || true)
-          echo "plan<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$PLAN"    >> "$GITHUB_OUTPUT"
-          echo "EOF"      >> "$GITHUB_OUTPUT"
-        # Exit 1 from --access means hasWidening — fail the job:
-        # run a second step `aouda schema diff --access` without swallowing the exit code.
+ - name: Run schema diff
+ id: diff
+ env:
+ AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+ AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+ run: |
+ PLAN=$(dotnet aouda schema diff --access 2>&1 || true)
+ echo "plan<<EOF" >> "$GITHUB_OUTPUT"
+ echo "$PLAN" >> "$GITHUB_OUTPUT"
+ echo "EOF" >> "$GITHUB_OUTPUT"
+ # Exit 1 from --access means hasWidening — fail the job:
+ # run a second step `aouda schema diff --access` without swallowing the exit code.
 
-      - name: Post diff as PR comment
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            ## Schema diff (staging)
+ - name: Post diff as PR comment
+ uses: peter-evans/create-or-update-comment@v4
+ with:
+ issue-number: ${{ github.event.pull_request.number }}
+ body: |
+ ## Schema diff (staging)
 
-            ```
-            ${{ steps.diff.outputs.plan }}
-            ```
+ ```
+ ${{ steps.diff.outputs.plan }}
+ ```
 ```
 
 ### Workflow 2: Apply to staging on merge (.NET)
@@ -108,31 +108,31 @@ Runs `schema apply` against staging whenever `main` is updated, keeping staging 
 name: Schema — Apply to staging
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "aouda.schema*.json"
+ push:
+ branches: [main]
+ paths:
+ - "aouda.schema*.json"
 
 jobs:
-  schema-apply-staging:
-    runs-on: ubuntu-latest
+ schema-apply-staging:
+ runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+ steps:
+ - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.x"
+ - name: Setup.NET
+ uses: actions/setup-dotnet@v4
+ with:
+ dotnet-version: "8.x"
 
-      - name: Install Aouda CLI
-        run: dotnet tool install Aouda.Cli -g
+ - name: Install Aouda CLI
+ run: dotnet tool install Aouda.Cli -g
 
-      - name: Apply schema to staging
-        env:
-          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
-          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
-        run: dotnet aouda schema apply
+ - name: Apply schema to staging
+ env:
+ AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+ AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+ run: dotnet aouda schema apply
 ```
 
 ### Workflow 3: Apply to production on release (.NET)
@@ -143,29 +143,29 @@ Runs `schema apply` against production when a GitHub release is published. Uses 
 name: Schema — Apply to production
 
 on:
-  release:
-    types: [published]
+ release:
+ types: [published]
 
 jobs:
-  schema-apply-prod:
-    runs-on: ubuntu-latest
+ schema-apply-prod:
+ runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+ steps:
+ - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.x"
+ - name: Setup.NET
+ uses: actions/setup-dotnet@v4
+ with:
+ dotnet-version: "8.x"
 
-      - name: Install Aouda CLI
-        run: dotnet tool install Aouda.Cli -g
+ - name: Install Aouda CLI
+ run: dotnet tool install Aouda.Cli -g
 
-      - name: Apply schema to production
-        env:
-          AOUDA_SERVER: ${{ secrets.AOUDA_PROD_SERVER }}
-          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
-        run: dotnet aouda schema apply --env prod
+ - name: Apply schema to production
+ env:
+ AOUDA_SERVER: ${{ secrets.AOUDA_PROD_SERVER }}
+ AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+ run: dotnet aouda schema apply --env prod
 ```
 
 Copy these three files into `.github/workflows/` in your repository, configure the secrets, and adjust the `paths` filter to match where your schema file lives. Full examples (with additional error-handling steps) are also under `examples/github-actions/schema-deploy-dotnet.yml` in the repository.
@@ -176,8 +176,8 @@ Copy these three files into `.github/workflows/` in your repository, configure t
 - `AOUDA_PROD_SERVER` — base URL of production Aouda.
 - `AOUDA_DATABASE` — database name (or use separate secrets per environment).
 - `AOUDA_TOKEN` — server admin key or bearer token, **required when the target database has auth
-  enabled** (**BL-464, 0.1.37**). Without it the `schema` commands exit `2` with
-  `AUTH_TOKEN_MISSING`; `--token` / `-t` on the command line overrides it.
+ enabled** (**BL-464, 0.1.37**). Without it the `schema` commands exit `2` with
+ `AUTH_TOKEN_MISSING`; `--token` / `-t` on the command line overrides it.
 
 Use `AOUDA_SERVER`, `AOUDA_DATABASE` and `AOUDA_TOKEN` in the workflow so the CLI picks them up; the examples use env vars set from secrets.
 
@@ -187,13 +187,13 @@ Use `AOUDA_SERVER`, `AOUDA_DATABASE` and `AOUDA_TOKEN` in the workflow so the CL
 
 Use this if your repo is Node/TypeScript or you prefer the `@aouda/client` CLI.
 
-Same flow as .NET:
+Same flow as.NET:
 
 - **On PR**: `npx @aouda/client schema diff` and post the plan as a PR comment.
 - **On push to main**: `npx @aouda/client schema apply` against staging.
 - **On release**: `npx @aouda/client schema apply` against production (with `--env prod` if using overlays).
 
-**Secrets**: Same as the .NET variant (`AOUDA_STAGING_SERVER`, `AOUDA_PROD_SERVER`, `AOUDA_DATABASE`).
+**Secrets**: Same as the.NET variant (`AOUDA_STAGING_SERVER`, `AOUDA_PROD_SERVER`, `AOUDA_DATABASE`).
 
 ### Workflow 1: PR diff comment (TypeScript)
 
@@ -201,45 +201,45 @@ Same flow as .NET:
 name: Schema — PR diff comment (TypeScript)
 
 on:
-  pull_request:
-    paths:
-      - "aouda.schema*.json"
+ pull_request:
+ paths:
+ - "aouda.schema*.json"
 
 jobs:
-  schema-diff:
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
+ schema-diff:
+ runs-on: ubuntu-latest
+ permissions:
+ pull-requests: write
 
-    steps:
-      - uses: actions/checkout@v4
+ steps:
+ - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+ - name: Setup Node.js
+ uses: actions/setup-node@v4
+ with:
+ node-version: "20"
 
-      - name: Run schema diff
-        id: diff
-        env:
-          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
-          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
-        run: |
-          PLAN=$(npx @aouda/client schema diff 2>&1 || true)
-          echo "plan<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$PLAN"    >> "$GITHUB_OUTPUT"
-          echo "EOF"      >> "$GITHUB_OUTPUT"
+ - name: Run schema diff
+ id: diff
+ env:
+ AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+ AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+ run: |
+ PLAN=$(npx @aouda/client schema diff 2>&1 || true)
+ echo "plan<<EOF" >> "$GITHUB_OUTPUT"
+ echo "$PLAN" >> "$GITHUB_OUTPUT"
+ echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Post diff as PR comment
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            ## Schema diff (staging)
+ - name: Post diff as PR comment
+ uses: peter-evans/create-or-update-comment@v4
+ with:
+ issue-number: ${{ github.event.pull_request.number }}
+ body: |
+ ## Schema diff (staging)
 
-            ```
-            ${{ steps.diff.outputs.plan }}
-            ```
+ ```
+ ${{ steps.diff.outputs.plan }}
+ ```
 ```
 
 ### Workflow 2: Apply to staging on merge (TypeScript)
@@ -248,28 +248,28 @@ jobs:
 name: Schema — Apply to staging (TypeScript)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "aouda.schema*.json"
+ push:
+ branches: [main]
+ paths:
+ - "aouda.schema*.json"
 
 jobs:
-  schema-apply-staging:
-    runs-on: ubuntu-latest
+ schema-apply-staging:
+ runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+ steps:
+ - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+ - name: Setup Node.js
+ uses: actions/setup-node@v4
+ with:
+ node-version: "20"
 
-      - name: Apply schema to staging
-        env:
-          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
-          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
-        run: npx @aouda/client schema apply
+ - name: Apply schema to staging
+ env:
+ AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+ AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+ run: npx @aouda/client schema apply
 ```
 
 ### Workflow 3: Apply to production on release (TypeScript)
@@ -278,26 +278,26 @@ jobs:
 name: Schema — Apply to production (TypeScript)
 
 on:
-  release:
-    types: [published]
+ release:
+ types: [published]
 
 jobs:
-  schema-apply-prod:
-    runs-on: ubuntu-latest
+ schema-apply-prod:
+ runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+ steps:
+ - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+ - name: Setup Node.js
+ uses: actions/setup-node@v4
+ with:
+ node-version: "20"
 
-      - name: Apply schema to production
-        env:
-          AOUDA_SERVER: ${{ secrets.AOUDA_PROD_SERVER }}
-          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
-        run: npx @aouda/client schema apply --env prod
+ - name: Apply schema to production
+ env:
+ AOUDA_SERVER: ${{ secrets.AOUDA_PROD_SERVER }}
+ AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+ run: npx @aouda/client schema apply --env prod
 ```
 
 Full examples are also under `examples/github-actions/schema-deploy-typescript.yml` in the repository.
@@ -306,23 +306,23 @@ Full examples are also under `examples/github-actions/schema-deploy-typescript.y
 
 ## Safety and Options
 
-- **Destructive changes**  
-  By default, `schema apply` **refuses** destructive changes (e.g. drop table, drop column). To allow them (e.g. in a one-off release), pass `--allow-destructive`. Prefer doing this only in a controlled step (e.g. manual approval or a dedicated “destructive” workflow).
+- **Destructive changes**
+ By default, `schema apply` **refuses** destructive changes (e.g. drop table, drop column). To allow them (e.g. in a one-off release), pass `--allow-destructive`. Prefer doing this only in a controlled step (e.g. manual approval or a dedicated “destructive” workflow).
 
-- **Dry run**  
-  Use `schema apply --dry-run` to get the same plan as apply without executing. Useful for “would this change anything?” checks.
+- **Dry run**
+ Use `schema apply --dry-run` to get the same plan as apply without executing. Useful for “would this change anything?” checks.
 
-- **Validate in CI**  
-  Use `schema validate` in a job that should **fail** if the server has drifted from the schema file (e.g. someone changed the DB by hand). Exit code 0 = in sync, 1 = drift.
+- **Validate in CI**
+ Use `schema validate` in a job that should **fail** if the server has drifted from the schema file (e.g. someone changed the DB by hand). Exit code 0 = in sync, 1 = drift.
 
-- **Check the file before anything is running**  
-  `aouda plan --declaration aouda.json [--env prod]`, with `aouda.json` holding `{ "version": 1, "databases": { "app": { "kind": "data", "schema": "aouda.schema.json" } } }` (**BL-1463, 0.16.0**; in 0.14.0 the same was `--Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=aouda.schema.json --Aouda:Databases:app:SchemaEnvironment=prod`, which is refused now; [Declare a server in one file](declaration.md)), validates the file with no server and no data directory (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**); exit 0 valid, 1 invalid, and each problem names the file and a JSON pointer. It cannot see references between tables and columns, which `schema apply` refuses. See [Plan a declaration](plan.md).
+- **Check the file before anything is running**
+ `aouda plan --declaration aouda.json [--env prod]`, with `aouda.json` holding `{ "version": 1, "databases": { "app": { "kind": "data", "schema": "aouda.schema.json" } } }` (**BL-1463, 0.16.0**; in 0.14.0 the same was `--Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=aouda.schema.json --Aouda:Databases:app:SchemaEnvironment=prod`, which is refused now; [Declare a server in one file](declaration.md)), validates the file with no server and no data directory (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**); exit 0 valid, 1 invalid, and each problem names the file and a JSON pointer. It cannot see references between tables and columns, which `schema apply` refuses. See [Plan a declaration](plan.md).
 
-- **Letting the server apply the file at start**  
-  A declared database can name its schema file (`databases.<name>.schema` in `aouda.json`, optional `schemaAllowDestructive`; the overlay follows the process setting `Aouda:Environment`; **BL-1463, 0.16.0**) and the server applies it at start, before it is ready (**BL-1388, 0.11.0**). That replaces an apply step in a *wipe and restart* flow, not the PR diff or `schema validate` jobs above. See [Schema management](schema-management.md#let-the-server-apply-it-at-start).
+- **Letting the server apply the file at start**
+ A declared database can name its schema file (`databases.<name>.schema` in `aouda.json`, optional `schemaAllowDestructive`; the overlay follows the process setting `Aouda:Environment`; **BL-1463, 0.16.0**) and the server applies it at start, before it is ready (**BL-1388, 0.11.0**). That replaces an apply step in a *wipe and restart* flow, not the PR diff or `schema validate` jobs above. See [Schema management](schema-management.md#let-the-server-apply-it-at-start).
 
-- **Environment overlays**  
-  Use `--env prod` when applying to production so the CLI merges `aouda.schema.prod.json` (replication factor, table durability levels, etc.) before sending to the server.
+- **Environment overlays**
+ Use `--env prod` when applying to production so the CLI merges `aouda.schema.prod.json` (replication factor, table durability levels, etc.) before sending to the server.
 
 ---
 

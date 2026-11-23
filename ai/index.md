@@ -86,37 +86,37 @@ Scope boundaries:
 ### Source map
 
 - Phase/task/report evidence:
-  - `docs/tasks/P12/P12-TwoLayerAuth-Tasks.md`
-  - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
-  - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
-  - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
+ - `docs/tasks/P12/P12-TwoLayerAuth-Tasks.md`
+ - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
+ - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
+ - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
-  - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
+ - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
+ - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
 - Design references:
-  - `docs/decisions/0017-ai-native-interface.md` (proposed; intent-level)
-  - `docs/decisions/0022-licensing-and-distribution-strategy.md` (draft; supersedes ADR 0017 licensing section)
-  - `docs/decisions/0023-authentication-and-authorization.md`
+ - `docs/decisions/0017-ai-native-interface.md` (proposed; intent-level)
+ - `docs/decisions/0022-licensing-and-distribution-strategy.md` (draft; supersedes ADR 0017 licensing section)
+ - `docs/decisions/0023-authentication-and-authorization.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Core runtime/code evidence:
-  - `src/Aouda.Server/DevServer/DevServerHost.cs`
-  - `src/Aouda.Server/DevServer/DevServerOptions.cs`
-  - `src/Aouda.Server/Controllers/DatabasesController.cs`
-  - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
-  - `src/Aouda.Server/Auth/AuthErrorResponses.cs`
-  - `src/Aouda.Protocol/ErrorCodes.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Server/DevServer/DevServerHost.cs`
+ - `src/Aouda.Server/DevServer/DevServerOptions.cs`
+ - `src/Aouda.Server/Controllers/DatabasesController.cs`
+ - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
+ - `src/Aouda.Server/Auth/AuthErrorResponses.cs`
+ - `src/Aouda.Protocol/ErrorCodes.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - SDK evidence:
-  - `.NET`: `src/Aouda.Client/Auth/AppAuthOptions.cs`, `src/Aouda.Client/Auth/ServerAuthOptions.cs`
-  - TypeScript: `../aouda-client-ts/src/client.ts`, `../aouda-client-ts/src/auth/auth-types.ts`, `../aouda-client-ts/src/auth/auth-client.ts`, `../aouda-client-ts/src/types.ts`
+ - `.NET`: `src/Aouda.Client/Auth/AppAuthOptions.cs`, `src/Aouda.Client/Auth/ServerAuthOptions.cs`
+ - TypeScript: `../aouda-client-ts/src/client.ts`, `../aouda-client-ts/src/auth/auth-types.ts`, `../aouda-client-ts/src/auth/auth-client.ts`, `../aouda-client-ts/src/types.ts`
 - Test evidence:
-  - `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs`
-  - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
-  - `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs`
-  - `../aouda-client-ts/tests/auth-client.test.ts`
-  - `../aouda-client-ts/tests/auth-handler.test.ts`
-  - `../aouda-client-ts/tests/auth-integration.test.ts`
+ - `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs`
+ - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
+ - `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs`
+ - `../aouda-client-ts/tests/auth-client.test.ts`
+ - `../aouda-client-ts/tests/auth-handler.test.ts`
+ - `../aouda-client-ts/tests/auth-integration.test.ts`
 
 ## 2.3 Defaults and zero-config behavior
 
@@ -126,9 +126,9 @@ If you do nothing beyond starting local dev:
 - App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. The response has no key. A principal and its key are declared, or minted on the principal. See [Access](auth/index.md) (**BL-1464, 0.16.0**).
 - Password reset and invite emails require a **configured email provider** on the server (`Aouda:Auth:Email` — `console` for local dev, `sendgrid` for production) — see [auth/notifications.md](../auth/notifications.md).
 - HTTP database creation with `{ "auth": { "enabled": true } }`:
-  - links to existing single app auth DB, or
-  - auto-creates default app auth DB if none exists, or
-  - returns explicit error if multiple auth DBs exist and none is specified.
+ - links to existing single app auth DB, or
+ - auto-creates default app auth DB if none exists, or
+ - returns explicit error if multiple auth DBs exist and none is specified.
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -149,16 +149,16 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ### Available now
 
 - Agent-friendly local bootstrap:
-  - `aouda start` with HTTP database + auth setup; keys from create-database response.
+ - `aouda start` with HTTP database + auth setup; keys from create-database response.
 - Auto-generated connection keys on auth-enabled DB creation:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Two-layer auth runtime:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - user JWT identity/session flow.
+ - user JWT identity/session flow.
 - Service-key user-context forwarding:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Structured auth errors with machine-usable fields:
-  - `error`, `message`, `suggestion`, optional `detail`, optional `requestId`.
+ - `error`, `message`, `suggestion`, optional `detail`, optional `requestId`.
 
 ### Planned / proposed
 
@@ -193,20 +193,20 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ## 2.7 Core concepts and mental model
 
 - AI-native in current Aouda means "low-friction operational surfaces" rather than "LLM magic endpoint":
-  - fast bootstrap,
-  - explicit auth defaults,
-  - machine-readable errors,
-  - predictable schema and policy APIs.
+ - fast bootstrap,
+ - explicit auth defaults,
+ - machine-readable errors,
+ - predictable schema and policy APIs.
 - Layered auth model for generated apps:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - Layer 2: user JWT/session identity.
+ - Layer 2: user JWT/session identity.
 - Progressive authorization maturity:
-  - start with `jwt-claim`,
+ - start with `jwt-claim`,
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Agent-safe failure model:
-  - stable error code + suggestion allow deterministic retries/fixes.
+ - stable error code + suggestion allow deterministic retries/fixes.
 - SDK behavior:
-  - auth handler starts with key/token, upgrades to user JWT after sign-in where applicable.
+ - auth handler starts with key/token, upgrades to user JWT after sign-in where applicable.
 
 Invariants:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -223,8 +223,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 4. Authorization:
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 5. Response:
-   - structured error payload on failure,
-   - standard protocol payloads on success.
+ - structured error payload on failure,
+ - standard protocol payloads on success.
 
 Implementation anchors:
 - Bootstrap and key-print UX: `src/Aouda.Server/DevServer/DevServerHost.cs`
@@ -238,8 +238,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ### Walk-through A: Local agent bootstrap with auth
 
-1. A host starts the dev server (`DevServerHost.RunAsync()`, loopback unless `Bind` says otherwise); the first admin is created at `POST /api/auth/setup` or by `AOUDA_DEV_ADMIN=true` (**BL-1473, 0.13.1**). With `aouda start` instead, the agent creates the auth-enabled DB via API and captures keys.
-2. `DevServerHost.RunAsync()` starts app and calls `EnsureAppAuthEnabledAsync(...)`.
+1. A host starts the dev server (`DevServerHost.RunAsync`, loopback unless `Bind` says otherwise); the first admin is created at `POST /api/auth/setup` or by `AOUDA_DEV_ADMIN=true` (**BL-1473, 0.13.1**). With `aouda start` instead, the agent creates the auth-enabled DB via API and captures keys.
+2. `DevServerHost.RunAsync` starts app and calls `EnsureAppAuthEnabledAsync(...)`.
 3. Host resolves/creates app auth DB and links app DB.
 4. If keys are newly generated, host prints `Anon key` and `Service role key`; if not, prints key prefixes + regeneration hint.
 
@@ -314,14 +314,14 @@ Precedence and operational notes:
 - Token validation mode changes are startup/middleware configuration behavior.
 - Auth route/admin policy changes are runtime dynamic.
 - Safety-gated behavior:
-  - app auth routes reject missing API keys;
+ - app auth routes reject missing API keys;
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Reserved/deferred:
-  - no runtime config surface for MCP server tooling or NL query engine in this repo.
+ - no runtime config surface for MCP server tooling or NL query engine in this repo.
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-### .NET example (two-layer app flow)
+###.NET example (two-layer app flow)
 
 ```csharp
 using Aouda.Client;
@@ -329,13 +329,13 @@ using Aouda.Client.Auth;
 
 var client = new AoudaClient(new AoudaClientOptions
 {
-    ServerUrl = "http://localhost:5433",
-    DatabaseName = "myapp",
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+ ServerUrl = "http://localhost:5433",
+ DatabaseName = "myapp",
+// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
 });
 
 var auth = await client.Auth.SignInAsync("alice@example.com", "Pass123!");
-var me = await client.Auth.MeAsync();
+var me = await client.Auth.MeAsync;
 Console.WriteLine($"{me.Email} {auth.ExpiresInSeconds}");
 ```
 
@@ -349,16 +349,16 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5433",
-  database: "myapp",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+ serverUrl: "http://localhost:5433",
+ database: "myapp",
+// client.whoami — apiKey is an aouda_ key, or session, never both.
 });
 
 await client.auth.signIn("admin@myapp.com", "Pass123!");
 await client.auth.createEntitlement("550e8400-e29b-41d4-a716-446655440000", {
-  dimension: "org_id",
-  key: "org-a",
-  level: "write"
+ dimension: "org_id",
+ key: "org-a",
+ level: "write"
 });
 ```
 
@@ -373,8 +373,8 @@ POST /api/databases/myapp/auth/signin
 Content-Type: application/json
 
 {
-  "email": "alice@example.com",
-  "password": "Pass123!"
+ "email": "alice@example.com",
+ "password": "Pass123!"
 }
 ```
 
@@ -384,9 +384,9 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
-  "dimension": "org_id",
-  "key": "org-a",
-  "level": "write"
+ "dimension": "org_id",
+ "key": "org-a",
+ "level": "write"
 }
 ```
 
@@ -396,10 +396,10 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ### A) API coverage matrix
 
-| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Start local server | `aouda start` CLI | `aouda start` CLI | local HTTP service | Implemented | Auth via POST /api/databases |
-| Create DB with auth and generated keys | HTTP call from .NET/transport | HTTP call from TS/transport | `POST /api/databases` with `auth.enabled` | Implemented | Returns keys only at creation/link time |
+| Create DB with auth and generated keys | HTTP call from.NET/transport | HTTP call from TS/transport | `POST /api/databases` with `auth.enabled` | Implemented | Returns keys only at creation/link time |
 | App auth sign-up/sign-in/refresh/me/password | `.NET` auth client | `client.auth.*` | `/api/databases/{db}/auth/*` | Implemented | Two-layer flow |
 | MCP auth tools | None | None | None | Missing | Planned in P12 Epic E / ADR 0017 intent |
 | Natural-language query interface | None | None | None | Missing | ADR 0017 proposed only |
@@ -461,19 +461,19 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 Monitor first:
 - auth gate failures:
-  - `AUTH_API_KEY_REQUIRED`,
-  - `AUTH_API_KEY_INVALID`,
-  - `AUTH_TOKEN_INVALID`,
-  - `AUTH_TOKEN_EXPIRED`,
-  - `AUTH_TOKEN_REVOKED`.
+ - `AUTH_API_KEY_REQUIRED`,
+ - `AUTH_API_KEY_INVALID`,
+ - `AUTH_TOKEN_INVALID`,
+ - `AUTH_TOKEN_EXPIRED`,
+ - `AUTH_TOKEN_REVOKED`.
 - dev bootstrap behavior:
-  - key generation vs existing-key prefix branch in startup output.
+ - key generation vs existing-key prefix branch in startup output.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - grant-not-found and insufficient-access error patterns,
+ - grant-not-found and insufficient-access error patterns,
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - request-level diagnostics:
-  - response `requestId`,
-  - `X-Auth-Database` on relevant auth failures.
+ - response `requestId`,
+ - `X-Auth-Database` on relevant auth failures.
 
 Recovery expectations:
 - restart preserves auth metadata and policy state (auth DB tables persisted under normal server mode);
@@ -524,51 +524,51 @@ Last verification date (UTC): `2026-04-01`.
 ## 2.18 Known gaps and undone work
 
 - MCP and NL query surfaces are still intent-level:
-  - ADR 0017 defines these capabilities, but no runtime package/endpoints are shipped in this repo.
-  - User impact: agents must use CLI/HTTP/SDK directly today.
+ - ADR 0017 defines these capabilities, but no runtime package/endpoints are shipped in this repo.
+ - User impact: agents must use CLI/HTTP/SDK directly today.
 - AI-friendly error payload is useful but incomplete relative to P12 Epic E intent:
-  - current payload has `error/message/suggestion/detail/requestId`,
-  - fields like `mcpTool` and `docs` are not emitted.
+ - current payload has `error/message/suggestion/detail/requestId`,
+ - fields like `mcpTool` and `docs` are not emitted.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Cloud ephemeral provisioning path is not present in current server:
-  - distribution direction exists in ADR 0022, not as shipped endpoint in this workspace.
+ - distribution direction exists in ADR 0022, not as shipped endpoint in this workspace.
 
 ## 2.19 References
 
 - ADRs:
-  - `docs/decisions/0017-ai-native-interface.md`
-  - `docs/decisions/0022-licensing-and-distribution-strategy.md`
-  - `docs/decisions/0023-authentication-and-authorization.md`
+ - `docs/decisions/0017-ai-native-interface.md`
+ - `docs/decisions/0022-licensing-and-distribution-strategy.md`
+ - `docs/decisions/0023-authentication-and-authorization.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Tasks/reports:
-  - `docs/tasks/P12/P12-TwoLayerAuth-Tasks.md`
-  - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
-  - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
-  - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
+ - `docs/tasks/P12/P12-TwoLayerAuth-Tasks.md`
+ - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
+ - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
+ - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
-  - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
+ - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
+ - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
 - Code:
-  - `src/Aouda.Server/DevServer/DevServerHost.cs`
-  - `src/Aouda.Server/DevServer/DevServerOptions.cs`
-  - `src/Aouda.Server/Controllers/DatabasesController.cs`
-  - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
-  - `src/Aouda.Server/Auth/AuthErrorResponses.cs`
-  - `src/Aouda.Protocol/ErrorCodes.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
-  - `src/Aouda.Client/Auth/AppAuthOptions.cs`
-  - `src/Aouda.Client/Auth/ServerAuthOptions.cs`
-  - `../aouda-client-ts/src/client.ts`
-  - `../aouda-client-ts/src/auth/auth-types.ts`
-  - `../aouda-client-ts/src/auth/auth-client.ts`
-  - `../aouda-client-ts/src/types.ts`
+ - `src/Aouda.Server/DevServer/DevServerHost.cs`
+ - `src/Aouda.Server/DevServer/DevServerOptions.cs`
+ - `src/Aouda.Server/Controllers/DatabasesController.cs`
+ - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
+ - `src/Aouda.Server/Auth/AuthErrorResponses.cs`
+ - `src/Aouda.Protocol/ErrorCodes.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Client/Auth/AppAuthOptions.cs`
+ - `src/Aouda.Client/Auth/ServerAuthOptions.cs`
+ - `../aouda-client-ts/src/client.ts`
+ - `../aouda-client-ts/src/auth/auth-types.ts`
+ - `../aouda-client-ts/src/auth/auth-client.ts`
+ - `../aouda-client-ts/src/types.ts`
 - Tests:
-  - `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs`
-  - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
-  - `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs`
-  - `../aouda-client-ts/tests/auth-client.test.ts`
-  - `../aouda-client-ts/tests/auth-handler.test.ts`
-  - `../aouda-client-ts/tests/auth-integration.test.ts`
+ - `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs`
+ - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
+ - `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs`
+ - `../aouda-client-ts/tests/auth-client.test.ts`
+ - `../aouda-client-ts/tests/auth-handler.test.ts`
+ - `../aouda-client-ts/tests/auth-integration.test.ts`
 
 ## 2.20 What is missing from this document? (meta completeness)
 
@@ -576,7 +576,7 @@ _Updated 2026-04-08 after P14/P16 completion._
 
 - This document covers runtime behavior and API surfaces, but does not include full per-endpoint OpenAPI-style field catalogs.
 - ~~MCP and natural-language query sections are intentionally marked as planned/missing~~ — ✅ **Partially resolved (P16)**:
-  - **MCP cluster tools** now ship from `@aouda/client` (`src/mcp/`): `createAoudaClusterMcpToolSet()` provides stable tool names, JSON Schema `inputSchema`, and `execute` handlers for cluster status, backup, scaling, add/remove node, promote, failover. Hosts (Cursor, custom agents, Studio) register these with an MCP implementation. Documentation: `aouda-client-ts/docs/dev/MCP-Cluster-Tools.md`. Full reference: `docs/dev/Functionality-TypeScript-Client.md` §12.
-  - **Natural language cluster operations** implemented in Studio (P16 G.5): AI-powered cluster management via Studio chat interface translating natural language to cluster operations using MCP tool definitions.
-  - **Schema inference Extend mode (P14, BL-022)**: `InferenceMode: Extend` enables insert-time inference for new tables. Apply-managed tables are DDL-locked in every mode (**BL-1177, 0.7.1**; before, only in `Extend`). Critical for AI agent autonomy: agents can create new tables via insert without explicit DDL.
-  - **WhereClause.Groups (P14, BL-044)**: nested boolean groups adopted end-to-end across SDKs, enabling AI agents to compose complex filter expressions naturally.
+ - **MCP cluster tools** now ship from `@aouda/client` (`src/mcp/`): `createAoudaClusterMcpToolSet` provides stable tool names, JSON Schema `inputSchema`, and `execute` handlers for cluster status, backup, scaling, add/remove node, promote, failover. Hosts (Cursor, custom agents, Studio) register these with an MCP implementation. Documentation: `aouda-client-ts/docs/dev/MCP-Cluster-Tools.md`. Full reference: `docs/dev/Functionality-TypeScript-Client.md` §12.
+ - **Natural language cluster operations** implemented in Studio (P16 G.5): AI-powered cluster management via Studio chat interface translating natural language to cluster operations using MCP tool definitions.
+ - **Schema inference Extend mode (P14, BL-022)**: `InferenceMode: Extend` enables insert-time inference for new tables. Apply-managed tables are DDL-locked in every mode (**BL-1177, 0.7.1**; before, only in `Extend`). Critical for AI agent autonomy: agents can create new tables via insert without explicit DDL.
+ - **WhereClause.Groups (P14, BL-044)**: nested boolean groups adopted end-to-end across SDKs, enabling AI agents to compose complex filter expressions naturally.

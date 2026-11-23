@@ -31,60 +31,60 @@ Do not paste that line into a document. The examples below use placeholders.
 <!-- declaration-example -->
 ```json
 {
-  "version": 1,
-  "keyRoot": { "env": "AOUDA_KEY_ROOT" },
-  "server": {
-    "principals": {
-      "ops@example.com": {
-        "roles": ["admin"],
-        "credentials": { "password": { "env": "AOUDA_OPS_PASSWORD" } }
-      }
-    }
-  },
-  "databases": {
-    "auth": {
-      "kind": "auth",
-      "signup": { "enabled": false },
-      "roles": {
-        "rates-feeder": {
-          "statements": [
-            {
-              "actions": ["write"],
-              "resources": ["rates/table/DepositQuote"],
-              "where": { "column": "source", "op": "in", "value": ["tullett"] }
-            }
-          ]
-        }
-      },
-      "principals": {
-        "anonymous": {
-          "statements": [
-            { "actions": ["execute"], "resources": ["rates/query/latest"] }
-          ]
-        },
-        "shop-backend": {
-          "roles": ["writer"],
-          "credentials": {
-            "keys": [
-              {
-                "id": "aouda_exampleexampleex",
-                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-              }
-            ]
-          }
-        },
-        "rates-feeder": {
-          "roles": ["rates-feeder"],
-          "credentials": { "derivedKey": { "version": 1 } }
-        }
-      }
-    },
-    "rates": {
-      "kind": "data",
-      "authDatabase": "auth",
-      "schema": "schema/rates.aouda.schema.json"
-    }
-  }
+ "version": 1,
+ "keyRoot": { "env": "AOUDA_KEY_ROOT" },
+ "server": {
+ "principals": {
+ "ops@example.com": {
+ "roles": ["admin"],
+ "credentials": { "password": { "env": "AOUDA_OPS_PASSWORD" } }
+ }
+ }
+ },
+ "databases": {
+ "auth": {
+ "kind": "auth",
+ "signup": { "enabled": false },
+ "roles": {
+ "rates-feeder": {
+ "statements": [
+ {
+ "actions": ["write"],
+ "resources": ["rates/table/DepositQuote"],
+ "where": { "column": "source", "op": "in", "value": ["tullett"] }
+ }
+ ]
+ }
+ },
+ "principals": {
+ "anonymous": {
+ "statements": [
+ { "actions": ["execute"], "resources": ["rates/query/latest"] }
+ ]
+ },
+ "shop-backend": {
+ "roles": ["writer"],
+ "credentials": {
+ "keys": [
+ {
+ "id": "aouda_exampleexampleex",
+ "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ }
+ ]
+ }
+ },
+ "rates-feeder": {
+ "roles": ["rates-feeder"],
+ "credentials": { "derivedKey": { "version": 1 } }
+ }
+ }
+ },
+ "rates": {
+ "kind": "data",
+ "authDatabase": "auth",
+ "schema": "schema/rates.aouda.schema.json"
+ }
+ }
 }
 ```
 

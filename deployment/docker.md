@@ -29,10 +29,10 @@ You need a token with `read:packages` on the `aoudadb` organisation.
 
 ```bash
 docker run -d --name aouda \
-  -m 2g --cpus 4 \
-  -p 127.0.0.1:5000:5000 \
-  -v aouda-data:/data \
-  ghcr.io/aoudadb/aouda-server:<version>
+ -m 2g --cpus 4 \
+ -p 127.0.0.1:5000:5000 \
+ -v aouda-data:/data \
+ ghcr.io/aoudadb/aouda-server:<version>
 ```
 
 The image's entry point is `dotnet Aouda.Server.dll start`, the data directory is `/data`, and it listens on port 5000.
@@ -45,7 +45,7 @@ Nothing to configure. The image is still `linux/amd64` on `aspnet:10.0-alpine`, 
 
 ⚠️ **Mounting somewhere other than `/data`?** Override the data path with **one** setting — `AOUDA_DATA_PATH` (the env var this image already sets), `Aouda__DataPath`, or `--data-dir`/`--data-path`/`-d` on the command line. All five are the same setting under the hood; setting more than one is redundant, not additive. There is no `AOUDA_DATA` (without `_PATH`) — that name is not read, and a container relying on it silently falls back to the built-in `/data` default, which then fails to create `{path}/Server` if nothing is actually mounted or writable there.
 
-⚠️ **The container's user is uid/gid 1654** (matching `$APP_UID`, the uid Microsoft's aspnet images standardize on since .NET 8). A bind-mounted host directory must be `chown`ed to `1654:1654` — or writable by it — before the container starts, or directory creation under the data path fails and the process exits immediately. A named volume (as in the example above) does not have this problem: Docker initializes it from the image's own ownership on first use.
+⚠️ **The container's user is uid/gid 1654** (matching `$APP_UID`, the uid Microsoft's aspnet images standardize on since.NET 8). A bind-mounted host directory must be `chown`ed to `1654:1654` — or writable by it — before the container starts, or directory creation under the data path fails and the process exits immediately. A named volume (as in the example above) does not have this problem: Docker initializes it from the image's own ownership on first use.
 
 ⚠️ **`-p 127.0.0.1:5000:5000`, not `-p 5000:5000`.** The second form publishes the admin API on every interface of the host, which is almost never what you want for a server whose first user was created a minute ago. Put a reverse proxy in front and read [Behind a reverse proxy](reverse-proxy.md).
 
@@ -103,20 +103,20 @@ Where a quota is genuinely impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead
 
 ```yaml
 services:
-  aouda:
-    image: ghcr.io/aoudadb/aouda-server:<version>
-    stop_grace_period: 130s
-    mem_limit: 2g
-    cpus: 4
-    ports:
-      - "127.0.0.1:5000:5000"
-    volumes:
-      - aouda-data:/data
-    environment:
-      AOUDA_DATA_PATH: /data
-      AOUDA_SHUTDOWNTIMEOUT: "00:02:00"
+ aouda:
+ image: ghcr.io/aoudadb/aouda-server:<version>
+ stop_grace_period: 130s
+ mem_limit: 2g
+ cpus: 4
+ ports:
+ - "127.0.0.1:5000:5000"
+ volumes:
+ - aouda-data:/data
+ environment:
+ AOUDA_DATA_PATH: /data
+ AOUDA_SHUTDOWNTIMEOUT: "00:02:00"
 volumes:
-  aouda-data:
+ aouda-data:
 ```
 
 ---
@@ -131,7 +131,7 @@ The image ships a healthcheck already:
 
 ```
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6
-  CMD wget -qO- http://localhost:5000/ready || exit 1
+ CMD wget -qO- http://localhost:5000/ready || exit 1
 ```
 
 ⚠️ **`--start-period=60s` is doing real work**: WAL recovery on a large database can legitimately take minutes, and a probe that starts immediately will kill a server that is recovering correctly.
@@ -165,25 +165,25 @@ only for a data volume that has **never been set up** (no server auth database) 
 | You declare | What happens at start |
 |---|---|
 | A key-only operator (**BL-1464, 0.16.0**): a `server.principals` entry in the declaration file holding the role `admin`, with a `derivedKey` (from the file's `keyRoot`) or a stored key `{ "id", "sha256" }` under `credentials.keys` | No setup mode. The server auth database is created with the principal and its key, and the key operates the server from the first start: create databases, principals and keys with it. No human admin is needed |
-| A first admin (**BL-1464, 0.16.0**): a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash": ... }` | The admin is created once, with a forced password change at the first sign-in; no setup mode. The seed is applied only when the principal is created, never again |
+| A first admin (**BL-1464, 0.16.0**): a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash":... }` | The admin is created once, with a forced password change at the first sign-in; no setup mode. The seed is applied only when the principal is created, never again |
 | `AOUDA_DEV_ADMIN=true` | Development and tests only: a throwaway admin and its key, printed once. Refused next to a declared server operator's credentials (`SERVER_KEY_DEV_ADMIN_CONFLICT`). See [Development admin](../guides/development-admin.md) |
 | none of them, on a new volume | **Setup mode**: `/startup` 200, `/ready` 503 `setup_required`, every other route `503 SETUP_REQUIRED` off the server's host |
 | none of them, on a volume set up before that still has an operator (an admin, or a principal holding `admin` with an active key) | Starts normally, operated by them. **Never setup mode again**: a set-up server back in setup mode could be claimed by any loopback caller |
-| none of them, on a volume set up before that has nobody who can manage the server (a restore, every key revoked) | **The start is refused**: `SERVER_HAS_NO_OPERATOR: this data directory has been set up before ...`, naming the ways out (declare an operator in the declaration file's `server.principals`, or `--dev-admin` for development). Declare one and restart |
+| none of them, on a volume set up before that has nobody who can manage the server (a restore, every key revoked) | **The start is refused**: `SERVER_HAS_NO_OPERATOR: this data directory has been set up before...`, naming the ways out (declare an operator in the declaration file's `server.principals`, or `--dev-admin` for development). Declare one and restart |
 
 The declaration file is named by `Aouda__Declaration` (or `aouda start --declaration <path>`); there is no default path. Example, a
 first admin by password seed:
 
 ```json
 { "version": 1, "server": { "principals": { "you@example.com": { "roles": ["admin"],
-    "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
+ "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
 ```
 
 and a key-only operator, its key root from a secret:
 
 ```json
 { "version": 1, "keyRoot": { "env": "AOUDA_KEY_ROOT" },
-  "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
+ "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
 ```
 
 **The old operator settings are refused** (**BL-1464, 0.16.0**). Each one set is a `SETTING_REMOVED` finding at start, before any
@@ -204,13 +204,13 @@ things through from a `.env` file next to it (or your environment); none has a d
 default would be a known credential:
 
 ```yaml
-    environment:
-      Aouda__Declaration: ${AOUDA_DECLARATION:-}
-      AOUDA_ADMIN_PASSWORD: ${AOUDA_ADMIN_PASSWORD:-}
-      AOUDA_DEV_ADMIN: ${AOUDA_DEV_ADMIN:-}
-    volumes:
-      - aouda_data:/data
-      # - ./aouda.json:/etc/aouda/aouda.json:ro
+ environment:
+ Aouda__Declaration: ${AOUDA_DECLARATION:-}
+ AOUDA_ADMIN_PASSWORD: ${AOUDA_ADMIN_PASSWORD:-}
+ AOUDA_DEV_ADMIN: ${AOUDA_DEV_ADMIN:-}
+ volumes:
+ - aouda_data:/data
+ # -./aouda.json:/etc/aouda/aouda.json:ro
 ```
 
 | You set | What happens |
@@ -240,8 +240,8 @@ container:
 
 ```bash
 printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
-  docker exec -i aouda wget -qO- --header 'Content-Type: application/json' \
-    --post-file=/dev/stdin http://localhost:5000/api/auth/setup
+ docker exec -i aouda wget -qO- --header 'Content-Type: application/json' \
+ --post-file=/dev/stdin http://localhost:5000/api/auth/setup
 ```
 
 The password goes on standard input, never on a command line (a command line is readable in `/proc/<pid>/cmdline` and kept by
@@ -276,11 +276,11 @@ Or with Docker secrets, which is the better answer for anything long-lived:
 
 ```yaml
 services:
-  aouda:
-    secrets: [aouda_admin_password]
+ aouda:
+ secrets: [aouda_admin_password]
 secrets:
-  aouda_admin_password:
-    file: ./admin-password
+ aouda_admin_password:
+ file:./admin-password
 ```
 
 then `--password-file /run/secrets/aouda_admin_password`.
@@ -303,11 +303,11 @@ declaration from the path in `Aouda:Declaration` and from no other (there is no 
 Mount the **directory** that holds it, read-only, and set the one variable:
 
 ```yaml
-    environment:
-      Aouda__Declaration: /etc/aouda/aouda.json
-      AOUDA_ENVIRONMENT: prod            # optional: also reads /etc/aouda/aouda.prod.json over it
-    volumes:
-      - ./aouda:/etc/aouda:ro            # aouda.json, aouda.prod.json, schema/shop.aouda.schema.json
+ environment:
+ Aouda__Declaration: /etc/aouda/aouda.json
+ AOUDA_ENVIRONMENT: prod # optional: also reads /etc/aouda/aouda.prod.json over it
+ volumes:
+ -./aouda:/etc/aouda:ro # aouda.json, aouda.prod.json, schema/shop.aouda.schema.json
 ```
 
 ```json
@@ -327,7 +327,7 @@ are **refused** (`SETTING_REMOVED`, naming the member of `aouda.json`). The whol
 
 (**BL-1461, BL-1463, 0.14.0**) A start refused for its configuration (a bad key declaration, a declared database whose `authDatabase`
 does not exist, a set-up server left with no operator, a data directory in another format) exits with status **78** and prints every
-finding on standard error, each as a line `error    <CODE>  <setting or file>` followed by the message and the fix, then a last line
+finding on standard error, each as a line `error <CODE> <setting or file>` followed by the message and the fix, then a last line
 naming the exit status. The codes are in [Declaration Finding Codes](../reference/plan-codes.md), the format in
 [the exit status table](linux.md#when-the-start-is-refused).
 
@@ -336,8 +336,8 @@ that exited 78, so a refused configuration is a restart loop, and the loop itsel
 names the setting.** (systemd can stop on it, with `RestartPreventExitStatus=78`; Docker has no equivalent.)
 
 ```bash
-docker compose logs --no-log-prefix aouda | grep -E '^error +[A-Z_]+' | tail -5   # e.g. error    KEY_SECRET_SHARED  Aouda:Auth:...
-docker compose ps -a aouda                                                        # STATUS: Restarting (78) ...
+docker compose logs --no-log-prefix aouda | grep -E '^error +[A-Z_]+' | tail -5 # e.g. error KEY_SECRET_SHARED Aouda:Auth:...
+docker compose ps -a aouda # STATUS: Restarting (78)...
 ```
 
 Check the declaration before you deploy, in the container you deploy, with its environment, secrets and mounts:

@@ -103,38 +103,38 @@ they are not in it).
 
 ```jsonc
 {
-  "$schema": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
-  "version": 1,
-  "databases": {
-    "derive_auth": {
-      "kind": "auth",
-      "roles": {
-        "quote_writer": {
-          "description": "Writes quotes, reads nothing else",
-          "statements": [
-            { "actions": ["write"], "resources": ["ledger/table/quotes"] }
-          ]
-        },
-        "analyst": {
-          "description": "Reads every table",
-          "statements": [ { "actions": ["read"], "resources": ["ledger/table/*", "reports/table/*"] } ]
-        }
-      }
-    },
-    "ledger": {
-      "kind": "data",
-      "authDatabase": "derive_auth",
-      "schema": "schemas/ledger.json",       // relative to /etc/aouda; its prod overlay is schemas/ledger.prod.json
-      "schemaAllowDestructive": false,
-      "memoryWeight": 2
-    },
-    "reports": {
-      "kind": "data",
-      "authDatabase": "derive_auth",
-      "durability": "os",
-      "defaultTemperature": "ColdPreferred"
-    }
-  }
+ "$schema": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
+ "version": 1,
+ "databases": {
+ "derive_auth": {
+ "kind": "auth",
+ "roles": {
+ "quote_writer": {
+ "description": "Writes quotes, reads nothing else",
+ "statements": [
+ { "actions": ["write"], "resources": ["ledger/table/quotes"] }
+ ]
+ },
+ "analyst": {
+ "description": "Reads every table",
+ "statements": [ { "actions": ["read"], "resources": ["ledger/table/*", "reports/table/*"] } ]
+ }
+ }
+ },
+ "ledger": {
+ "kind": "data",
+ "authDatabase": "derive_auth",
+ "schema": "schemas/ledger.json", // relative to /etc/aouda; its prod overlay is schemas/ledger.prod.json
+ "schemaAllowDestructive": false,
+ "memoryWeight": 2
+ },
+ "reports": {
+ "kind": "data",
+ "authDatabase": "derive_auth",
+ "durability": "os",
+ "defaultTemperature": "ColdPreferred"
+ }
+ }
 }
 ```
 
@@ -169,7 +169,7 @@ Delete the data directory and start the server with the declaration above. What 
 
 (**BL-1463, 0.14.0**) **Before any of these steps, the start checks the whole declaration** — the settings, the declaration file (**BL-1463, 0.16.0**),
 every secret and schema file it names — and **creates nothing when one is refused**. It reports every
-problem at once, each as a finding with a stable code (`SETTING_REMOVED`, `KEY_ID_DUPLICATE`, `SCHEMA_INVALID`, ...), where it is
+problem at once, each as a finding with a stable code (`SETTING_REMOVED`, `KEY_ID_DUPLICATE`, `SCHEMA_INVALID`,...), where it is
 (a setting and the source that set it, or a file and a JSON pointer) and what to do, then exits with status 78 (or 1 when the only
 problem is a file that could not be read yet). Each step below then checks what it needs from the data directory before it changes
 anything. The codes are listed in [Declaration Finding Codes](../reference/plan-codes.md).
@@ -219,12 +219,12 @@ setup mode are the start's; **BL-1464, 0.16.0**: the `keyStore` and `principalRo
 a reload applies:
 
 - (**BL-1463, 0.16.0**) the declaration file itself and its overlay: they are read again, from the path the running server was
-  started with, at every reload;
+ started with, at every reload;
 - a **new** `databases` entry (created, and linked to its auth database);
 - a declared database's `schema` (and its overlay) — the file is read again and applied **non-destructively** whatever
-  `schemaAllowDestructive` says (a destructive change is the warning `SCHEMA_DESTRUCTIVE_REFUSED`, and `/ready` keeps `schema_drift`);
+ `schemaAllowDestructive` says (a destructive change is the warning `SCHEMA_DESTRUCTIVE_REFUSED`, and `/ready` keeps `schema_drift`);
 - the `roles` of a declared auth database, and (**BL-1464, 0.16.0**) the rest of the access section: `signup`, `principals`
-  and their credentials, `server.roles` and `server.principals` ([Declared access](declared-access.md));
+ and their credentials, `server.roles` and `server.principals` ([Declared access](declared-access.md));
 - the `authDatabase` of a database that has **no link yet**.
 
 What it does not: a database's operational fields, `schemaAllowDestructive`, `Aouda:SkipDatabases` and every other setting are
@@ -237,7 +237,7 @@ nothing (it is not read as an empty declaration that retracts every database).
 
 ### What `/ready` says while it starts
 
-`GET /ready` needs no credential and answers `503` with every reason that still holds, or `200` with `"reasons": []`
+`GET /ready` needs no credential and answers `503` with every reason that still holds, or `200` with `"reasons": `
 ([reference](../reference/http-api.md#get-ready)). Over the course of the wipe-and-start above you can see:
 
 | `code` (`subject`) | When | Ends when |
@@ -253,7 +253,7 @@ nothing (it is not read as an empty declaration that retracts every database).
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
 | `reload_failed` (the entry, when one is named) | (**BL-1427, 0.14.0**) The last reload stopped part-way; the steps before it are applied | The next reload that completes |
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of the declared databases was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
-| `access_converge_failed` (the auth database) | (**BL-1596, next train**) Only after a backup restore: the declared access section could not be converged. What the file removed is removed where the node writes; the rest waits. The server keeps running | The next converge that completes (a reload, a restore) |
+| `access_converge_failed` (the auth database) | Only after a backup restore: the declared access section could not be converged. What the file removed is removed where the node writes; the rest waits. The server keeps running | The next converge that completes (a reload, a restore) |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 
 (**BL-1464, 0.16.0**) `root_user_unusable` and `configured_key_inactive` are gone with the settings they reported on.

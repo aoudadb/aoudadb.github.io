@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Direct client access and listeners
 
-Document status: Complete (P40 S09)  
+Document status: Complete (P40 S09)
 Last updated: 2026-08-21
 
 Aouda serves **two browser populations with different trust**. The distinction is a property of the **listener** a client connects to — not of a route, an origin header, or a credential negotiated per request.
@@ -39,15 +39,15 @@ Keep today's `Aouda:Bind` / `Aouda:Port` (or `--port`) as the **admin** listener
 
 ```json
 {
-  "Aouda": {
-    "Port": 5433,
-    "Listeners": {
-      "DataPlane": {
-        "Bind": "0.0.0.0:5434",
-        "CorsOrigins": "https://app.example.com"
-      }
-    }
-  }
+ "Aouda": {
+ "Port": 5433,
+ "Listeners": {
+ "DataPlane": {
+ "Bind": "0.0.0.0:5434",
+ "CorsOrigins": "https://app.example.com"
+ }
+ }
+ }
 }
 ```
 
@@ -89,11 +89,11 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```json
 {
-  "tables": {
-    "EquityQuote": {
-      "columns": { }
-    }
-  }
+ "tables": {
+ "EquityQuote": {
+ "columns": { }
+ }
+ }
 }
 ```
 
@@ -103,10 +103,10 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```json
 "materializedQueries": {
-  "latest_quote": {
-    "type": "latestPerKey",
-    ...
-  }
+ "latest_quote": {
+ "type": "latestPerKey",
+...
+ }
 }
 ```
 
@@ -129,8 +129,7 @@ minute per device) plus headroom for page loads and reconnects, and `MaxSubscrip
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 (**NativeClients, 0.4.0**).
 
-**Server clock.** Every response carries a `Date` header that a browser can read cross-origin (**NativeClients, next
-train**); the SDKs keep the offset from it (`serverClockOffsetMs` / `ServerClockOffset`) so a client can judge a
+**Server clock.** Every response carries a `Date` header that a browser can read cross-origin; the SDKs keep the offset from it (`serverClockOffsetMs` / `ServerClockOffset`) so a client can judge a
 server-stamped lease against the server's clock.
 
 Signup 5/min and signin 20/min per IP still apply. An optional failed-signin ceiling (`Aouda:Auth:FailedSigninCeiling`, off by default) caps **failed** sign-ins per auth database — the attack shape per-IP limiting cannot see. It is per process. A tripped ceiling is a full login outage on that database until the window drains (correct passwords included); see [Auth reference](../auth/reference.md#rate-limiting).
@@ -157,8 +156,8 @@ Typical layout:
 
 ```
 Browser ──TLS──► CDN/WAF ──► Aouda data-plane :5434
-Studio  ──TLS──►              Aouda admin      :5433
-Hub     ──────────────────►  Aouda admin      :5433
+Studio ──TLS──► Aouda admin :5433
+Hub ──────────────────► Aouda admin :5433
 ```
 
 **Trusted proxies.** The edge is the TCP peer. Until you set `Aouda:ForwardedHeaders`, per-IP rate limits, lockout attribution, and `_audit_log` client IPs are the proxy's address — one global bucket. Configure the feature and name the proxies; see [Behind a reverse proxy](../deployment/reverse-proxy.md).
@@ -197,20 +196,20 @@ import { equityQuoteByTicker } from "./generated/named-queries";
 const dataPlane = "https://data.example.com"; // :5434 behind TLS
 
 const client = new AoudaClient({
-  serverUrl: dataPlane,
-  database: "trading",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+ serverUrl: dataPlane,
+ database: "trading",
+// client.whoami — apiKey is an aouda_ key, or session, never both.
 });
-await client.connect();
+await client.connect;
 
 const session = await client.auth.signIn({
-  email: "trader@example.com",
-  password: "…",
+ email: "trader@example.com",
+ password: "…",
 });
 // attach session.accessToken per client docs
 
 const quote = await client.namedQueries.execute("equity.quoteByTicker", {
-  ticker: "AAPL",
+ ticker: "AAPL",
 });
 ```
 
@@ -218,9 +217,9 @@ Ad-hoc from the same client against the data-plane:
 
 ```bash
 curl -i -X POST https://data.example.com/api/databases/trading/query \
-  -H "Authorization: Bearer $JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"database":"trading","table":"EquityQuote"}'
+ -H "Authorization: Bearer $JWT" \
+ -H "Content-Type: application/json" \
+ -d '{"database":"trading","table":"EquityQuote"}'
 # 404
 ```
 
@@ -244,7 +243,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 - Bare internet exposure (no edge).
 - A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
-  browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
+ browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 

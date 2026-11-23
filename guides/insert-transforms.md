@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Insert-time transforms and constraints
 
-Document status: Complete (P37)  
+Document status: Complete (P37)
 Last updated: 2026-08-19
 
 Tier 1 transforms are **declarative**. They run on REST insert/update/upsert and on the WebSocket write-stream path. No user code, no loops, no HTTP calls.
@@ -57,38 +57,38 @@ Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). Th
 
 ```json
 {
-  "columns": {
-    "id": { "type": "Int64", "primaryKey": 1 },
-    "qty": { "type": "Int64" },
-    "rawTicker": { "type": "String" },
-    "ticker": {
-      "type": "String",
-      "derived": {
-        "type": "call",
-        "fn": "upper",
-        "args": [
-          {
-            "type": "call",
-            "fn": "trim",
-            "args": [{ "type": "colRef", "col": "rawTicker" }]
-          }
-        ]
-      }
-    },
-    "qtyCopy": {
-      "type": "Int64",
-      "derived": { "type": "colRef", "col": "qty" }
-    },
-    "qtyPlusTen": {
-      "type": "Int64",
-      "derived": {
-        "type": "arithmetic",
-        "op": "+",
-        "left": { "type": "colRef", "col": "qty" },
-        "right": { "type": "literal", "value": 10 }
-      }
-    }
-  }
+ "columns": {
+ "id": { "type": "Int64", "primaryKey": 1 },
+ "qty": { "type": "Int64" },
+ "rawTicker": { "type": "String" },
+ "ticker": {
+ "type": "String",
+ "derived": {
+ "type": "call",
+ "fn": "upper",
+ "args": [
+ {
+ "type": "call",
+ "fn": "trim",
+ "args": [{ "type": "colRef", "col": "rawTicker" }]
+ }
+ ]
+ }
+ },
+ "qtyCopy": {
+ "type": "Int64",
+ "derived": { "type": "colRef", "col": "qty" }
+ },
+ "qtyPlusTen": {
+ "type": "Int64",
+ "derived": {
+ "type": "arithmetic",
+ "op": "+",
+ "left": { "type": "colRef", "col": "qty" },
+ "right": { "type": "literal", "value": 10 }
+ }
+ }
+ }
 }
 ```
 
@@ -116,12 +116,12 @@ time never comes from a device's clock.
 
 ```json
 "Messages": {
-  "columns": {
-    "Id":       { "type": "Int64", "primaryKey": 1 },
-    "Body":     { "type": "String" },
-    "SentAt":   { "type": "Timestamp", "derived": { "serverTime": "insert" } },
-    "EditedAt": { "type": "Timestamp", "derived": { "serverTime": "write" } }
-  }
+ "columns": {
+ "Id": { "type": "Int64", "primaryKey": 1 },
+ "Body": { "type": "String" },
+ "SentAt": { "type": "Timestamp", "derived": { "serverTime": "insert" } },
+ "EditedAt": { "type": "Timestamp", "derived": { "serverTime": "write" } }
+ }
 }
 ```
 
@@ -131,23 +131,23 @@ time never comes from a device's clock.
 | `write` | stamped | stamped | stamped | stamped |
 
 - **Every write path stamps it**: insert, named mutations (`insert` / `update` / `upsert`), the row and batch HTTP
-  endpoints, the write stream, route / tee targets (each target stamps its own), and bulk load with `applyTransforms`.
+ endpoints, the write stream, route / tee targets (each target stamps its own), and bulk load with `applyTransforms`.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  fails with `TRANSFORM_DERIVED_READONLY` (400) and writes nothing; `update` `set` / `setExpr` the same. A named mutation
-  whose `values` / `set` / `setExpr` names it fails at apply with `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE`. A
-  `preTransformed` bulk load into the table is refused with `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` — load
-  historical times into an ordinary `Timestamp` column instead.
+ fails with `TRANSFORM_DERIVED_READONLY` (400) and writes nothing; `update` `set` / `setExpr` the same. A named mutation
+ whose `values` / `set` / `setExpr` names it fails at apply with `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE`. A
+ `preTransformed` bulk load into the table is refused with `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` — load
+ historical times into an ordinary `Timestamp` column instead.
 - **No expression reads a stamp.** A `derived` expression that names a server-time column is refused at apply: its value
-  would disagree with the stamp on some write paths. Read the stamp itself.
+ would disagree with the stamp on some write paths. Read the stamp itself.
 - **One reading per request.** Every row of a batch, every route / tee hop and every row of a bulk-load job hold the same
-  value. It is the primary's wall clock: **not monotonic** — two writes can read the same time, and a clock step backwards
-  shows. Order by your key or a sequence, not by the stamp, when order matters.
+ value. It is the primary's wall clock: **not monotonic** — two writes can read the same time, and a clock step backwards
+ shows. Order by your key or a sequence, not by the stamp, when order matters.
 - **Stored, not recomputed.** The value is written like any other cell (the WAL carries it), so a restart, a replay or a
-  replica reads exactly what was stamped.
+ replica reads exactly what was stamped.
 - **Declared on a `Timestamp` column only**, which is not a primary or partition key, not `unique` or `autoIncrement`,
-  and has no `default`. An existing column cannot be turned into a stamp (its values were not the server's); add a new
-  one. A stamp column added to a table that has rows must be `nullable: true`: the rows that predate it read `null`, and
-  an update of such a row keeps it `null` for an `insert` stamp.
+ and has no `default`. An existing column cannot be turned into a stamp (its values were not the server's); add a new
+ one. A stamp column added to a table that has rows must be `nullable: true`: the rows that predate it read `null`, and
+ an update of such a row keeps it `null` for an `insert` stamp.
 
 The presence pattern in [Named queries](named-queries.md) uses a `write` stamp for `LastHeartbeat`.
 
@@ -176,24 +176,24 @@ The presence pattern in [Named queries](named-queries.md) uses a `write` stamp f
 
 ```json
 {
-  "ticker": {
-    "type": "String",
-    "derived": {
-      "type": "call",
-      "fn": "upper",
-      "args": [{ "type": "call", "fn": "trim", "args": [{ "type": "colRef", "col": "rawTicker" }] }]
-    }
-  },
-  "priceAtTick": {
-    "type": "Decimal",
-    "precision": 18,
-    "scale": 2,
-    "derived": {
-      "type": "call",
-      "fn": "roundTo",
-      "args": [{ "type": "colRef", "col": "rawPrice" }, { "type": "literal", "value": 0.05 }]
-    }
-  }
+ "ticker": {
+ "type": "String",
+ "derived": {
+ "type": "call",
+ "fn": "upper",
+ "args": [{ "type": "call", "fn": "trim", "args": [{ "type": "colRef", "col": "rawTicker" }] }]
+ }
+ },
+ "priceAtTick": {
+ "type": "Decimal",
+ "precision": 18,
+ "scale": 2,
+ "derived": {
+ "type": "call",
+ "fn": "roundTo",
+ "args": [{ "type": "colRef", "col": "rawPrice" }, { "type": "literal", "value": 0.05 }]
+ }
+ }
 }
 ```
 
@@ -202,15 +202,15 @@ Rules worth knowing before you design around it:
 - **Null propagates.** If *any* argument evaluates to null, the whole call returns null — it does not throw and does not substitute a default. Wrap in `coalesce` if you want one.
 - **Decimals are exact** (**LoadSpeed S13, 0.4.0**). Arithmetic over a `Decimal(p,s)` column or a fractional literal computes at a fixed scale (`+` / `-` the larger, `*` the sum, `/` at least 6 places), a literal keeps the scale it is written with (`0.05` is scale 2), and a result past 18 digits is an error, never a silent `Double`. The value is then rounded half away from zero to the derived column's scale. Full rules: [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020).
 - **Integer arithmetic does not wrap** (**BL-1481, 0.15.0**). `+`, `-` and `*` over integer columns compute in 64 bits; a result that
-  does not fit is an error, never a wrapped number. An insert, upsert, update or bulk load whose derived column's expression overflows for
-  a row is refused whole with `EXPRESSION_OVERFLOW` (400; `rowErrors[0].index` names the row; nothing is written), and so is an update whose
-  `setExpr` overflows for any matched row. A `selectExpr` cell or a formula cell that overflows is null. `UInt16`, `UInt32` and `UInt64`
-  operands are numbers (**BL-1424, 0.15.0**): `u + 1` is an `Int64`; a `UInt64` above `Int64`'s maximum is an overflow beside integers
-  or decimals and a `Double` beside a floating operand. A result the target column cannot hold (`u - 10` into a `UInt32`) is refused as
-  `INVALID_REQUEST`.
+ does not fit is an error, never a wrapped number. An insert, upsert, update or bulk load whose derived column's expression overflows for
+ a row is refused whole with `EXPRESSION_OVERFLOW` (400; `rowErrors[0].index` names the row; nothing is written), and so is an update whose
+ `setExpr` overflows for any matched row. A `selectExpr` cell or a formula cell that overflows is null. `UInt16`, `UInt32` and `UInt64`
+ operands are numbers (**BL-1424, 0.15.0**): `u + 1` is an `Int64`; a `UInt64` above `Int64`'s maximum is an overflow beside integers
+ or decimals and a `Double` beside a floating operand. A result the target column cannot hold (`u - 10` into a `UInt32`) is refused as
+ `INVALID_REQUEST`.
 - `cast` accepts only `Int32`, `Int64`, `Int16`, `Byte`, `UInt16`, `UInt32`, `UInt64`, `Double`, `Float32`, `Decimal(p,s)` (e.g. `"Decimal(18,6)"`; **LoadSpeed S13, 0.4.0** — plain `"Decimal"` is refused), `String`. **`Timestamp`, `Date`, `Guid`, `Bool`, and vector types are not castable.** Float→integer casts truncate toward zero, and a finite value outside the target range is an error rather than a silent wrap.
 - There is **no timestamp truncation function**. Bucketing a timestamp to a day or an hour is a partition-key function (`TruncateToDay` and friends) or a materialized-query `groupBy` term, not a derived column.
-- Unknown `fn`, wrong arity, or a non-literal `cast` type fails **schema apply** with `SCHEMA_EXPR_UNKNOWN_FUNCTION` — not at insert time. The same validation runs on `namedQueries[].selectExpr` and `namedMutations[].setExpr`.
+- Unknown `fn`, wrong arity, or a non-literal `cast` type fails **schema apply** with `SCHEMA_EXPR_UNKNOWN_FUNCTION` — not at insert time. The same validation runs on `namedQueries.selectExpr` and `namedMutations.setExpr`.
 
 This is deliberately not a general expression language. It covers normalization — the tidying an ingest hop does — so that hop can be deleted. It does not cover lookups, I/O, or cross-row state; those are still [a service's job](division-of-responsibility.md). (**ADR 0072, 0.14.0**) A [formula](formulas.md) — the value of an `Expression` column — is the one place an expression may read another row (`cellRef`, by full primary key); insert-time transforms stay row-local, and a formula is never written through a transform.
 
@@ -228,11 +228,11 @@ to refuse nulls. `eq null` and `ne null` test IS NULL / IS NOT NULL. (**BL-1337,
 
 ```json
 {
-  "checks": {
-    "ticker_present": {
-      "and": [{ "column": "ticker", "op": "ne", "value": "" }]
-    }
-  }
+ "checks": {
+ "ticker_present": {
+ "and": [{ "column": "ticker", "op": "ne", "value": "" }]
+ }
+ }
 }
 ```
 
@@ -242,32 +242,32 @@ to refuse nulls. `eq null` and `ne null` test IS NULL / IS NOT NULL. (**BL-1337,
 
 ```json
 {
-  "tables": {
-    "Ingest": {
-      "columns": {
-        "id": { "type": "Int64", "primaryKey": 1 },
-        "kind": { "type": "String" },
-        "ticker": { "type": "String" },
-        "payload": { "type": "String" }
-      },
-      "transforms": [
-        {
-          "name": "to_quotes",
-          "kind": "route",
-          "when": { "and": [{ "column": "kind", "op": "eq", "value": "quote" }] },
-          "to": "TradeQuote"
-        },
-        {
-          "name": "to_trades",
-          "kind": "route",
-          "when": { "and": [{ "column": "kind", "op": "eq", "value": "trade" }] },
-          "to": "Trade"
-        }
-      ]
-    },
-    "TradeQuote": { "columns": { } },
-    "Trade": { "columns": { } }
-  }
+ "tables": {
+ "Ingest": {
+ "columns": {
+ "id": { "type": "Int64", "primaryKey": 1 },
+ "kind": { "type": "String" },
+ "ticker": { "type": "String" },
+ "payload": { "type": "String" }
+ },
+ "transforms": [
+ {
+ "name": "to_quotes",
+ "kind": "route",
+ "when": { "and": [{ "column": "kind", "op": "eq", "value": "quote" }] },
+ "to": "TradeQuote"
+ },
+ {
+ "name": "to_trades",
+ "kind": "route",
+ "when": { "and": [{ "column": "kind", "op": "eq", "value": "trade" }] },
+ "to": "Trade"
+ }
+ ]
+ },
+ "TradeQuote": { "columns": { } },
+ "Trade": { "columns": { } }
+ }
 }
 ```
 
@@ -288,8 +288,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 An unmatched row is an **error**, not a fallback — it does not stay on the ingress table. If you want a catch-all, declare it: a last route whose `when` is a condition that always holds, pointing at a quarantine table. `tee` has no such rule; a `tee` that matches nothing simply produces no copy, because the ingress row was stored anyway.
 
 A `when` selects a row only when its predicate is true: a null compared is not selected, so a route with no other match refuses
-the row (`TRANSFORM_ROUTE_UNMATCHED`) and a tee does not copy it; a `case when` over a null takes its `else` (**BL-1337, next
-train**).
+the row (`TRANSFORM_ROUTE_UNMATCHED`) and a tee does not copy it; a `case when` over a null takes its `else`.
 
 ---
 
@@ -348,10 +347,10 @@ Transforms are not free. Small batches pay more; large batches amortize. Treat *
 
 ```json
 {
-  "columns": {
-    "email": { "type": "String", "unique": true },
-    "orgId": { "type": "Int64", "references": "Org.id" }
-  }
+ "columns": {
+ "email": { "type": "String", "unique": true },
+ "orgId": { "type": "Int64", "references": "Org.id" }
+ }
 }
 ```
 
@@ -361,69 +360,69 @@ Duplicates on a unique non-PK column are rejected across HRA, hot, and cold. `re
 
 ## Worked example: replace an ingest service
 
-**Before:** a .NET worker reads a vendor file, drops empty tickers, keeps `quote` and `trade`, copies timestamps, and inserts in 2 000-row chunks.
+**Before:** a.NET worker reads a vendor file, drops empty tickers, keeps `quote` and `trade`, copies timestamps, and inserts in 2 000-row chunks.
 
 **After** (derived uses `ScalarExprNode`; `ne` not `neq`; landing tables declare the same columns):
 
 ```json
 {
-  "tables": {
-    "VendorTick": {
-      "columns": {
-        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "kind": { "type": "String" },
-        "ticker": { "type": "String" },
-        "ts": { "type": "Timestamp" },
-        "tsUtc": { "type": "Timestamp", "derived": { "type": "colRef", "col": "ts" } },
-        "volumeRaw": { "type": "Int64" },
-        "volume": {
-          "type": "Int64",
-          "derived": { "type": "colRef", "col": "volumeRaw" }
-        }
-      },
-      "checks": {
-        "ticker_nonempty": {
-          "and": [{ "column": "ticker", "op": "ne", "value": "" }]
-        }
-      },
-      "transforms": [
-        {
-          "name": "quotes",
-          "kind": "route",
-          "when": { "and": [{ "column": "kind", "op": "eq", "value": "quote" }] },
-          "to": "EquityQuote"
-        },
-        {
-          "name": "trades",
-          "kind": "route",
-          "when": { "and": [{ "column": "kind", "op": "eq", "value": "trade" }] },
-          "to": "EquityTrade"
-        }
-      ]
-    },
-    "EquityQuote": {
-      "columns": {
-        "id": { "type": "Int64", "primaryKey": 1 },
-        "kind": { "type": "String" },
-        "ticker": { "type": "String" },
-        "ts": { "type": "Timestamp" },
-        "tsUtc": { "type": "Timestamp" },
-        "volumeRaw": { "type": "Int64" },
-        "volume": { "type": "Int64" }
-      }
-    },
-    "EquityTrade": {
-      "columns": {
-        "id": { "type": "Int64", "primaryKey": 1 },
-        "kind": { "type": "String" },
-        "ticker": { "type": "String" },
-        "ts": { "type": "Timestamp" },
-        "tsUtc": { "type": "Timestamp" },
-        "volumeRaw": { "type": "Int64" },
-        "volume": { "type": "Int64" }
-      }
-    }
-  }
+ "tables": {
+ "VendorTick": {
+ "columns": {
+ "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+ "kind": { "type": "String" },
+ "ticker": { "type": "String" },
+ "ts": { "type": "Timestamp" },
+ "tsUtc": { "type": "Timestamp", "derived": { "type": "colRef", "col": "ts" } },
+ "volumeRaw": { "type": "Int64" },
+ "volume": {
+ "type": "Int64",
+ "derived": { "type": "colRef", "col": "volumeRaw" }
+ }
+ },
+ "checks": {
+ "ticker_nonempty": {
+ "and": [{ "column": "ticker", "op": "ne", "value": "" }]
+ }
+ },
+ "transforms": [
+ {
+ "name": "quotes",
+ "kind": "route",
+ "when": { "and": [{ "column": "kind", "op": "eq", "value": "quote" }] },
+ "to": "EquityQuote"
+ },
+ {
+ "name": "trades",
+ "kind": "route",
+ "when": { "and": [{ "column": "kind", "op": "eq", "value": "trade" }] },
+ "to": "EquityTrade"
+ }
+ ]
+ },
+ "EquityQuote": {
+ "columns": {
+ "id": { "type": "Int64", "primaryKey": 1 },
+ "kind": { "type": "String" },
+ "ticker": { "type": "String" },
+ "ts": { "type": "Timestamp" },
+ "tsUtc": { "type": "Timestamp" },
+ "volumeRaw": { "type": "Int64" },
+ "volume": { "type": "Int64" }
+ }
+ },
+ "EquityTrade": {
+ "columns": {
+ "id": { "type": "Int64", "primaryKey": 1 },
+ "kind": { "type": "String" },
+ "ticker": { "type": "String" },
+ "ts": { "type": "Timestamp" },
+ "tsUtc": { "type": "Timestamp" },
+ "volumeRaw": { "type": "Int64" },
+ "volume": { "type": "Int64" }
+ }
+ }
+ }
 }
 ```
 
@@ -434,13 +433,13 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ```bash
 curl -X POST http://localhost:5433/api/databases/trading/tables/VendorTick/rows \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-  -H "Content-Type: application/json" \
-  -d '{
-    "database": "trading",
-    "table": "VendorTick",
-    "columns": ["kind", "ticker", "ts", "volumeRaw"],
-    "data": [["quote"], ["AAPL"], ["2026-08-14T12:00:00Z"], [100]]
-  }'
+ -H "Content-Type: application/json" \
+ -d '{
+ "database": "trading",
+ "table": "VendorTick",
+ "columns": ["kind", "ticker", "ts", "volumeRaw"],
+ "data": [["quote"], ["AAPL"], ["2026-08-14T12:00:00Z"], [100]]
+ }'
 ```
 
 The body's rows are column arrays (**Lead S12, 0.6.0**: `"rows": [{…}]` is refused `400 ROW_OBJECTS_UNSUPPORTED`).
@@ -452,24 +451,24 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ```csharp
 await client.GetTable("VendorTick").InsertAsync(
 [
-    new Dictionary<string, object?>
-    {
-        ["kind"] = "quote",
-        ["ticker"] = "AAPL",
-        ["ts"] = "2026-08-14T12:00:00Z",
-        ["volumeRaw"] = 100L,
-    }
+ new Dictionary<string, object?>
+ {
+ ["kind"] = "quote",
+ ["ticker"] = "AAPL",
+ ["ts"] = "2026-08-14T12:00:00Z",
+ ["volumeRaw"] = 100L,
+ }
 ]);
 
-Assert.Equal(0, await client.GetTable("VendorTick").CountAsync());
-Assert.Equal(1, await client.GetTable("EquityQuote").CountAsync());
+Assert.Equal(0, await client.GetTable("VendorTick").CountAsync);
+Assert.Equal(1, await client.GetTable("EquityQuote").CountAsync);
 ```
 
 TypeScript (same contract):
 
 ```typescript
 await client.table("VendorTick").insertMany([
-  { kind: "quote", ticker: "AAPL", ts: "2026-08-14T12:00:00Z", volumeRaw: 100 },
+ { kind: "quote", ticker: "AAPL", ts: "2026-08-14T12:00:00Z", volumeRaw: 100 },
 ]);
 ```
 

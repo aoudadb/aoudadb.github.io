@@ -155,20 +155,20 @@ Additionally, every functionality document must act as an explicit **entry point
 Now that the domain docs are approved, use this repeatable workflow for each domain:
 
 1. **Inventory phase evidence**
-   - Read all relevant task specs + reports in `docs/tasks/P*/`.
-   - Build implemented/deferred list.
+ - Read all relevant task specs + reports in `docs/tasks/P*/`.
+ - Build implemented/deferred list.
 2. **Verify against code/API/tests**
-   - Confirm behavior and defaults in actual implementation.
+ - Confirm behavior and defaults in actual implementation.
 3. **Reconcile with existing docs**
-   - Mark stale claims and update or remove.
+ - Mark stale claims and update or remove.
 4. **Extract concrete gaps**
-   - Convert every unresolved/missing item into backlog candidates (with scope, impact, and evidence).
+ - Convert every unresolved/missing item into backlog candidates (with scope, impact, and evidence).
 5. **Backlog reconcile**
-   - Match candidates against `docs/BACKLOG.md`, avoid duplicates, and add missing entries.
+ - Match candidates against `docs/BACKLOG.md`, avoid duplicates, and add missing entries.
 6. **Prioritize for production readiness**
-   - Classify as correctness, durability, security, performance, operability, DX, or ecosystem.
+ - Classify as correctness, durability, security, performance, operability, DX, or ecosystem.
 7. **Update this overview**
-   - Keep status as approved unless a doc falls out-of-date; track audit date and major gap deltas.
+ - Keep status as approved unless a doc falls out-of-date; track audit date and major gap deltas.
 
 ---
 
@@ -183,15 +183,15 @@ This section tracks the per-domain documents and maturity level.
 | Real-time streaming | `docs/dev/Functionality-RealTime-Streaming.md` | Approved baseline — updated P14 (WebSocket CORS) |
 | Auth and authorization | `docs/dev/Functionality-Auth-And-Authorization.md` | Approved baseline — updated P14 (audit, server admin keys), P16 (Hub auth, server admin key API) |
 | Storage and persistence | `docs/dev/Functionality-Storage-And-Persistence.md` | Approved baseline — updated P14 (embedded persistence fix) |
-| Write path durability | `guides/write-durability.md` | **Published** — what each level loses (a loss statement per level), changing a level, WAL archive and the RPO (**Durability-1, next train**) |
+| Write path durability | `guides/write-durability.md` | **Published** — what each level loses (a loss statement per level), changing a level, WAL archive and the RPO |
 | Query execution and optimization | `docs/dev/Functionality-Query-Execution.md` | Approved baseline — updated P14 (correctness fixes), P15 (full join engine, all join types, post-join ops) |
 | Partitioning and multi-tenancy | `docs/dev/Functionality-Partitioning-And-Multitenancy.md` | Approved baseline |
 | Time-series and clustering | `docs/dev/Functionality-TimeSeries-And-Clustering.md` | Approved baseline |
 | Materialized queries | `docs/dev/Functionality-Materialized-Queries.md` | Approved baseline — updated P16 (client API, Studio browser) |
 | **Table retention and deleting before a time** | `guides/retention.md` | **New** — Horizon (0.5.0): `policy.retention`, the horizon, `expiredRows`, the delete before a time, subscriber notices, deletion hygiene |
-| **Array columns** | `guides/array-columns.md` | **New** — (**BL-035, 0.9.0**): six array types (`Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`), the JSON and frame forms, limits (65,536 elements, 1 MiB), what is refused and where (`ARRAY_COLUMN_UNSUPPORTED`), subscriptions' `column_types`, sizing |
+| **Array columns** | `guides/array-columns.md` | **New** — (**BL-035, 0.9.0**): six array types (`Double`, `Float32`, `Int32`, `Int64`, `Byte`, `String`), the JSON and frame forms, limits (65,536 elements, 1 MiB), what is refused and where (`ARRAY_COLUMN_UNSUPPORTED`), subscriptions' `column_types`, sizing |
 | Replication and cluster behavior | `guides/replication.md` | **Replication is not supported yet** — run one node ([single-node deployment](single-node-deployment.md)); the page describes the code as it stands |
-| Backup and restore | `guides/backup.md` | **Published** — one set per backup, exact and point-in-time restore, retention, `aouda backup` (**Durability-1, next train**); the runbook for a new host is [Restore to a new host](restore-to-a-new-host.md); how data crosses a format bump is [Dump and load](dump-load.md); the format refusals are in [Upgrading](upgrading.md) |
+| Backup and restore | `guides/backup.md` | **Published** — one set per backup, exact and point-in-time restore, retention, `aouda backup`; the runbook for a new host is [Restore to a new host](restore-to-a-new-host.md); how data crosses a format bump is [Dump and load](dump-load.md); the format refusals are in [Upgrading](upgrading.md) |
 | AI-native usage model | `docs/dev/Functionality-AI-Native-Usage.md` | Approved baseline — updated P14 (Extend mode, WhereClause groups), P16 (MCP cluster tools) |
 | Testing and developer experience | `docs/dev/Functionality-Testing-And-DX.md` | Approved baseline |
 | Distribution and licensing | `docs/dev/Functionality-Distribution-And-Licensing.md` | Approved baseline — updated P16 (CLI, Docker, Helm, K8s operator) |
@@ -219,7 +219,7 @@ Getting-started guides should link to functionality docs for depth, not duplicat
 
 - Update this file when a functionality doc is created, substantially revised, or marked complete.
 - Any "planned" claim in a functionality doc must have either:
-  - an ADR reference, and
-  - an active task/backlog reference.
+ - an ADR reference, and
+ - an active task/backlog reference.
 - If a doc section grows into implementation detail, split detail into dedicated functionality/reference docs and keep this overview concise.
 

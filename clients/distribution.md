@@ -35,15 +35,15 @@ If your question is "What is shipped vs not shipped in distribution and licensin
 Distribution and licensing in Aouda are product behavior, not packaging trivia.
 
 - User problem solved:
-  - Developers need one-command or one-package adoption paths across embedded, server, and client usage.
-  - Teams need clear legal boundaries for what is free to use, what is restricted, and where MIT vs BSL applies.
+ - Developers need one-command or one-package adoption paths across embedded, server, and client usage.
+ - Teams need clear legal boundaries for what is free to use, what is restricted, and where MIT vs BSL applies.
 - Operational/business outcomes:
-  - Consistent artifact model for NuGet, npm, and dotnet global tool flows.
-  - Explicit protection against third-party "managed Aouda" reselling while keeping client/tooling low-friction.
-  - Repeatable local and CI packaging/consumption patterns.
+ - Consistent artifact model for NuGet, npm, and dotnet global tool flows.
+ - Explicit protection against third-party "managed Aouda" reselling while keeping client/tooling low-friction.
+ - Repeatable local and CI packaging/consumption patterns.
 - Scope boundaries:
-  - This doc covers current artifacts, package metadata, licensing surfaces, and runtime distribution entry points.
-  - It does not define cloud billing, commercial terms, or legal contract negotiation process.
+ - This doc covers current artifacts, package metadata, licensing surfaces, and runtime distribution entry points.
+ - It does not define cloud billing, commercial terms, or legal contract negotiation process.
 
 ## 2.2 Discovery and navigation map
 
@@ -72,30 +72,30 @@ Distribution and licensing in Aouda are product behavior, not packaging trivia.
 ### Source map
 
 - Task/report evidence:
-  - `docs/tasks/P4/P4-Integration-Distribution-Tasks.md`
-  - `docs/tasks/P8/BL031-AoudaClient-NuGetPackage-And-Docs.md`
-  - `docs/tasks/P11/P11-UnifiedDistribution-Tasks.md`
-  - `docs/tasks/P11/P11-EpicC-Task1-BSL-License-And-Repository-Setup-Report.md`
-  - `docs/tasks/P11/P11-EpicC-Task2-MIT-License-Client-Packages-Report.md`
-  - `docs/tasks/P11/P11-EpicE-E1-E2-Report.md`
-  - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
+ - `docs/tasks/P4/P4-Integration-Distribution-Tasks.md`
+ - `docs/tasks/P8/BL031-AoudaClient-NuGetPackage-And-Docs.md`
+ - `docs/tasks/P11/P11-UnifiedDistribution-Tasks.md`
+ - `docs/tasks/P11/P11-EpicC-Task1-BSL-License-And-Repository-Setup-Report.md`
+ - `docs/tasks/P11/P11-EpicC-Task2-MIT-License-Client-Packages-Report.md`
+ - `docs/tasks/P11/P11-EpicE-E1-E2-Report.md`
+ - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
 - ADR evidence:
-  - `docs/decisions/0022-licensing-and-distribution-strategy.md`
-  - `docs/decisions/0024-testing-package.md`
+ - `docs/decisions/0022-licensing-and-distribution-strategy.md`
+ - `docs/decisions/0024-testing-package.md`
 - Code/package evidence:
-  - `LICENSE`, `LICENSE-MIT`
-  - `src/Aouda.Embedded/Aouda.Embedded.csproj`
-  - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
-  - `src/Aouda.Client/Aouda.Client.csproj`
-  - `src/Aouda.Cli/Aouda.Cli.csproj`
-  - `src/Aouda.Server/Aouda.Server.csproj`
-  - `src/Aouda.Testing/Aouda.Testing.csproj`
-  - `aouda-client-ts/package.json`
+ - `LICENSE`, `LICENSE-MIT`
+ - `src/Aouda.Embedded/Aouda.Embedded.csproj`
+ - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
+ - `src/Aouda.Client/Aouda.Client.csproj`
+ - `src/Aouda.Cli/Aouda.Cli.csproj`
+ - `src/Aouda.Server/Aouda.Server.csproj`
+ - `src/Aouda.Testing/Aouda.Testing.csproj`
+ - `aouda-client-ts/package.json`
 - Runtime entry points:
-  - `src/Aouda.Cli/Program.cs`
-  - `src/Aouda.Server/DevServer/DevServerHost.cs`
-  - `src/Aouda.Embedded/AoudaEmbedded.cs`
-  - `src/Aouda.Embedded/Configuration/AoudaOptionsEnvOverlay.cs`
+ - `src/Aouda.Cli/Program.cs`
+ - `src/Aouda.Server/DevServer/DevServerHost.cs`
+ - `src/Aouda.Embedded/AoudaEmbedded.cs`
+ - `src/Aouda.Embedded/Configuration/AoudaOptionsEnvOverlay.cs`
 
 ## 2.3 Defaults and zero-config behavior
 
@@ -103,10 +103,10 @@ If you do nothing except install artifacts:
 
 - `Aouda.Embedded` defaults to ephemeral temp-path operation when `DataPath` is not set.
 - `aouda start` is the shipped CLI server entry point (`aouda dev` was planned but is not exposed in the current CLI; use `aouda start` with `--port` and `--data-dir`). Typical local defaults when using appsettings:
-  - `--port 5000`
-  - `--database default`
-  - ephemeral data path (temp folder, deleted on shutdown)
-  - `--auth` disabled
+ - `--port 5000`
+ - `--database default`
+ - ephemeral data path (temp folder, deleted on shutdown)
+ - `--auth` disabled
 - `Aouda.Testing` defaults to MIT-licensed in-process test-server packaging.
 - TypeScript client package defaults to MIT license and Node `>=22` engine requirement (**NativeClients, 0.4.0**; 0.3.0: `>=20`).
 
@@ -127,25 +127,25 @@ If you do nothing except install artifacts:
 
 - BSL + MIT base files exist at repository root (`LICENSE`, `LICENSE-MIT`).
 - Package-level licensing metadata is wired in current packable projects:
-  - BSL-style package license file usage in `Aouda.Embedded`.
-  - MIT license expression usage in `Aouda.Abstractions`, `Aouda.Client`, `Aouda.Cli`, `Aouda.Testing`.
-  - TypeScript package declares `"license": "MIT"`.
+ - BSL-style package license file usage in `Aouda.Embedded`.
+ - MIT license expression usage in `Aouda.Abstractions`, `Aouda.Client`, `Aouda.Cli`, `Aouda.Testing`.
+ - TypeScript package declares `"license": "MIT"`.
 - Multi-artifact distribution paths are implemented:
-  - NuGet packages: `Aouda.Embedded`, `Aouda.Abstractions`, `Aouda.Client`, `Aouda.Testing`.
-  - dotnet global tool: `Aouda.Cli` with `ToolCommandName=aouda`.
-  - npm package: `@aouda/client`.
+ - NuGet packages: `Aouda.Embedded`, `Aouda.Abstractions`, `Aouda.Client`, `Aouda.Testing`.
+ - dotnet global tool: `Aouda.Cli` with `ToolCommandName=aouda`.
+ - npm package: `@aouda/client`.
 - Runtime distribution entry points are implemented:
-  - Embedded open/create via `AoudaEmbedded`.
-  - `aouda dev` command with port/data/database/auth options.
-  - Dev server host in `Aouda.Server.DevServer`.
+ - Embedded open/create via `AoudaEmbedded`.
+ - `aouda dev` command with port/data/database/auth options.
+ - Dev server host in `Aouda.Server.DevServer`.
 
 ### Planned / proposed
 
 - ADR 0022 phase-3/phase-4 vision remains planned from this snapshot:
-  - Cloud ephemeral provisioning path.
-  - Hybrid unified auto mode (`embedded/server/cloud`) as a stable public API contract.
+ - Cloud ephemeral provisioning path.
+ - Hybrid unified auto mode (`embedded/server/cloud`) as a stable public API contract.
 - Distribution simplification work is planned:
-  - BL-032 to remove engine DLL exposure from `Aouda.Abstractions` package.
+ - BL-032 to remove engine DLL exposure from `Aouda.Abstractions` package.
 - Broader publish automation and release governance are still mostly process-level, not productized pipeline APIs.
 
 ### Reserved / not yet wired
@@ -185,18 +185,18 @@ Implementation drift note:
 ## 2.7 Core concepts and mental model
 
 - Artifact class:
-  - **Engine-inclusive** package/tool: ships runtime engine behavior (`Aouda.Embedded`, server-hosted flows).
-  - **Thin client/tooling** package: API/transport/testing convenience (`Aouda.Abstractions`, `Aouda.Client`, `@aouda/client`, `Aouda.Testing`, `Aouda.Cli`).
+ - **Engine-inclusive** package/tool: ships runtime engine behavior (`Aouda.Embedded`, server-hosted flows).
+ - **Thin client/tooling** package: API/transport/testing convenience (`Aouda.Abstractions`, `Aouda.Client`, `@aouda/client`, `Aouda.Testing`, `Aouda.Cli`).
 - License posture:
-  - **BSL-oriented** for core engine/server surfaces.
-  - **MIT** for client/tooling adoption surfaces.
+ - **BSL-oriented** for core engine/server surfaces.
+ - **MIT** for client/tooling adoption surfaces.
 - Distribution layer:
-  - **Build artifact metadata** in project/package manifests.
-  - **Runtime bootstrap surfaces** (embedded open/create, `aouda dev`, SDK constructors).
+ - **Build artifact metadata** in project/package manifests.
+ - **Runtime bootstrap surfaces** (embedded open/create, `aouda dev`, SDK constructors).
 - Packaging contract:
-  - Metadata fields (`PackageId`, `Version`, `PackageLicense*`, readme, tool command).
-  - Included files (`README`, license files, DLL payloads).
-  - Consumer expectations (single package vs transitive dependencies).
+ - Metadata fields (`PackageId`, `Version`, `PackageLicense*`, readme, tool command).
+ - Included files (`README`, license files, DLL payloads).
+ - Consumer expectations (single package vs transitive dependencies).
 
 Invariants:
 - Licensing intent must map to actual package metadata, not only ADR prose.
@@ -216,20 +216,20 @@ High-level implementation path:
 Key implementation anchors:
 
 - Licensing and package metadata:
-  - `src/Aouda.Embedded/Aouda.Embedded.csproj`
-  - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
-  - `src/Aouda.Client/Aouda.Client.csproj`
-  - `src/Aouda.Cli/Aouda.Cli.csproj`
-  - `src/Aouda.Testing/Aouda.Testing.csproj`
-  - `aouda-client-ts/package.json`
+ - `src/Aouda.Embedded/Aouda.Embedded.csproj`
+ - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
+ - `src/Aouda.Client/Aouda.Client.csproj`
+ - `src/Aouda.Cli/Aouda.Cli.csproj`
+ - `src/Aouda.Testing/Aouda.Testing.csproj`
+ - `aouda-client-ts/package.json`
 - Runtime entry points:
-  - `src/Aouda.Cli/Program.cs`
-  - `src/Aouda.Cli/Commands/DevCommand.cs`
-  - `src/Aouda.Server/DevServer/DevServerHost.cs`
-  - `src/Aouda.Embedded/AoudaEmbedded.cs`
-  - `src/Aouda.Embedded/Configuration/AoudaOptionsEnvOverlay.cs`
+ - `src/Aouda.Cli/Program.cs`
+ - `src/Aouda.Cli/Commands/DevCommand.cs`
+ - `src/Aouda.Server/DevServer/DevServerHost.cs`
+ - `src/Aouda.Embedded/AoudaEmbedded.cs`
+ - `src/Aouda.Embedded/Configuration/AoudaOptionsEnvOverlay.cs`
 - Maintainer packaging guide:
-  - `docs/dev/Client-NuGet-Packaging.md`
+ - `docs/dev/Client-NuGet-Packaging.md`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
@@ -254,9 +254,9 @@ Primary proving tests/evidence:
 2. CLI constructs `DevServerOptions` and dispatches to `DevCommand.RunAsync`.
 3. `DevCommand` forwards to `DevServerHost.RunAsync`.
 4. `DevServerHost` builds ASP.NET app, registers Aouda server services, applies dev overrides:
-   - temp or persistent path
-   - DB creation seed
-   - CORS allow-all
+ - temp or persistent path
+ - DB creation seed
+ - CORS allow-all
 5. App starts, optional auth bootstrap runs, startup banner prints, then waits for shutdown.
 
 Primary anchors:
@@ -269,7 +269,7 @@ Primary proving tests:
 
 ### Walk-through C: Embedded open with env overlay
 
-1. Caller invokes `AoudaEmbedded.OpenDatabaseAsync()` with no options.
+1. Caller invokes `AoudaEmbedded.OpenDatabaseAsync` with no options.
 2. Method creates default `AoudaEmbeddedOptions`.
 3. `AoudaOptionsEnvOverlay` applies `AOUDA_DATABASE` and `AOUDA_DATA_PATH`.
 4. `AoudaEmbedded` maps to low-level `EmbeddedOptions` and calls `CreateAsync`.
@@ -333,46 +333,46 @@ This section includes both runtime distribution settings and package/build metad
 Configuration precedence and operational notes:
 
 - Embedded open precedence:
-  - Explicit `AoudaEmbeddedOptions` argument wins.
-  - No-args open applies environment overlay (`AOUDA_*`).
+ - Explicit `AoudaEmbeddedOptions` argument wins.
+ - No-args open applies environment overlay (`AOUDA_*`).
 - CLI dev precedence:
-  - Command-line options define runtime for each invocation.
+ - Command-line options define runtime for each invocation.
 - Packaging metadata precedence:
-  - `.csproj` values are baseline.
-  - CI/release command-line pack properties can override version and related fields.
+ - `.csproj` values are baseline.
+ - CI/release command-line pack properties can override version and related fields.
 - Dynamic vs restart-required:
-  - Package metadata is build-time only.
-  - `aouda dev` runtime options are process-start scoped (restart to change).
+ - Package metadata is build-time only.
+ - `aouda dev` runtime options are process-start scoped (restart to change).
 - Deprecated/reserved:
-  - Legacy "single package hides all engine internals from clients" is not yet true for Abstractions; BL-032 tracks cleanup.
+ - Legacy "single package hides all engine internals from clients" is not yet true for Abstractions; BL-032 tracks cleanup.
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-### .NET examples
+###.NET examples
 
 ```csharp
 // Embedded package (in-process)
 await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync(new AoudaEmbeddedOptions
 {
-    DataPath = "./data",
-    Durability = "strict"   // the default (Lead S26, 0.6.0)
+ DataPath = "./data",
+ Durability = "strict" // the default (Lead S26, 0.6.0)
 });
 
 await db.GetTable("orders").InsertAsync(new Dictionary<string, object?>
 {
-    ["id"] = 1L,
-    ["total"] = 99.5
+ ["id"] = 1L,
+ ["total"] = 99.5
 });
 ```
 
 Expected result: database opens locally and writes are persisted when `DataPath` is set.
 
-Common mistake: assuming a unified `Aouda.CreateClient()` symbol exists in this snapshot; use `AoudaEmbedded` or `AoudaClient` directly.
+Common mistake: assuming a unified `Aouda.CreateClient` symbol exists in this snapshot; use `AoudaEmbedded` or `AoudaClient` directly.
 
 ```csharp
-// Remote .NET client package
+// Remote.NET client package
 using var client = new AoudaClient("http://localhost:5433", "default");
-var rows = await client.GetTable("orders").Where("total", "gte", 50).ToListAsync();
+var rows = await client.GetTable("orders").Where("total", "gte", 50).ToListAsync;
 ```
 
 Expected result: remote query executes through server HTTP API.
@@ -385,14 +385,14 @@ Common mistake: using `Aouda.Abstractions` directly in app code instead of insta
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5433",
-  database: "default",
+ serverUrl: "http://localhost:5433",
+ database: "default",
 });
 
 const result = await client.table("orders")
-  .where("total", ">", 50)
-  .limit(10)
-  .execute();
+.where("total", ">", 50)
+.limit(10)
+.execute;
 ```
 
 Expected result: `result.rows` returns matching rows from server.
@@ -417,12 +417,12 @@ Common mistake: assuming schema commands can run without server/database context
 
 ### A) API coverage matrix
 
-| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Install embedded package | NuGet (`Aouda.Embedded`) + `AoudaEmbedded` | N/A | N/A | Implemented | In-process only |
-| Install remote .NET client | NuGet (`Aouda.Client`) + `AoudaClient` | N/A | N/A | Implemented | Depends on server URL availability |
+| Install remote.NET client | NuGet (`Aouda.Client`) + `AoudaClient` | N/A | N/A | Implemented | Depends on server URL availability |
 | Install TS client package | N/A | npm `@aouda/client` + `createAoudaClient` | N/A | Implemented | Node 22+, browsers, React Native (**NativeClients, 0.4.0**; 0.3.0: Node 20+) |
-| Start local server | `aouda` tool command path from .NET ecosystem | via process execution | Server HTTP endpoints | Implemented | `aouda start` |
+| Start local server | `aouda` tool command path from.NET ecosystem | via process execution | Server HTTP endpoints | Implemented | `aouda start` |
 | In-process test server package | `Aouda.Testing` (`AoudaTestServer`) | N/A | Test-hosted HTTP | Implemented | MIT tool package |
 | Unified auto client mode selection | No stable public API in current snapshot | N/A | N/A | Missing | Reports mention prior work, symbols absent now |
 
@@ -440,12 +440,12 @@ Common mistake: assuming schema commands can run without server/database context
 ### Scenario 1: First-run local development (server + polyglot clients)
 
 When to use:
-- You need a local HTTP Aouda endpoint for .NET and TypeScript clients.
+- You need a local HTTP Aouda endpoint for.NET and TypeScript clients.
 
 Steps:
 1. Install CLI tool: `dotnet tool install -g Aouda.Cli`
 2. Start server: `aouda start --port 5433 --data-dir "./data"`
-3. Run either .NET `AoudaClient` or TS `createAoudaClient` against `http://localhost:5433`.
+3. Run either.NET `AoudaClient` or TS `createAoudaClient` against `http://localhost:5433`.
 
 Expected result checks:
 - `GET /health` returns `200`.
@@ -506,11 +506,11 @@ Expected result checks:
 What to monitor first:
 
 - Artifact integrity:
-  - Pack success, manifest correctness, dependency graph shape.
+ - Pack success, manifest correctness, dependency graph shape.
 - Runtime bootstrap health:
-  - `aouda dev` startup success and health endpoint response.
+ - `aouda dev` startup success and health endpoint response.
 - License metadata consistency:
-  - package metadata matches intended license posture.
+ - package metadata matches intended license posture.
 
 Recovery and restart expectations:
 
@@ -588,8 +588,8 @@ _Updated 2026-04-08 after P14/P16 completion._
 ### Remaining gaps
 
 - Unified auto mode gaps:
-  - Public `CreateClient`/`AoudaMode` auto-resolution surface is not visible in current code snapshot.
-  - User impact: users must choose explicit embedded or server client constructors.
+ - Public `CreateClient`/`AoudaMode` auto-resolution surface is not visible in current code snapshot.
+ - User impact: users must choose explicit embedded or server client constructors.
 - Cloud billing/payment integration: deferred until commercial offering launches.
 - Windows installer / MSI packaging: Docker is the primary distribution mechanism.
 - `aouda backup create/list/restore` CLI subcommands: backup APIs exist but CLI wrappers not yet built.
@@ -597,40 +597,40 @@ _Updated 2026-04-08 after P14/P16 completion._
 ## 2.19 References
 
 - ADRs:
-  - `docs/decisions/0022-licensing-and-distribution-strategy.md`
-  - `docs/decisions/0024-testing-package.md`
+ - `docs/decisions/0022-licensing-and-distribution-strategy.md`
+ - `docs/decisions/0024-testing-package.md`
 - Tasks/reports:
-  - `docs/tasks/P4/P4-Integration-Distribution-Tasks.md`
-  - `docs/tasks/P8/BL031-AoudaClient-NuGetPackage-And-Docs.md`
-  - `docs/tasks/P11/P11-UnifiedDistribution-Tasks.md`
-  - `docs/tasks/P11/P11-EpicC-Task1-BSL-License-And-Repository-Setup-Report.md`
-  - `docs/tasks/P11/P11-EpicC-Task2-MIT-License-Client-Packages-Report.md`
-  - `docs/tasks/P11/P11-EpicE-E1-E2-Report.md`
-  - `docs/tasks/P11/P11-EpicD-Task1-AoudaDev-Server-Command-Report.md`
-  - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
+ - `docs/tasks/P4/P4-Integration-Distribution-Tasks.md`
+ - `docs/tasks/P8/BL031-AoudaClient-NuGetPackage-And-Docs.md`
+ - `docs/tasks/P11/P11-UnifiedDistribution-Tasks.md`
+ - `docs/tasks/P11/P11-EpicC-Task1-BSL-License-And-Repository-Setup-Report.md`
+ - `docs/tasks/P11/P11-EpicC-Task2-MIT-License-Client-Packages-Report.md`
+ - `docs/tasks/P11/P11-EpicE-E1-E2-Report.md`
+ - `docs/tasks/P11/P11-EpicD-Task1-AoudaDev-Server-Command-Report.md`
+ - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
 - Backlog:
-  - `docs/BACKLOG.md` (BL-031, BL-032); BL-033 closed — see `docs/tasks/P14/BL-033-Embedded-Persistence-Across-Reopen.md`
+ - `docs/BACKLOG.md` (BL-031, BL-032); BL-033 closed — see `docs/tasks/P14/BL-033-Embedded-Persistence-Across-Reopen.md`
 - Code paths:
-  - `LICENSE`, `LICENSE-MIT`
-  - `src/Aouda.Embedded/Aouda.Embedded.csproj`
-  - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
-  - `src/Aouda.Client/Aouda.Client.csproj`
-  - `src/Aouda.Cli/Aouda.Cli.csproj`
-  - `src/Aouda.Server/Aouda.Server.csproj`
-  - `src/Aouda.Testing/Aouda.Testing.csproj`
-  - `src/Aouda.Cli/Program.cs`
-  - `src/Aouda.Cli/Commands/DevCommand.cs`
-  - `src/Aouda.Server/DevServer/DevServerHost.cs`
-  - `src/Aouda.Embedded/AoudaEmbedded.cs`
-  - `src/Aouda.Embedded/Configuration/AoudaOptionsEnvOverlay.cs`
-  - `aouda-client-ts/package.json`
-  - `docs/dev/Client-NuGet-Packaging.md`
+ - `LICENSE`, `LICENSE-MIT`
+ - `src/Aouda.Embedded/Aouda.Embedded.csproj`
+ - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
+ - `src/Aouda.Client/Aouda.Client.csproj`
+ - `src/Aouda.Cli/Aouda.Cli.csproj`
+ - `src/Aouda.Server/Aouda.Server.csproj`
+ - `src/Aouda.Testing/Aouda.Testing.csproj`
+ - `src/Aouda.Cli/Program.cs`
+ - `src/Aouda.Cli/Commands/DevCommand.cs`
+ - `src/Aouda.Server/DevServer/DevServerHost.cs`
+ - `src/Aouda.Embedded/AoudaEmbedded.cs`
+ - `src/Aouda.Embedded/Configuration/AoudaOptionsEnvOverlay.cs`
+ - `aouda-client-ts/package.json`
+ - `docs/dev/Client-NuGet-Packaging.md`
 - Tests:
-  - `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs`
-  - `tests/Aouda.Embedded.Tests/OpenDatabaseTests.cs`
-  - `tests/Aouda.Embedded.Tests/AoudaFactoryTests.cs`
-  - `tests/Aouda.Testing.Tests/*`
-  - `aouda-client-ts/tests/*`
+ - `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs`
+ - `tests/Aouda.Embedded.Tests/OpenDatabaseTests.cs`
+ - `tests/Aouda.Embedded.Tests/AoudaFactoryTests.cs`
+ - `tests/Aouda.Testing.Tests/*`
+ - `aouda-client-ts/tests/*`
 
 ## 2.20 What is missing from this document? (meta completeness)
 

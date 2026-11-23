@@ -37,17 +37,17 @@ If your question is "What is implemented vs missing?", jump to:
 Aouda query execution exists to make one query contract work consistently across hot, cold, and mixed segment states without exposing storage complexity to users.
 
 - User problem solved:
-  - Query current data even when some rows are still in HRA and others are already compacted to cold segments.
-  - Keep query behavior stable as data moves between hot and cold storage.
-  - Expose a single API family across server HTTP, .NET client, and TypeScript client.
+ - Query current data even when some rows are still in HRA and others are already compacted to cold segments.
+ - Keep query behavior stable as data moves between hot and cold storage.
+ - Expose a single API family across server HTTP,.NET client, and TypeScript client.
 - Operational outcomes:
-  - Predictable defaults (column-array results, bounded limits, strict validation).
-  - Observable execution through performance counters and query stats.
-  - Incremental optimization through pruning and vectorized paths without API changes.
+ - Predictable defaults (column-array results, bounded limits, strict validation).
+ - Observable execution through performance counters and query stats.
+ - Incremental optimization through pruning and vectorized paths without API changes.
 - Scope boundaries:
-  - This document covers execution and optimization for single-table query surfaces.
-  - It does not claim full public JOIN support in fluent SDKs.
-  - Dedicated HTTP count endpoint is `POST /api/databases/{db}/query/count` (aggregate path); .NET `RemoteTableQuery.CountAsync` uses it for remote counts.
+ - This document covers execution and optimization for single-table query surfaces.
+ - It does not claim full public JOIN support in fluent SDKs.
+ - Dedicated HTTP count endpoint is `POST /api/databases/{db}/query/count` (aggregate path);.NET `RemoteTableQuery.CountAsync` uses it for remote counts.
 
 ## 2.2 Discovery and navigation map
 
@@ -95,7 +95,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | HTTP query response format | column arrays | `columns`, `types`, `data` (one array per column), `rowCount`. (**Lead S12, 0.6.0; breaking**) It is the only JSON shape: the row format (`format=rows`) and the `format` parameter are gone, and any `format=` is refused `400 INVALID_FORMAT`. A request whose `Accept` lists `application/vnd.aouda.column-batch-v2` gets binary column-batch frames instead, and both SDKs ask for them by default (**ColumnarRead S16, 0.3.0**; `ACB2`, its envelope in an end frame, since **Lead S09, 0.6.0**; [HTTP reference](../reference/http-api.md#post-apidatabasesdbquery)). |
 | `limit` when omitted/negative | `1000` (`ProtocolConstants.DefaultLimit`) | Prevents accidental unbounded results. With `aggregates` / `groupBy` it counts **groups** (**ColumnarRead S16, 0.3.0**): set `limit` and page with `offset` when a query can make more. |
 | `limit` upper bound | `10000` (`ProtocolConstants.MaxLimit`) | Oversized client limits are capped server-side. |
-| `limit = 0` | Unlimited | Still valid on `/query` for unbounded reads; remote `.CountAsync()` uses `/query/count` instead. |
+| `limit = 0` | Unlimited | Still valid on `/query` for unbounded reads; remote `.CountAsync` uses `/query/count` instead. |
 | `offset` | `0` | No row skipping unless explicitly requested. |
 | `orderBy` max columns | `8` (`ProtocolConstants.MaxOrderByColumns`) | Prevents unbounded sort-key complexity in requests. |
 | `where` omitted | No predicate filtering | Full scan path across discovered segments. |
@@ -111,29 +111,29 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 - One JSON result shape, column arrays (**Lead S12, 0.6.0**: the `rows` format and the `format` parameter are removed; a request naming `format` is refused `400 INVALID_FORMAT`), and binary column-batch frames on request (`Accept`).
 - **Expression SELECT projections** — `selectExpr` field on `QueryMessage` adds server-side computed columns to query results without storing them (P27 / S7 / BL-080). See `guides/bulk-mutations.md` §8.
 - Fluent query APIs:
-  - Engine-side `TableQuery` (`Where`, `Select`, `SelectExpr`, `Skip`, `Limit`, `OrderBy`, `ThenBy`, aggregates).
-  - .NET remote `RemoteTableQuery` with ordering and cross-partition flag propagation, plus `.SelectExpr()`.
-  - TypeScript `TableQuery` with immutable chaining and operator mapping, plus `.selectExpr()`.
+ - Engine-side `TableQuery` (`Where`, `Select`, `SelectExpr`, `Skip`, `Limit`, `OrderBy`, `ThenBy`, aggregates).
+ -.NET remote `RemoteTableQuery` with ordering and cross-partition flag propagation, plus `.SelectExpr`.
+ - TypeScript `TableQuery` with immutable chaining and operator mapping, plus `.selectExpr`.
 - Hot/cold query execution through one path — **one scan** (**ColumnarRead, 0.3.0**): every read (rows, columns,
-  `COUNT(*)`, aggregates, GROUP BY, `ORDER BY … LIMIT`, `DISTINCT`, joins' sides, streaming) and every write-side scan
-  (DELETE / UPDATE matching, constraint checks) reads cold segments, hot segments and the unflushed write buffer through
-  `TableScan`, with one predicate evaluator (`PredicateProgram`). `QueryEngine`, `RowFilterEngine`, `PagePruner`,
-  `ParallelSegmentScanner` and the other old engines are deleted.
+ `COUNT(*)`, aggregates, GROUP BY, `ORDER BY … LIMIT`, `DISTINCT`, joins' sides, streaming) and every write-side scan
+ (DELETE / UPDATE matching, constraint checks) reads cold segments, hot segments and the unflushed write buffer through
+ `TableScan`, with one predicate evaluator (`PredicateProgram`). `QueryEngine`, `RowFilterEngine`, `PagePruner`,
+ `ParallelSegmentScanner` and the other old engines are deleted.
 - Optimization in the execution path (**ColumnarRead, 0.3.0**):
-  - Each 8,192-row row group is classified from its statistics (`RowGroupClassifier`): none of its rows can match → not
-    read; every row matches → the filter is not evaluated. Only the filter's columns are decoded first; the others only for
-    the 2,048-row vectors that hold a selected row.
-  - Aggregates and `DISTINCT` answer a row group the filter selects whole, with no deleted row, from its statistics.
-  - `ORDER BY … LIMIT` keeps a top-K whose threshold skips row groups that cannot beat it.
-  - A filter pinning every series column by equality reads only that series' rows, from each segment's run directory; a
-    full-key read of a cold segment reads only the rows the key map located.
-  - Scans above 65,536 rows of work run on several workers within the query's CPU grant (morsels); answers do not depend on
-    the degree.
-  - Partition-key pruning as before. A bloom filter is read only by primary-key lookups (a `Strict` table writes one),
-    not by filters on other columns; the adaptive bloom path is deleted.
+ - Each 8,192-row row group is classified from its statistics (`RowGroupClassifier`): none of its rows can match → not
+ read; every row matches → the filter is not evaluated. Only the filter's columns are decoded first; the others only for
+ the 2,048-row vectors that hold a selected row.
+ - Aggregates and `DISTINCT` answer a row group the filter selects whole, with no deleted row, from its statistics.
+ - `ORDER BY … LIMIT` keeps a top-K whose threshold skips row groups that cannot beat it.
+ - A filter pinning every series column by equality reads only that series' rows, from each segment's run directory; a
+ full-key read of a cold segment reads only the rows the key map located.
+ - Scans above 65,536 rows of work run on several workers within the query's CPU grant (morsels); answers do not depend on
+ the degree.
+ - Partition-key pruning as before. A bloom filter is read only by primary-key lookups (a `Strict` table writes one),
+ not by filters on other columns; the adaptive bloom path is deleted.
 - Late rows are flushed inline; there are no delta segments to read (**ColumnarRead, 0.3.0**).
 - Materialized-query routing on every read path and over HTTP, to a current result only
-  ([routing](materialized.md#routing-a-read-to-a-maintained-result); **ColumnarRead S18, 0.3.0**).
+ ([routing](materialized.md#routing-a-read-to-a-maintained-result); **ColumnarRead S18, 0.3.0**).
 
 ### Planned / proposed
 
@@ -162,17 +162,17 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 |---|---|---|---|---|---|
 | REST query endpoint with validation and typed errors | Yes | No | No | P4 EpicA report + `QueryController` + `QueryIntegrationTests` | Supports request/body validation and protocol error mapping. |
 | Fluent projection/filter/pagination/ordering in engine API | Yes | No | No | `TableQuery` + storage tests + API tests | Immutable chaining with ordering and pagination behavior. |
-| .NET remote fluent ordering/query parity | Yes | No | No | `RemoteTableQuery` + client wiring | Includes `OrderBy`, `ThenBy`, `WithCrossPartitionAccess`. |
-| TypeScript fluent ordering/query parity | Yes | No | No | `query-builder.ts` + `query-builder.test.ts` | Core parity present including nested group API (`whereGroup()`). Resolved P14, BL-044. |
+|.NET remote fluent ordering/query parity | Yes | No | No | `RemoteTableQuery` + client wiring | Includes `OrderBy`, `ThenBy`, `WithCrossPartitionAccess`. |
+| TypeScript fluent ordering/query parity | Yes | No | No | `query-builder.ts` + `query-builder.test.ts` | Core parity present including nested group API (`whereGroup`). Resolved P14, BL-044. |
 | Nested boolean groups over HTTP (`WhereClause.Groups`) | Yes | No | No | `Messages.cs` + `QueryTranslator` recursion | Server/wire supports nested groups. |
-| Nested boolean groups in .NET client builders | Yes | No | No | `RemoteConditionBuilder` + `QueryMessageBuilder` | Resolved P14, BL-044; nested group composition now emitted. |
-| Nested boolean groups in TypeScript builder | Yes | No | No | `aouda-client-ts/src/query-builder.ts` (`WhereGroupBuilder`, `whereGroup()`) | `whereGroup()` builds nested `WhereClause.groups` entries. Resolved P14, BL-044. |
+| Nested boolean groups in.NET client builders | Yes | No | No | `RemoteConditionBuilder` + `QueryMessageBuilder` | Resolved P14, BL-044; nested group composition now emitted. |
+| Nested boolean groups in TypeScript builder | Yes | No | No | `aouda-client-ts/src/query-builder.ts` (`WhereGroupBuilder`, `whereGroup`) | `whereGroup` builds nested `WhereClause.groups` entries. Resolved P14, BL-044. |
 | Hot + cold + unflushed HRA unified visibility | Yes | No | No | P4 R10.4 report + `TableQuery` + P7 summary tests | Virtual hot segment merged into query execution paths. |
 | Delta segment query inclusion | No | No | Yes | P4 BL007 report | Removed with delta segments (**ColumnarRead, 0.3.0**): late rows are flushed inline. |
 | Page pruning and multi-column pruning | Yes | No | No | `TableScan` + `RowGroupClassifier` (**ColumnarRead, 0.3.0**; `QueryEngine`, `RowFilterEngine`, `PagePruner` deleted) | Per 8,192-row row group, from the segment footer's statistics; `AND` / `OR` / `NOT` in three-valued logic. |
 | Bloom-filter-assisted pruning | No | Partial | No | Key probe only (**ColumnarRead, 0.3.0**) | Only primary-key lookups read a bloom (`Strict` tables); the adaptive bloom path is deleted. |
 | Parallel multi-segment scanning | Yes | No | No | Morsels on the query's CPU grant (**ColumnarRead, 0.3.0**; `ParallelSegmentScanner` deleted) | Above 65,536 rows of work; rows come back in the sequential order. `ORDER BY … LIMIT` stays on one thread. |
-| Dedicated count API endpoint | Yes (`/query/count`) | No | Yes | Implemented (2026-04-04, `BL-026`) | TypeScript `count()` uses it since the **architecture review, 0.3.0**. |
+| Dedicated count API endpoint | Yes (`/query/count`) | No | Yes | Implemented (2026-04-04, `BL-026`) | TypeScript `count` uses it since the **architecture review, 0.3.0**. |
 | Fluent JOIN query support | No | No | Yes | Backlog + absence in fluent APIs | Internal planner support exists but not exposed in fluent APIs. |
 
 ## 2.7 Core concepts and mental model
@@ -181,23 +181,23 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 - `TableQuery`: engine-facing immutable builder used by server translation and direct engine consumers.
 - `QueryTranslator`: server bridge from wire DTO to `TableQuery`; enforces defaults and limits.
 - `TableScan` (**ColumnarRead, 0.3.0**): the one scan every read and write-side scan runs on, over one fixed view of
-  the table's segments, their deletion masks and the write buffer; sinks for rows, aggregates, GROUP BY, top-K and
-  `DISTINCT`.
+ the table's segments, their deletion masks and the write buffer; sinks for rows, aggregates, GROUP BY, top-K and
+ `DISTINCT`.
 - `PredicateProgram`: the one predicate evaluator (three-valued: a null makes a comparison unknown).
 - `RowGroupClassifier`: decides from a row group's statistics whether none, all or some of its rows can match.
 - `QueryEngine`, `QueryBatch`, `RowFilterEngine` and `ParallelSegmentScanner` are deleted (**ColumnarRead, 0.3.0**).
 - Optimization layers:
-  - row-group pruning from page statistics,
-  - series and key lookups that read only the rows they return,
-  - top-K thresholds for `ORDER BY … LIMIT`,
-  - parallel morsels for large scans.
+ - row-group pruning from page statistics,
+ - series and key lookups that read only the rows they return,
+ - top-K thresholds for `ORDER BY … LIMIT`,
+ - parallel morsels for large scans.
 
 Key invariants:
 
 - Query results should be correct regardless of temperature state (hot-only, cold-only, mixed, plus unflushed HRA).
 - Protocol defaults and limits are centralized (for consistency across clients).
 - Request validation occurs before heavy execution work.
-- `ThenBy()` requires `OrderBy()` first in both .NET and TypeScript APIs.
+- `ThenBy` requires `OrderBy` first in both.NET and TypeScript APIs.
 
 ## 2.8 How Aouda implements it
 
@@ -207,14 +207,14 @@ At a high level:
 2. `QueryTranslator.Validate` performs request-level checks (database/table presence, `offset`, operators, order-by constraints, recursive `Groups` validation).
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. `QueryTranslator.Translate` builds an immutable `TableQuery` chain with:
-   - projection,
-   - predicate,
-   - pagination defaults/caps,
-   - ordering,
-   - cross-partition flag.
+ - projection,
+ - predicate,
+ - pagination defaults/caps,
+ - ordering,
+ - cross-partition flag.
 5. `TableQuery` resolves schema/segments and selects execution path:
-   - a current materialized result that holds the answer, when one does ([routing](materialized.md#routing-a-read-to-a-maintained-result)),
-   - otherwise the one scan (`TableScan`) for rows, columns, aggregates, GROUP BY, top-K and `DISTINCT` alike (**ColumnarRead, 0.3.0**).
+ - a current materialized result that holds the answer, when one does ([routing](materialized.md#routing-a-read-to-a-maintained-result)),
+ - otherwise the one scan (`TableScan`) for rows, columns, aggregates, GROUP BY, top-K and `DISTINCT` alike (**ColumnarRead, 0.3.0**).
 6. The scan reads the segments the table's catalog names; no directory is listed (**ColumnarRead, 0.3.0**).
 7. Results are returned as column arrays (JSON) or column-batch frames (**Lead S12, 0.6.0**: no row format).
 
@@ -243,54 +243,54 @@ Runtime notes:
 1. Entry point: `TableQuery.ToColumnarAsync` (or list path) with predicate set.
 2. The read fixes its view: the segments its catalog names, their deletion masks and the write buffer, at one instant.
 3. `TableScan` classifies each 8,192-row row group from its statistics (`RowGroupClassifier`), decodes the filter's
-   columns for the rest, evaluates the predicate with `PredicateProgram`, and decodes the other columns only for the
-   2,048-row vectors holding a selected row.
+ columns for the rest, evaluates the predicate with `PredicateProgram`, and decodes the other columns only for the
+ 2,048-row vectors holding a selected row.
 4. Validity bitmaps and deletion masks are preserved through decode/projection.
 5. Tests: the differential oracle (`ReadRuleOracle*Tests`) and the reference fuzzer (`ReadFuzz*Tests`) in
-   `tests/Aouda.Engine.Api.Tests/ColumnarRead/`, `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
+ `tests/Aouda.Engine.Api.Tests/ColumnarRead/`, `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
 
 ### Path C: Aggregate/count with mixed hot+cold and unflushed rows
 
 1. Entry point: `TableQuery.AggregateAsync` or client-side `Count`.
 2. The read's view includes persisted segments plus the unflushed write buffer.
 3. Every aggregate runs on the one scan (**ColumnarRead, 0.3.0**; `ParallelSegmentScanner` is deleted). An 8,192-row row group the filter selects whole and that has no deleted row is answered
-   from its page statistics — row and null counts, exact integer and decimal sums, exact bounds — without reading a page; a
-   double's `SUM` and a string's `MIN` / `MAX` are decoded for that row group, and a row group with a deletion is decoded
-   whole. `SUM` of a `String`, `Bool`, `Guid`, `Timestamp` or `Date` column is refused. A `GroupBy` query given to
-   `AggregateAsync()` is refused rather than answered ungrouped — use `GroupAggregateAsync()` (item 6).
+ from its page statistics — row and null counts, exact integer and decimal sums, exact bounds — without reading a page; a
+ double's `SUM` and a string's `MIN` / `MAX` are decoded for that row group, and a row group with a deletion is decoded
+ whole. `SUM` of a `String`, `Bool`, `Guid`, `Timestamp` or `Date` column is refused. A `GroupBy` query given to
+ `AggregateAsync` is refused rather than answered ungrouped — use `GroupAggregateAsync` (item 6).
 4. Merged aggregate result reflects both cold and current hot state.
 5. **Nulls (**BL-735, 0.2.0**):** `Min`, `Max`, `Sum` and `Count(column)` skip a column's nulls, as SQL does;
-   a bare `Count()` counts every row. Before, a null was aggregated as its type's default (`0`), so `Min` over positive
-   values with a null read `0`.
-   **`Sum` over no value is `null` (**BL-757, 0.3.0**)** — a filter that matches nothing, or a column null in every
-   matching row — on every path, joins included; it was `0` when a segment was read and `null` when none was. `Min` / `Max`
-   over no value are `null`; `Count` over nothing is `0`. `Min` / `Max` of a `String` (code-point order) or `Bool` column
-   now answer the value instead of `null` (**ColumnarRead, 0.3.0**).
+ a bare `Count` counts every row. Before, a null was aggregated as its type's default (`0`), so `Min` over positive
+ values with a null read `0`.
+ **`Sum` over no value is `null` (**BL-757, 0.3.0**)** — a filter that matches nothing, or a column null in every
+ matching row — on every path, joins included; it was `0` when a segment was read and `null` when none was. `Min` / `Max`
+ over no value are `null`; `Count` over nothing is `0`. `Min` / `Max` of a `String` (code-point order) or `Bool` column
+ now answer the value instead of `null` (**ColumnarRead, 0.3.0**).
 6. **Grouped aggregates in the embedded engine (**ColumnarRead, 0.3.0**):** `TableQuery.GroupBy("Ticker", "Source")`, or
-   `GroupBy(GroupKey.Column("Ticker"), GroupKey.Truncate("DateTime", PartitionFunction.TruncateToMinute, "Minute"))` for a
-   time bucket of a `Timestamp` column, with `Count()`, `Count(col)`, `Sum`, `Min`, `Max`, `First(col, orderBy)` and
-   `Last(col, orderBy)`, executed by `GroupAggregateAsync()`. The result is a `ColumnarQueryResult`: the keys, then one
-   column per aggregate (`COUNT`, `SUM_<col>`, `MIN_<col>`, `FIRST_<col>` …), ordered by the keys ascending with nulls
-   last; `Skip` / `Limit` apply after grouping. An integer `SUM` is an exact `Int64` (an overflow throws). (**LoadSpeed
-   S13, 0.4.0**) A `Decimal(p,s)` `SUM` is an exact `Decimal(18,s)` and a sum of 18 digits or more throws (*A Decimal
-   sum does not fit Decimal(18,s).*), as a materialized query's does; `Min` / `Max` are exact at the column's scale and
-   `Avg` is a `Double` ([`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)). **ColumnarRead S16
-   (0.3.0):** `OrderBy` over a grouped result (by a key's or an aggregate's output name, before `Skip` / `Limit`); `Avg(col)`
-   and `CountDistinct(col)`; `GroupAggregateAsync()` without `GroupBy()` answers one row. Over HTTP as the query message's
-   `aggregates` / `groupBy` ([reference](../reference/http-api.md#aggregates-and-group-by)).
+ `GroupBy(GroupKey.Column("Ticker"), GroupKey.Truncate("DateTime", PartitionFunction.TruncateToMinute, "Minute"))` for a
+ time bucket of a `Timestamp` column, with `Count`, `Count(col)`, `Sum`, `Min`, `Max`, `First(col, orderBy)` and
+ `Last(col, orderBy)`, executed by `GroupAggregateAsync`. The result is a `ColumnarQueryResult`: the keys, then one
+ column per aggregate (`COUNT`, `SUM_<col>`, `MIN_<col>`, `FIRST_<col>` …), ordered by the keys ascending with nulls
+ last; `Skip` / `Limit` apply after grouping. An integer `SUM` is an exact `Int64` (an overflow throws). (**LoadSpeed
+ S13, 0.4.0**) A `Decimal(p,s)` `SUM` is an exact `Decimal(18,s)` and a sum of 18 digits or more throws (*A Decimal
+ sum does not fit Decimal(18,s).*), as a materialized query's does; `Min` / `Max` are exact at the column's scale and
+ `Avg` is a `Double` ([`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)). **ColumnarRead S16
+ (0.3.0):** `OrderBy` over a grouped result (by a key's or an aggregate's output name, before `Skip` / `Limit`); `Avg(col)`
+ and `CountDistinct(col)`; `GroupAggregateAsync` without `GroupBy` answers one row. Over HTTP as the query message's
+ `aggregates` / `groupBy` ([reference](../reference/http-api.md#aggregates-and-group-by)).
 7. **The latest (or first) row per key (**BL-450, ColumnarRead S18, 0.3.0**):** `TableQuery.LatestPerKey("DateTime",
-   "Ticker", "Source")` keeps, per distinct key, the row with the greatest `DateTime` among the rows the filter selects;
-   `FirstPerKey` the least. A row whose order column is null is not a candidate; among rows tied on it, the lowest primary
-   key wins. `Select`, `OrderBy`, `Skip` / `Limit` and `WithTotalMatches` apply to the collapsed rows; `ToListAsync`,
-   `ToResultAsync` and `ToColumnarAsync` answer it. It is read from a `LatestPerKey` / `FirstPerKey` materialized query of the
-   same keys and order column when one is current and the filter is on the keys only
-   ([routing](materialized.md#routing-a-read-to-a-maintained-result)); the table answers otherwise. Not over HTTP yet.
+ "Ticker", "Source")` keeps, per distinct key, the row with the greatest `DateTime` among the rows the filter selects;
+ `FirstPerKey` the least. A row whose order column is null is not a candidate; among rows tied on it, the lowest primary
+ key wins. `Select`, `OrderBy`, `Skip` / `Limit` and `WithTotalMatches` apply to the collapsed rows; `ToListAsync`,
+ `ToResultAsync` and `ToColumnarAsync` answer it. It is read from a `LatestPerKey` / `FirstPerKey` materialized query of the
+ same keys and order column when one is current and the filter is on the keys only
+ ([routing](materialized.md#routing-a-read-to-a-maintained-result)); the table answers otherwise. Not over HTTP yet.
 8. **Routing (**ColumnarRead S18, 0.3.0**):** every one of these reads — rows, columns, aggregates, GROUP BY, the per-key
-   collapse — is answered from a materialized query that holds the answer and is current
-   ([routing](materialized.md#routing-a-read-to-a-maintained-result)); `WithDirectScan()` reads the table regardless.
+ collapse — is answered from a materialized query that holds the answer and is current
+ ([routing](materialized.md#routing-a-read-to-a-maintained-result)); `WithDirectScan` reads the table regardless.
 9. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
-   `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`; S18's `ReadRuleOracleRoutingTests`
-   for routing) and the reference fuzzer.
+ `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`; S18's `ReadRuleOracleRoutingTests`
+ for routing) and the reference fuzzer.
 
 ### Path D: QueryEngine row-window contract
 
@@ -308,7 +308,7 @@ for its history.)
 |---|---|---|---|
 | Do I need separate APIs for hot vs cold data? | Often yes (cache + store split) | One query surface across hot/cold/unflushed HRA | Simpler app code and fewer consistency surprises. |
 | Is pruning/optimization user-managed? | Often index/query-hint heavy | Optimization is mostly internal (row-group statistics, series and key lookups, top-K, parallel morsels) | Lower tuning burden for common workloads. |
-| Are count semantics an independent API today? | Yes (HTTP `/query/count`; .NET `CountAsync`; TypeScript `count()` since the **architecture review, 0.3.0**) | Both SDKs post `/query/count` | No row is transferred to count. |
+| Are count semantics an independent API today? | Yes (HTTP `/query/count`;.NET `CountAsync`; TypeScript `count` since the **architecture review, 0.3.0**) | Both SDKs post `/query/count` | No row is transferred to count. |
 | Can query routing exploit materialized tables automatically? | Usually manual endpoint/view selection | Matcher-based auto-routing in query path | Potential speedup without endpoint changes. |
 | Do clients and server share one protocol contract? | Sometimes fragmented | Shared protocol DTOs + translator + SDK mappers | Predictable behavior across HTTP/.NET/TS surfaces. |
 
@@ -374,7 +374,7 @@ Notes:
 
 | Option | Meaning | Example |
 |---|---|---|
-| `orderBy[].descending=true` | Descending sort for that column | `{ "column":"createdAt", "descending":true }` |
+| `orderBy.descending=true` | Descending sort for that column | `{ "column":"createdAt", "descending":true }` |
 | `offset` | Skip N rows before returning data | `"offset": 100` |
 | `limit` | Max rows returned (`0` means unlimited) | `"limit": 1000` |
 | `crossPartitionAccess` | Waive the partition-filter guard (admin listener) | `"crossPartitionAccess": true` |
@@ -383,63 +383,63 @@ Notes:
 
 ### A) API coverage matrix
 
-| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Basic query execute | `RemoteTableQuery.ToColumnarAsync()/ToListAsync()` | `table().execute()` | `POST /api/databases/{db}/query` | Implemented | Columnar is default response shape. |
+| Basic query execute | `RemoteTableQuery.ToColumnarAsync/ToListAsync` | `table.execute` | `POST /api/databases/{db}/query` | Implemented | Columnar is default response shape. |
 | Filtering (AND-style chaining) | `.Where(...)`, `.WhereAnd(...)`, `.WhereOr(...)` | `.where(...)` (AND chaining) | `where.and`, `where.or` | Implemented | TS builder emits `and` for chained where. |
-| Nested boolean groups | `.whereGroup()` / `WhereGroupBuilder` (P14, BL-044) | `.whereGroup()` / `WhereGroupBuilder` (P14, BL-044) | `where.groups` supported | Implemented | Both .NET and TypeScript builder surfaces now emit nested `groups`. |
+| Nested boolean groups | `.whereGroup` / `WhereGroupBuilder` (P14, BL-044) | `.whereGroup` / `WhereGroupBuilder` (P14, BL-044) | `where.groups` supported | Implemented | Both.NET and TypeScript builder surfaces now emit nested `groups`. |
 | Projection | `.Select(...)` | `.select(...)` | `select` | Implemented | Null/omitted means all columns. |
-| Pagination | `.Skip()`, `.Limit()` | `.offset()`, `.limit()` | `offset`, `limit` | Implemented | `limit=0` treated as unlimited. |
-| Ordering | `.OrderBy().ThenBy()` | `.orderBy().thenBy()` | `orderBy[]` | Implemented | Max 8 order-by columns. |
-| Grouped aggregates | Embedded engine: `TableQuery.GroupBy(...)` + `GroupAggregateAsync()`; remote: `RemoteTableQuery.GroupBy(...)` / `Sum` / `Avg` / `CountDistinct` … + `AggregateAsync()` (**ColumnarRead, 0.3.0**) | `.groupBy(...)`, `.sum()`, `.avg()`, `.countRows()`, `.countDistinct()` … (**ColumnarRead S16, 0.3.0**) | `aggregates`, `groupBy` in the query message (**S16**) | Implemented (0.3.0) | Time buckets (`minute` … `year`); `orderBy` over the result's names. `First` / `Last` embedded only. |
-| Total matches with a page | Embedded engine: `TableQuery.WithTotalMatches()` → `TotalMatches` on the result (**ColumnarRead, 0.3.0**) | — | Named queries: `count: true` → `totalMatches` | Embedded + named queries | Counted by the same read over the same snapshot as the page, ignoring `Skip` / `Limit`. |
-| Rows as views | Embedded engine: `ToListAsync()` rows read the result's columns (**ColumnarRead, 0.3.0**); remote: `ClientColumnarResult.Rows` over a frame answer's typed columns (**ColumnarRead S16, 0.3.0**) | `result.rows` are views over `result.typedColumns` when the server answered with frames (**ColumnarRead S16, 0.3.0**) | Column-batch frame response | Implemented (0.3.0) | A row is a view over the result's column arrays: the indexer boxes one cell, `Get<T>` reads a typed column without boxing, `ToDictionary()` copies. |
-| Count convenience | `.CountAsync()` → `/query/count` | `.count()` → `/query/count` (**architecture review, 0.3.0**; it downloaded every matching row through `/query`) | `POST .../query/count` | Implemented (0.3.0) | No row is transferred. The filter and joins count; `select`, `orderBy`, `limit`, `offset` and `distinct` do not. Aggregates and `groupBy` are dropped by both SDKs: the count is of matching rows, not groups (C# `CountAsync` sent them and got a 400 before). |
-| Cross-partition query flag | `.WithCrossPartitionAccess()` | `.withCrossPartitionAccess()` | `crossPartitionAccess` bool | Implemented | Waives the partition-filter guard on the admin listener; reaches subscriptions and named-query calls too. (**BL-1227, 0.9.0**) |
-|| Expression SELECT (computed columns) | `.SelectExpr((alias, expr), ...)` | `.selectExpr({ alias: expr })` | `selectExpr[]` in query body | Implemented (P27 S7 / P40 S08) | Server-computed columns appended to result; type is inferred where the expression permits (`Unknown` otherwise). Always nullable. See [browser-tier read limits](browser-tier-read-limits.md#selectexpr-result-types) and [Bulk Mutations](bulk-mutations.md). |
-|| Literal UPDATE | `.UpdateAsync(dict)` | `.update(values)` | `PATCH .../rows` | Implemented | Requires at least one WHERE predicate. See [Bulk Mutations guide](bulk-mutations.md). |
-|| Expression SET UPDATE | `.UpdateAsync(setBuilder)` | `.update({ col: { \$inc: 1 } })` | `PATCH .../rows` (`setExpr`) | Implemented (P27 S1) | Server-side expression evaluation; WAL stores concrete resolved values. |
-|| DELETE with WHERE | `.DeleteAsync()` | `.delete()` | `DELETE .../rows` | Implemented | Requires at least one WHERE predicate. |
-|| DELETE with LIMIT | `.DeleteAsync()` + `.Limit()` | `.delete()` + `.limit()` | `DELETE .../rows` (`limit`, `orderBy`) | Implemented (P27 S2) | Returns `hasMore` sentinel; pair with `orderBy` for deterministic rolling deletes. |
-|| TRUNCATE | `.TruncateAsync()` | `.truncate()` | `POST .../truncate` | Implemented (P27 S2) | Requires `Truncate` auth scope; crash-safe. |
+| Pagination | `.Skip`, `.Limit` | `.offset`, `.limit` | `offset`, `limit` | Implemented | `limit=0` treated as unlimited. |
+| Ordering | `.OrderBy.ThenBy` | `.orderBy.thenBy` | `orderBy` | Implemented | Max 8 order-by columns. |
+| Grouped aggregates | Embedded engine: `TableQuery.GroupBy(...)` + `GroupAggregateAsync`; remote: `RemoteTableQuery.GroupBy(...)` / `Sum` / `Avg` / `CountDistinct` … + `AggregateAsync` (**ColumnarRead, 0.3.0**) | `.groupBy(...)`, `.sum`, `.avg`, `.countRows`, `.countDistinct` … (**ColumnarRead S16, 0.3.0**) | `aggregates`, `groupBy` in the query message (**S16**) | Implemented (0.3.0) | Time buckets (`minute` … `year`); `orderBy` over the result's names. `First` / `Last` embedded only. |
+| Total matches with a page | Embedded engine: `TableQuery.WithTotalMatches` → `TotalMatches` on the result (**ColumnarRead, 0.3.0**) | — | Named queries: `count: true` → `totalMatches` | Embedded + named queries | Counted by the same read over the same snapshot as the page, ignoring `Skip` / `Limit`. |
+| Rows as views | Embedded engine: `ToListAsync` rows read the result's columns (**ColumnarRead, 0.3.0**); remote: `ClientColumnarResult.Rows` over a frame answer's typed columns (**ColumnarRead S16, 0.3.0**) | `result.rows` are views over `result.typedColumns` when the server answered with frames (**ColumnarRead S16, 0.3.0**) | Column-batch frame response | Implemented (0.3.0) | A row is a view over the result's column arrays: the indexer boxes one cell, `Get<T>` reads a typed column without boxing, `ToDictionary` copies. |
+| Count convenience | `.CountAsync` → `/query/count` | `.count` → `/query/count` (**architecture review, 0.3.0**; it downloaded every matching row through `/query`) | `POST.../query/count` | Implemented (0.3.0) | No row is transferred. The filter and joins count; `select`, `orderBy`, `limit`, `offset` and `distinct` do not. Aggregates and `groupBy` are dropped by both SDKs: the count is of matching rows, not groups (C# `CountAsync` sent them and got a 400 before). |
+| Cross-partition query flag | `.WithCrossPartitionAccess` | `.withCrossPartitionAccess` | `crossPartitionAccess` bool | Implemented | Waives the partition-filter guard on the admin listener; reaches subscriptions and named-query calls too. (**BL-1227, 0.9.0**) |
+|| Expression SELECT (computed columns) | `.SelectExpr((alias, expr),...)` | `.selectExpr({ alias: expr })` | `selectExpr` in query body | Implemented (P27 S7 / P40 S08) | Server-computed columns appended to result; type is inferred where the expression permits (`Unknown` otherwise). Always nullable. See [browser-tier read limits](browser-tier-read-limits.md#selectexpr-result-types) and [Bulk Mutations](bulk-mutations.md). |
+|| Literal UPDATE | `.UpdateAsync(dict)` | `.update(values)` | `PATCH.../rows` | Implemented | Requires at least one WHERE predicate. See [Bulk Mutations guide](bulk-mutations.md). |
+|| Expression SET UPDATE | `.UpdateAsync(setBuilder)` | `.update({ col: { \$inc: 1 } })` | `PATCH.../rows` (`setExpr`) | Implemented (P27 S1) | Server-side expression evaluation; WAL stores concrete resolved values. |
+|| DELETE with WHERE | `.DeleteAsync` | `.delete` | `DELETE.../rows` | Implemented | Requires at least one WHERE predicate. |
+|| DELETE with LIMIT | `.DeleteAsync` + `.Limit` | `.delete` + `.limit` | `DELETE.../rows` (`limit`, `orderBy`) | Implemented (P27 S2) | Returns `hasMore` sentinel; pair with `orderBy` for deterministic rolling deletes. |
+|| TRUNCATE | `.TruncateAsync` | `.truncate` | `POST.../truncate` | Implemented (P27 S2) | Requires `Truncate` auth scope; crash-safe. |
 || RETURNING on UPDATE/DELETE | `.UpdateAsync(..., returning:[...])` | `.update(v, { returning:[...] })` | `returning` field on PATCH/DELETE | Implemented (P27 S3) | UPDATE returns post-update; DELETE returns pre-delete values. |
-|| Batch mutation | `.BatchAsync([...])` | `.batch([...])` | `POST .../rows/batch` | Implemented (P27 S4) | Multiple operations in one round-trip, applied in order; **not one transaction** — each commits on its own (BL-843). See [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch). |
+|| Batch mutation | `.BatchAsync([...])` | `.batch([...])` | `POST.../rows/batch` | Implemented (P27 S4) | Multiple operations in one round-trip, applied in order; **not one transaction** — each commits on its own (BL-843). See [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch). |
 
 ### B) Missing API matrix
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| Fluent JOIN workflows | `Join()` API across SDK fluent builders | Use planner/internal paths only (no stable public fluent route) | `BL-009` | High |
+| Fluent JOIN workflows | `Join` API across SDK fluent builders | Use planner/internal paths only (no stable public fluent route) | `BL-009` | High |
 | JOINed materialized query support | Materialized-query JOIN definition + maintenance | Single-table materialized patterns only | `BL-010` | Medium |
 
-### .NET example
+###.NET example
 
 ```csharp
 var rows = await client
-    .Table("orders")
-    .Where("status", "eq", "active")
-    .OrderBy("createdAt", descending: true)
-    .ThenBy("id")
-    .Limit(100)
-    .ToListAsync<dynamic>();
+.Table("orders")
+.Where("status", "eq", "active")
+.OrderBy("createdAt", descending: true)
+.ThenBy("id")
+.Limit(100)
+.ToListAsync<dynamic>;
 ```
 
 Expected result:
 - Up to 100 rows, sorted by `createdAt DESC, id ASC`.
 
 Common mistake:
-- Calling `ThenBy()` before `OrderBy()` throws.
+- Calling `ThenBy` before `OrderBy` throws.
 
 ### TypeScript example
 
 ```ts
 const result = await client
-  .table("orders")
-  .where("status", "=", "active")
-  .orderBy("createdAt", "desc")
-  .thenBy("id", "asc")
-  .limit(100)
-  .execute();
+.table("orders")
+.where("status", "=", "active")
+.orderBy("createdAt", "desc")
+.thenBy("id", "asc")
+.limit(100)
+.execute;
 
 console.log(result.rows.length, result.stats.executionMs);
 ```
@@ -448,7 +448,7 @@ Expected result:
 - Rows in requested order with `QueryStats` in `result.stats`.
 
 Common mistake:
-- Assuming multiple `.where()` calls produce OR behavior; they are AND-combined.
+- Assuming multiple `.where` calls produce OR behavior; they are AND-combined.
 
 ### HTTP example
 
@@ -457,19 +457,19 @@ POST /api/databases/appdb/query
 Content-Type: application/json
 
 {
-  "database": "appdb",
-  "table": "orders",
-  "select": ["id", "status", "createdAt"],
-  "where": {
-    "and": [
-      { "column": "status", "op": "eq", "value": "active" }
-    ]
-  },
-  "orderBy": [
-    { "column": "createdAt", "descending": true }
-  ],
-  "offset": 0,
-  "limit": 100
+ "database": "appdb",
+ "table": "orders",
+ "select": ["id", "status", "createdAt"],
+ "where": {
+ "and": [
+ { "column": "status", "op": "eq", "value": "active" }
+ ]
+ },
+ "orderBy": [
+ { "column": "createdAt", "descending": true }
+ ],
+ "offset": 0,
+ "limit": 100
 }
 ```
 
@@ -490,7 +490,7 @@ Steps:
 1. Insert a small sample table.
 2. Execute one filtered query via HTTP or SDK.
 3. Run the targeted server query tests:
-   - `dotnet test tests/Aouda.Server.Tests --no-build --filter "FullyQualifiedName~QueryIntegrationTests|FullyQualifiedName~QueryTranslatorTests" --verbosity minimal`
+ - `dotnet test tests/Aouda.Server.Tests --no-build --filter "FullyQualifiedName~QueryIntegrationTests|FullyQualifiedName~QueryTranslatorTests" --verbosity minimal`
 
 Expected checks:
 - Query returns expected rows.
@@ -514,16 +514,16 @@ Expected checks:
 ### Scenario 3: Query API compatibility across SDKs
 
 When to use:
-- Ensure .NET and TypeScript clients serialize equivalent query contracts.
+- Ensure.NET and TypeScript clients serialize equivalent query contracts.
 
 Steps:
-1. Build equivalent filter/order/limit query in .NET and TS.
-2. Inspect outgoing payloads in tests (`query-builder.test.ts`, .NET integration tests).
+1. Build equivalent filter/order/limit query in.NET and TS.
+2. Inspect outgoing payloads in tests (`query-builder.test.ts`,.NET integration tests).
 3. Execute both and compare logical result sets.
 
 Expected checks:
 - Operator mapping and order-by serialization match protocol expectations.
-- TS and .NET both return consistent row counts/order for equivalent query intent.
+- TS and.NET both return consistent row counts/order for equivalent query intent.
 
 ## 2.13 Operations and observability
 
@@ -536,7 +536,7 @@ What to monitor first:
 - Partition pruning and hot-tier hits: `Perf.SegmentsPrunedByPartitionKey`, `Perf.HotSegmentHits` / `HotSegmentMisses`.
 - Parallel execution behavior: `Perf.ParallelSegmentScans`.
 - ⚠️ The `query` subsystem of `/api/admin/metrics` still carries `hotAggregateOps` and `coldAggregateOps`; nothing has
-  moved them since the old scans were deleted (**ColumnarRead, 0.3.0**).
+ moved them since the old scans were deleted (**ColumnarRead, 0.3.0**).
 
 Quick-answer matrix:
 
@@ -553,7 +553,7 @@ Quick-answer matrix:
 |---|---|---|
 | `INVALID_FORMAT` error | The request names the `format` query parameter, removed in **Lead S12, 0.6.0** | Drop the parameter: results are always column arrays (`columns`, `data`); ask for frames with `Accept` |
 | `Database is required` or path/body mismatch | Missing or inconsistent `database` field | Ensure body `database` matches `/api/databases/{db}` route. |
-| `ThenBy() requires OrderBy()` exception | Secondary sort called first | Add `OrderBy()` before `ThenBy()` in query chain. |
+| `ThenBy requires OrderBy` exception | Secondary sort called first | Add `OrderBy` before `ThenBy` in query chain. |
 | Query returns fewer rows than expected | Default/capped limit applied | Set explicit `limit` (or `0` when intentionally unbounded). |
 | Nested boolean request works over HTTP but not SDK builder | SDK does not expose groups API yet | Use raw protocol payload or flatten conditions; track `BL-044`. |
 | Slow cold predicate query | Limited pruning selectivity or high decode volume | Validate predicate columns, check pruning counters, review data distribution/segment stats. |
@@ -591,13 +591,13 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 ### Resolved gaps
 
 - ~~`DISTINCT` returned a `NULL` and its type's default as one row~~ — ✅ **Resolved** (**ColumnarRead, 0.3.0**):
-  `Distinct("Volume")` over rows holding both `NULL` and `0` (or `false`, or `""`) returned only one of them. A `NULL` is
-  now a distinct value of its own. `DISTINCT` also reads constant pages and small value sets from their statistics.
+ `Distinct("Volume")` over rows holding both `NULL` and `0` (or `false`, or `""`) returned only one of them. A `NULL` is
+ now a distinct value of its own. `DISTINCT` also reads constant pages and small value sets from their statistics.
 
 - ~~Nested group construction is not first-class in current SDK query builders~~ — ✅ **Resolved (P14, BL-044)**: WhereClause.Groups adopted end-to-end across SDKs/helpers with nested group support.
 - ~~No max-depth validation for deeply recursive `WhereClause.Groups`~~ — ✅ **Resolved (P14, BL-044)**: depth guardrails implemented.
-- ~~TypeScript client count may still use full query~~ — ✅ **Resolved** (P14, BL-026 for the endpoint and .NET; **architecture review, 0.3.0** for TypeScript): `count()` posts `/query/count` and transfers no row. It used to send `POST .../query` with `limit=0` — no limit — and download every matching row to read `rowCount`. Both SDKs drop aggregates and `groupBy` from a count, so it counts matching rows; .NET `CountAsync` sent them and got a 400.
-- ~~Fluent/public JOIN APIs remain unavailable~~ — ✅ **Resolved (P14 BL-009, P15)**: complete join engine with all five join types (INNER, LEFT, RIGHT, FULL OUTER, CROSS), post-join SELECT/WHERE/ORDER BY/LIMIT/aggregates, multi-column keys, chained joins (up to 8 tables), Grace hash join with spill-to-disk. Exposed in both .NET `TableQuery` and TypeScript `@aouda/client` query builders.
+- ~~TypeScript client count may still use full query~~ — ✅ **Resolved** (P14, BL-026 for the endpoint and.NET; **architecture review, 0.3.0** for TypeScript): `count` posts `/query/count` and transfers no row. It used to send `POST.../query` with `limit=0` — no limit — and download every matching row to read `rowCount`. Both SDKs drop aggregates and `groupBy` from a count, so it counts matching rows;.NET `CountAsync` sent them and got a 400.
+- ~~Fluent/public JOIN APIs remain unavailable~~ — ✅ **Resolved (P14 BL-009, P15)**: complete join engine with all five join types (INNER, LEFT, RIGHT, FULL OUTER, CROSS), post-join SELECT/WHERE/ORDER BY/LIMIT/aggregates, multi-column keys, chained joins (up to 8 tables), Grace hash join with spill-to-disk. Exposed in both.NET `TableQuery` and TypeScript `@aouda/client` query builders.
 - ~~Bool predicate overload parity~~ — ✅ **Resolved (P14, BL-038)**: `ConstBool`, `ColumnRef.Eq/Ne(bool)` added.
 - ~~Guid PK mixed-type comparison failure~~ — ✅ **Resolved (P14, BL-039)**: added `IsGuid`/`CompileGuid` path in `RowFilterEngine`.
 - ~~Nullable timestamp update failure~~ — ✅ **Resolved (P14, BL-040)**: deletion mask applied to validity bitmap.
@@ -607,9 +607,9 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 
 ### New capabilities (P15/P16)
 
-- **Extended filter operators (P16 H.2)**: TypeScript client now supports `in()`, `notIn()`, `like()`, `isNull()`, `isNotNull()`, `between()` in addition to the six comparison operators.
-- **Aggregate query builder (P16 H.1)**: TypeScript client supports `sum()`, `min()`, `max()`, `count()`, `groupBy()`, `groupAggregate()`. ⚠️ Until **ColumnarRead S16 (0.3.0)** the builder sent a field the server ignored, so these returned plain rows; they now send `aggregates` / `groupBy`.
-- **Columnar output (P16 H.4)**: `.toColumnar()` execution method for high-performance columnar access.
+- **Extended filter operators (P16 H.2)**: TypeScript client now supports `in`, `notIn`, `like`, `isNull`, `isNotNull`, `between` in addition to the six comparison operators.
+- **Aggregate query builder (P16 H.1)**: TypeScript client supports `sum`, `min`, `max`, `count`, `groupBy`, `groupAggregate`. ⚠️ Until **ColumnarRead S16 (0.3.0)** the builder sent a field the server ignored, so these returned plain rows; they now send `aggregates` / `groupBy`.
+- **Columnar output (P16 H.4)**: `.toColumnar` execution method for high-performance columnar access.
 
 ### Remaining gaps
 

@@ -119,7 +119,8 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         text = str(findings[0])
         self.assertTrue(text.startswith("guides/a.md:2: BL-100 shipped in aouda 0.12.0"), text)
-        self.assertIn("(**BL-100, 0.12.0**)", text)
+        self.assertIn("remove the shipped `next train` marker", text)
+        self.assertIn("do not stamp `0.12.0` into public prose", text)
 
     def test_unreleased_and_unknown_ids_pass(self):
         self.write("a.md", "(**BL-300, next train**) (**BL-200, next train**) (**BL-999, next train**)\n")
@@ -127,11 +128,8 @@ class CheckTests(unittest.TestCase):
 
     def test_an_allow_listed_phase_card_stays_next_train(self):
         """A released section names an allow-listed card as an open defect. A marker for its fix is not stale."""
-        self.assertEqual(cnt._ALLOW, {
-            "BL-332", "BL-558", "BL-787", "BL-1010", "BL-1020", "BL-1035", "BL-1099", "BL-1101", "BL-1104",
-            "BL-1133", "BL-1145", "BL-1147", "BL-1485",
-        })
-        self.write("a.md", "(**BL-1020, next train**) and (**BL-100, next train**)\n")
+        self.assertEqual(cnt._ALLOW, {"BL-332"})
+        self.write("a.md", "(**BL-332, next train**) and (**BL-100, next train**)\n")
         findings = cnt.check(self.root, self.released)
         self.assertEqual([f.bl for f in findings], ["BL-100"])
 

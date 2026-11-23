@@ -6,13 +6,13 @@ parent: "Guides"
 
 # Aouda Functionality: Server Process and Multi-Database Lifecycle
 
-Document status: Complete  
-Primary owner: Engineering  
+Document status: Complete
+Primary owner: Engineering
 Last updated: 2026-08-13
 
-Coverage phases: P4 (Server & Clients), P6, P7, P16  
-Primary task folders: `docs/tasks/P4-Server-And-Clients-COMPLETION.md`, `docs/tasks/P6-COMPLETION.md`, `docs/tasks/P7-COMPLETION.md`, `docs/tasks/P16-COMPLETION.md`  
-Primary ADRs: `docs/decisions/0006-target-scope.md`, `docs/decisions/0026-aouda-cloud-and-hub-architecture.md`  
+Coverage phases: P4 (Server & Clients), P6, P7, P16
+Primary task folders: `docs/tasks/P4-Server-And-Clients-COMPLETION.md`, `docs/tasks/P6-COMPLETION.md`, `docs/tasks/P7-COMPLETION.md`, `docs/tasks/P16-COMPLETION.md`
+Primary ADRs: `docs/decisions/0006-target-scope.md`, `docs/decisions/0026-aouda-cloud-and-hub-architecture.md`
 Related functionality docs: `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-Partitioning-And-Multitenancy.md`, `docs/dev/Functionality-Replication-And-Clustering.md`, `docs/dev/Functionality-Cloud-And-Hub.md`, `docs/dev/Functionality-Storage-And-Persistence.md`, `docs/dev/Functionality-Write-Path-Durability.md`
 
 ---
@@ -70,7 +70,7 @@ If your question is "What endpoints exist for operators?", go to:
 | Observability endpoints and metrics | §2.13 Operations and observability |
 | Health endpoints for Kubernetes probes | §2.13 Operations and observability |
 | What changed between P4 flat routes and P6 database-scoped routes | §2.5 Phase coverage matrix, §2.7 Core concepts |
-| Known gaps and missing .NET client operations | §2.18 Known gaps |
+| Known gaps and missing.NET client operations | §2.18 Known gaps |
 
 **Role-based map:**
 
@@ -95,7 +95,7 @@ If your question is "What endpoints exist for operators?", go to:
 | `src/Aouda.Engine.Api/DatabaseManager.cs` | Multi-engine orchestrator |
 | `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs` | Per-database memory coordination |
 | `src/Aouda.Engine.Storage/Registry/` | `DatabaseRegistry`, `DatabaseRegistryStore`, `DatabaseState`, `DatabaseOptions` |
-| `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` | .NET client database API |
+| `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` |.NET client database API |
 
 ---
 
@@ -151,7 +151,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ### Planned / Proposed
 
 - **TypeScript client `client.Databases.get(name)` and `drop(name)`** — HTTP `GET /api/databases/{db}` and `DELETE /api/databases/{db}` exist on the server; the TypeScript client wraps are tracked as a follow-on item.
-- **`client.Databases.DropAsync()` in .NET client** — `AoudaDatabasesApi` currently exposes only `ListAsync` and `CreateAsync`; `GET /api/databases/{db}` and `DELETE /api/databases/{db}` are server-implemented but not wrapped. Backlog item.
+- **`client.Databases.DropAsync` in.NET client** — `AoudaDatabasesApi` currently exposes only `ListAsync` and `CreateAsync`; `GET /api/databases/{db}` and `DELETE /api/databases/{db}` are server-implemented but not wrapped. Backlog item.
 - **Per-database Prometheus scrape** — Current metrics API emits JSON; Prometheus format is explicitly deferred.
 - **`ActiveConnections` counter in `MetricsSummary`** — Returns 0; HTTP connection tracking wiring is not yet complete.
 - **Historical per-database metrics series** — Point-in-time snapshots only; no time-series store for per-db metrics.
@@ -166,7 +166,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 | Phase | Tasks / Reports | Delivered capability | Undone / deferred | Backlog |
 |---|---|---|---|---|
-| **P6** (Multi-Database) | Epics A–F | Multi-database registry (`databases.json`); `DatabaseManager`; database-scoped routes (`/api/databases/{db}/…`); database CRUD; wire protocol v2 (required `database` field); .NET client `AoudaClient(url, dbName)`, `client.Databases.List/Create`; per-database memory governance (`ServerMemoryBudgetManager`); per-database metrics (`DatabaseMetricsTracker`); per-database health check; `GET /api/server/memory`, `/api/server/metrics`, `/api/server/databases/{db}/metrics`; replication v2/v3; write concern | TypeScript multi-database client (Epic C.3) not evidenced in this repo; Studio DB navigation (Epic D) not evidenced; per-database Prometheus deferred; dynamic table-subscription reconfig requires reconnect | BL-001 resolved; per-db Prometheus deferred |
+| **P6** (Multi-Database) | Epics A–F | Multi-database registry (`databases.json`); `DatabaseManager`; database-scoped routes (`/api/databases/{db}/…`); database CRUD; wire protocol v2 (required `database` field);.NET client `AoudaClient(url, dbName)`, `client.Databases.List/Create`; per-database memory governance (`ServerMemoryBudgetManager`); per-database metrics (`DatabaseMetricsTracker`); per-database health check; `GET /api/server/memory`, `/api/server/metrics`, `/api/server/databases/{db}/metrics`; replication v2/v3; write concern | TypeScript multi-database client (Epic C.3) not evidenced in this repo; Studio DB navigation (Epic D) not evidenced; per-database Prometheus deferred; dynamic table-subscription reconfig requires reconnect | BL-001 resolved; per-db Prometheus deferred |
 | **P7** (Production Scenarios) | T6 (durability), T10 (harness reports), bug-fix session | `POST /api/server/shutdown` (loopback-only, BL-028); `POST /api/databases/{db}/query/count`; `RemoteTableQuery.CountAsync`; harness scenario M.1–M.8 multi-database validation | BL-028 formal resolution carried into P14 write-path improvements | BL-028 resolved here; BL-023, BL-024 partially open |
 | **P16** (Cloud & Hub), SA6 | A.1–A.11, SA6, ENG1 | Unified CLI: `aouda start/stop/databases`; `ServerHostRunner`; admin API expansion under `/admin/*` (cluster, backup, config, node, capabilities); `cluster-state.json` + `backup-config.json` runtime persistence; CORS defaults for Hub; `Aouda:Bind`, `Aouda:Join`, `Aouda:Role` config keys | `aouda dev` not evidenced as distinct command vs `aouda start`; Hub/Studio/TypeScript implementations in sibling repos | BL-042, BL-043 (OAuth) deferred |
 
@@ -204,8 +204,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | `Aouda.Server.exe` / `aouda` command split | ✅ | | | `src/Aouda.Server/Cli/CliParser.cs`, P4 §2 #19 | |
 | First-run bootstrap (`GET /api/auth/setup/status`, `aouda init`) | ✅ | | | `src/Aouda.Server/Controllers/SetupController.cs`, `src/Aouda.Cli/Commands/InitCommand.cs` | |
 | `Aouda.Embedded.Hot` hot cache client | | | ❌ | withdrawn BL-162 (2026-08-13) | Rebuild as named-query materialization (BL-164) |
-| .NET client `client.Databases.ListAsync/CreateAsync` | ✅ | | | `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` | |
-| .NET client `client.Databases.GetAsync / DropAsync` | | | ❌ | P6 §5.2 (HTTP endpoints exist); `AoudaDatabasesApi.cs` has only List + Create | See §2.18 |
+|.NET client `client.Databases.ListAsync/CreateAsync` | ✅ | | | `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` | |
+|.NET client `client.Databases.GetAsync / DropAsync` | | | ❌ | P6 §5.2 (HTTP endpoints exist); `AoudaDatabasesApi.cs` has only List + Create | See §2.18 |
 | Admin management API under `/admin/*` (P16) | ✅ | | | `src/Aouda.Server/Controllers/Cluster|Backup|Config|Node|CapabilitiesController.cs`, P16 §5.3 | |
 | Runtime config persistence (`cluster-state.json`; the backup schedule is in the `_settings` database) | ✅ | | | P16 §3.2, §5.6 | |
 | Prometheus scrape format | | | ❌ | P4 §10 (deferred); P6 §10 | See §2.18 |
@@ -229,19 +229,19 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
 
 ```
 {DataPath}/
-  Server/
-    databases.json            ← registry of all database definitions
-    cluster-state.json        ← runtime cluster config (P16, present if cluster joined)
-  Databases/
-    {dbName}/
-      catalog/
-        catalog.json          ← table/column definitions (WAL-backed)
-      wal/
-        wal_000000001.log   ← segmented write-ahead log (not insert.wal)
-        CHECKPOINT          ← crash redo horizon
-      tables/
-        t{id}/                ← one per table, named by table id (t0005); column files, segment manifests
-      materialized/           ← materialized query definitions + data
+ Server/
+ databases.json ← registry of all database definitions
+ cluster-state.json ← runtime cluster config (P16, present if cluster joined)
+ Databases/
+ {dbName}/
+ catalog/
+ catalog.json ← table/column definitions (WAL-backed)
+ wal/
+ wal_000000001.log ← segmented write-ahead log (not insert.wal)
+ CHECKPOINT ← crash redo horizon
+ tables/
+ t{id}/ ← one per table, named by table id (t0005); column files, segment manifests
+ materialized/ ← materialized query definitions + data
 ```
 
 ### Route taxonomy
@@ -265,10 +265,10 @@ P4 introduced a flat `/api/*` surface (single engine, no database context). P6 m
 
 ```
 POST /api/databases
-  → Creating → Active
-              ↓
+ → Creating → Active
+ ↓
 DELETE /api/databases/{db}
-              → Dropping → Dropped (removed from registry on next save)
+ → Dropping → Dropped (removed from registry on next save)
 ```
 
 `DatabaseManager.InitializeAsync` opens all `Active` entries at startup. `Failed` databases (failed to open) are tracked in `_failedDatabases` and visible in health responses.
@@ -289,40 +289,40 @@ DELETE /api/databases/{db}
 
 ```
 Process start
-  → WebApplication.CreateBuilder
-  → AddAoudaServer (DI registration)
-      - DatabaseRegistry + DatabaseRegistryStore (registry)
-      - DatabaseManager (orchestrator)
-      - ServerMemoryBudgetManager (memory governance)
-      - DatabaseMetricsTracker (per-db ops metrics)
-      - MetricsCollector (global Perf counters)
-      - HealthAggregator + IComponentHealthCheck implementations
-      - StructuredLogging + OtelConfiguration
-  → MapControllers
-  → StartAsync
-      DatabaseManager.InitializeAsync
-        → reads databases.json via DatabaseRegistryStore
-        → calls AoudaEngine.OpenAsync for each Active database
-        → registers each engine with ServerMemoryBudgetManager
-      PendingOpsWorker.StartAsync
-        → prunes Done/Failed jobs from pending_jobs.json
-        → re-enqueues any Running/Interrupted jobs (crash recovery)
-        → starts background processing loop (Channel-based)
-  → Kestrel begins accepting requests
-  → Middleware pipeline:
-      ProtocolVersionMiddleware
-      CorrelationIdMiddleware
-      LogContextEnricherMiddleware
-      RequestLoggingMiddleware
-      RateLimiter (concurrency 50 / queue 100)
-      RequestTimeouts (30 s)
-      Controllers (database-aware routing)
-  → StopAsync
-      PendingOpsWorker.StopAsync
-        → drains in-flight job (waits for current handler to complete or cancels)
-        → marks interrupted jobs as Interrupted in pending_jobs.json
-      DatabaseManager.DisposeAsync
-        → AoudaEngine.DisposeAsync for each engine (WAL flush + cleanup)
+ → WebApplication.CreateBuilder
+ → AddAoudaServer (DI registration)
+ - DatabaseRegistry + DatabaseRegistryStore (registry)
+ - DatabaseManager (orchestrator)
+ - ServerMemoryBudgetManager (memory governance)
+ - DatabaseMetricsTracker (per-db ops metrics)
+ - MetricsCollector (global Perf counters)
+ - HealthAggregator + IComponentHealthCheck implementations
+ - StructuredLogging + OtelConfiguration
+ → MapControllers
+ → StartAsync
+ DatabaseManager.InitializeAsync
+ → reads databases.json via DatabaseRegistryStore
+ → calls AoudaEngine.OpenAsync for each Active database
+ → registers each engine with ServerMemoryBudgetManager
+ PendingOpsWorker.StartAsync
+ → prunes Done/Failed jobs from pending_jobs.json
+ → re-enqueues any Running/Interrupted jobs (crash recovery)
+ → starts background processing loop (Channel-based)
+ → Kestrel begins accepting requests
+ → Middleware pipeline:
+ ProtocolVersionMiddleware
+ CorrelationIdMiddleware
+ LogContextEnricherMiddleware
+ RequestLoggingMiddleware
+ RateLimiter (concurrency 50 / queue 100)
+ RequestTimeouts (30 s)
+ Controllers (database-aware routing)
+ → StopAsync
+ PendingOpsWorker.StopAsync
+ → drains in-flight job (waits for current handler to complete or cancels)
+ → marks interrupted jobs as Interrupted in pending_jobs.json
+ DatabaseManager.DisposeAsync
+ → AoudaEngine.DisposeAsync for each engine (WAL flush + cleanup)
 ```
 
 ### Component interactions
@@ -336,7 +336,7 @@ Process start
 | `PendingJobStore` | `src/Aouda.Engine.Storage/Jobs/PendingJobStore.cs` | JSON persistence for `PendingJobRecord`s; atomic write; survives crashes |
 | `DatabaseRegistry` | `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs` | In-memory registry state with read-lock |
 | `DatabaseRegistryStore` | `src/Aouda.Engine.Storage/Registry/DatabaseRegistryStore.cs` | Serializes registry to/from `databases.json` with atomic writes |
-| `ServerMemoryBudgetManager` | `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs` | Coordinates per-engine budgets; exposes `GetServerUsage()` |
+| `ServerMemoryBudgetManager` | `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs` | Coordinates per-engine budgets; exposes `GetServerUsage` |
 | `DatabaseMetricsTracker` | `src/Aouda.Server/Metrics/DatabaseMetricsTracker.cs` | Records per-db query/insert ops; snapshots for `GET /api/server/metrics` |
 | `DatabaseHealthCheck` | `src/Aouda.Server/Health/DatabaseHealthCheck.cs` | Non-critical health check; queries engine reachability |
 | `ServerController` | `src/Aouda.Server/Controllers/ServerController.cs` | `GET /api/server/memory`, `/api/server/metrics`, `/api/server/databases/{db}/metrics`, `POST /api/server/shutdown` |
@@ -348,8 +348,8 @@ Process start
 
 - `DatabaseManager` constructor accepts an optional `ServerMemoryBudgetManager?`; it is null in isolated test contexts.
 - `DatabasesController` validates that the `database` field in request bodies matches the `{db}` path segment; mismatch → `400 INVALID_REQUEST`.
-- `TableDurabilityOptions` null fields inherit database-level defaults. (**Lead S26, 0.6.0**) A table's `Level` may be `strict`, `unlogged` or `memory`; `os` is refused (a database level only), and `strict` is refused unless the database has a WAL (`strict` or `os`; **BL-1175, next train**).
-- (**Lead S26, 0.6.0**) A database's `Durability` is read at every open. A database that has a WAL (`strict`, `os`) reopened at `unlogged` or `memory` replays the WAL, flushes every row, closes cleanly and **retires the WAL** at that open — refused (`WAL_RETIREMENT_REFUSED`, WAL kept) when it cannot finish (**BL-1145, next train**; [Changing a level](write-durability.md#changing-a-level)).
+- `TableDurabilityOptions` null fields inherit database-level defaults. (**Lead S26, 0.6.0**) A table's `Level` may be `strict`, `unlogged` or `memory`; `os` is refused (a database level only), and `strict` is refused unless the database has a WAL (`strict` or `os`;).
+- (**Lead S26, 0.6.0**) A database's `Durability` is read at every open. A database that has a WAL (`strict`, `os`) reopened at `unlogged` or `memory` replays the WAL, flushes every row, closes cleanly and **retires the WAL** at that open — refused (`WAL_RETIREMENT_REFUSED`, WAL kept) when it cannot finish ([Changing a level](write-durability.md#changing-a-level)).
 - Write concern resolution order: per-write → table → database → `One`.
 
 ---
@@ -360,25 +360,25 @@ Process start
 
 ```
 POST /api/databases
-  → ProtocolVersionMiddleware (echo/set headers)
-  → CorrelationIdMiddleware (X-Correlation-ID)
-  → RateLimiter (concurrency check)
-  → RequestTimeouts (start 30 s clock)
-  → DatabasesController.CreateDatabase(request, ct)
-      → validate request.Name is not empty → 400 if empty
-      → DatabaseManager.CreateDatabaseAsync(name, options)
-          → _lifecycleLock.WaitAsync()       // serialize create/drop
-          → DatabaseRegistry.Exists(name)?   // → 409 if already exists
-          → DatabaseRegistryStore.CreateAsync(name, options)
-              → write Creating state to databases.json (atomic)
-              → create Databases/{name}/ directory scaffold
-          → AoudaEngine.OpenAsync(dbPath)    // open catalog + WAL + store
-          → register engine with _engines[name]
-          → _serverBudgetManager?.Register(name, engine.BudgetManager)
-          → DatabaseRegistry.SetState(name, Active) → write to databases.json
-          → _lifecycleLock.Release()
-      → return 201 Created + DatabaseInfoResponse
-  → RequestLoggingMiddleware (log duration)
+ → ProtocolVersionMiddleware (echo/set headers)
+ → CorrelationIdMiddleware (X-Correlation-ID)
+ → RateLimiter (concurrency check)
+ → RequestTimeouts (start 30 s clock)
+ → DatabasesController.CreateDatabase(request, ct)
+ → validate request.Name is not empty → 400 if empty
+ → DatabaseManager.CreateDatabaseAsync(name, options)
+ → _lifecycleLock.WaitAsync // serialize create/drop
+ → DatabaseRegistry.Exists(name)? // → 409 if already exists
+ → DatabaseRegistryStore.CreateAsync(name, options)
+ → write Creating state to databases.json (atomic)
+ → create Databases/{name}/ directory scaffold
+ → AoudaEngine.OpenAsync(dbPath) // open catalog + WAL + store
+ → register engine with _engines[name]
+ → _serverBudgetManager?.Register(name, engine.BudgetManager)
+ → DatabaseRegistry.SetState(name, Active) → write to databases.json
+ → _lifecycleLock.Release
+ → return 201 Created + DatabaseInfoResponse
+ → RequestLoggingMiddleware (log duration)
 ```
 
 **State mutations:** `databases.json` updated twice (Creating → Active); directory scaffold created; engine opened.
@@ -390,50 +390,50 @@ POST /api/databases
 
 ```
 DELETE /api/databases/{db}
-  → middleware chain (protocol, correlation, rate limit, timeout)
-  → DatabasesController.DropDatabase(db, ct)
-      → DatabaseManager.DropDatabaseAsync(db)
-          → _lifecycleLock.WaitAsync()        // serialize create/drop
-          → verify engine is in Active state  // → 404 if not found, 204 idempotent if already Dropping
-          → remove engine from _engines[db]   // no more queries routed to this engine
-          → unregister from _serverBudgetManager
-          → collect branch engines (snapshots, replicas)
-          → DatabaseRegistry.MarkForDropAsync(db)  // persist Dropping state (atomic write)
-          → _lifecycleLock.Release()          // ← lock released here; 204 about to return
-          → PendingOpsWorker.EnqueueAsync(    // persisted to pending_jobs.json BEFORE return
-              "DropDatabase",
-              '{"name":"<db>"}',
-              inMemoryContext: (engine, branchEngines))
-      → return 204 No Content
-  → background: PendingOpsWorker dequeues + dispatches to DropDatabaseJobHandler
-      Phase 1 (if inMemoryContext not null):  engine.DropDisposeAsync()
-                                               // skips HRA snapshot; WAL/data discarded
-                                               // branch engines also disposed
-      Phase 2 (retry loop):  Directory.Delete(recursive) — 1s→2s→…→30s cap
-      Phase 3 (retry loop):  DatabaseRegistry.CompleteDropAsync(db)
-                                               // removes Dropping entry; atomic write
+ → middleware chain (protocol, correlation, rate limit, timeout)
+ → DatabasesController.DropDatabase(db, ct)
+ → DatabaseManager.DropDatabaseAsync(db)
+ → _lifecycleLock.WaitAsync // serialize create/drop
+ → verify engine is in Active state // → 404 if not found, 204 idempotent if already Dropping
+ → remove engine from _engines[db] // no more queries routed to this engine
+ → unregister from _serverBudgetManager
+ → collect branch engines (snapshots, replicas)
+ → DatabaseRegistry.MarkForDropAsync(db) // persist Dropping state (atomic write)
+ → _lifecycleLock.Release // ← lock released here; 204 about to return
+ → PendingOpsWorker.EnqueueAsync(// persisted to pending_jobs.json BEFORE return
+ "DropDatabase",
+ '{"name":"<db>"}',
+ inMemoryContext: (engine, branchEngines))
+ → return 204 No Content
+ → background: PendingOpsWorker dequeues + dispatches to DropDatabaseJobHandler
+ Phase 1 (if inMemoryContext not null): engine.DropDisposeAsync
+ // skips HRA snapshot; WAL/data discarded
+ // branch engines also disposed
+ Phase 2 (retry loop): Directory.Delete(recursive) — 1s→2s→…→30s cap
+ Phase 3 (retry loop): DatabaseRegistry.CompleteDropAsync(db)
+ // removes Dropping entry; atomic write
 ```
 
-**State mutations:** engine removed from routing immediately (foreground); directory and registry entry removed later (background).  
-**Crash safety:** `pending_jobs.json` is written atomically before `204` is returned. On restart, `PendingOpsWorker.StartAsync` loads `Running`/`Interrupted` jobs and re-executes them; phase 1 (engine dispose) is skipped on the recovery path since the engine is no longer in memory.  
-**Idempotency:** Re-issuing `DELETE` while a drop is in progress returns `204` (idempotent, no second job enqueued).  
-**Observability:** `Perf.DatabasesDropped` counter; structured log at `Information` per phase; `Error`-level log if retry eventually fails.  
+**State mutations:** engine removed from routing immediately (foreground); directory and registry entry removed later (background).
+**Crash safety:** `pending_jobs.json` is written atomically before `204` is returned. On restart, `PendingOpsWorker.StartAsync` loads `Running`/`Interrupted` jobs and re-executes them; phase 1 (engine dispose) is skipped on the recovery path since the engine is no longer in memory.
+**Idempotency:** Re-issuing `DELETE` while a drop is in progress returns `204` (idempotent, no second job enqueued).
+**Observability:** `Perf.DatabasesDropped` counter; structured log at `Information` per phase; `Error`-level log if retry eventually fails.
 **Tests:** `tests/Aouda.Engine.Api.Tests/DatabaseManagerTests.cs` (BL-127 ACs 1–14); `tests/Aouda.Engine.Api.Tests/Jobs/PendingOpsWorkerTests.cs` (BL-129 ACs S2-1–S2-8).
 
 ### Walk-through 3: Database-scoped query routing
 
 ```
 POST /api/databases/{db}/query
-  Body: { "database": "{db}", "table": "orders", "limit": 100 }
-  → middleware chain (protocol, correlation, rate limit, timeout)
-  → QueryController.ExecuteQuery(db, request, ct)
-      → validate request.Database == db (path match) → 400 if mismatch
-      → DatabaseManager.GetEngine(db) → lock-free TryGetValue
-          → 404 DATABASE_NOT_FOUND if engine absent
-      → QueryTranslator.Translate(engine, request) → TableQuery
-      → TableQuery.ToColumnarAsync(ct)    // engine evaluates
-      → BuildColumnarResponse(result) → JSON
-  → return 200 + ColumnarResult JSON
+ Body: { "database": "{db}", "table": "orders", "limit": 100 }
+ → middleware chain (protocol, correlation, rate limit, timeout)
+ → QueryController.ExecuteQuery(db, request, ct)
+ → validate request.Database == db (path match) → 400 if mismatch
+ → DatabaseManager.GetEngine(db) → lock-free TryGetValue
+ → 404 DATABASE_NOT_FOUND if engine absent
+ → QueryTranslator.Translate(engine, request) → TableQuery
+ → TableQuery.ToColumnarAsync(ct) // engine evaluates
+ → BuildColumnarResponse(result) → JSON
+ → return 200 + ColumnarResult JSON
 ```
 
 **State mutations:** none (read-only query path).
@@ -443,17 +443,17 @@ POST /api/databases/{db}/query
 ### Walk-through 4: Graceful shutdown
 
 ```
-POST /api/server/shutdown  (must originate from loopback)
-  → middleware chain
-  → ServerController.Shutdown()
-      → ServerController.IsShutdownCallerLoopback(HttpContext)
-          → IPAddress.IsLoopback(RemoteIpAddress) → 403 if non-loopback
-      → _hostLifetime.StopApplication()
-          → CancellationToken cancellation propagates to all hosted services
-          → AoudaHostedService.StopAsync (or DatabaseManager.DisposeAsync)
-              → foreach engine: AoudaEngine.DisposeAsync()
-                  → WAL flush → hot segment seal → resource cleanup
-      → return 202 Accepted + { "status": "shutting down" }
+POST /api/server/shutdown (must originate from loopback)
+ → middleware chain
+ → ServerController.Shutdown
+ → ServerController.IsShutdownCallerLoopback(HttpContext)
+ → IPAddress.IsLoopback(RemoteIpAddress) → 403 if non-loopback
+ → _hostLifetime.StopApplication
+ → CancellationToken cancellation propagates to all hosted services
+ → AoudaHostedService.StopAsync (or DatabaseManager.DisposeAsync)
+ → foreach engine: AoudaEngine.DisposeAsync
+ → WAL flush → hot segment seal → resource cleanup
+ → return 202 Accepted + { "status": "shutting down" }
 ```
 
 **State mutations:** all engines flushed and closed; data directory left in clean state.
@@ -464,13 +464,13 @@ POST /api/server/shutdown  (must originate from loopback)
 
 ```
 aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durability": "strict", "maxMemoryShareBytes": 1073741824 } } }
-  → DeclarationFileReader reads it (Aouda:Declaration) into DatabaseConfigSection entries
-  → AoudaHostedService (or server startup middleware) reads the declaration's databases
-  → foreach entry name in the declaration:
-      → if !DatabaseManager.DatabaseExists(name):
-          → DatabaseManager.CreateDatabaseAsync(name, configOptions)  // idempotent
-      → if exists: no-op (reconcile is additive, not destructive)
-  → normal InitializeAsync opens all Active databases
+ → DeclarationFileReader reads it (Aouda:Declaration) into DatabaseConfigSection entries
+ → AoudaHostedService (or server startup middleware) reads the declaration's databases
+ → foreach entry name in the declaration:
+ → if !DatabaseManager.DatabaseExists(name):
+ → DatabaseManager.CreateDatabaseAsync(name, configOptions) // idempotent
+ → if exists: no-op (reconcile is additive, not destructive)
+ → normal InitializeAsync opens all Active databases
 ```
 
 **Result:** declared databases are available immediately after server start without manual `POST /api/databases` calls.
@@ -486,7 +486,7 @@ aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durab
 | Server + CLI bundled | Separate server binary and CLI tool | Single `aouda` binary via `Aouda.Cli`; `Aouda.Server.exe` restricted to runtime ops only | One binary to distribute; operators and AI agents learn one tool |
 | Management API design | Often requires config files or restarts | All mutations (cluster join, backup schedule, config) go through HTTP APIs; state persists in focused JSON files | Safe to automate with idempotent API calls; no server restart for most changes |
 | Observability granularity | Global metrics or none | Per-database memory + ops metrics alongside global Perf-counter subsystems; per-db health check in `/health/detailed` | Diagnose per-tenant hotspots without shared metrics noise |
-| Shutdown semantics | SIGTERM → hope | `POST /api/server/shutdown` calls `StopApplication()` → WAL flush → clean exit | Durability tests can trigger and verify clean shutdown without `kill -9` |
+| Shutdown semantics | SIGTERM → hope | `POST /api/server/shutdown` calls `StopApplication` → WAL flush → clean exit | Durability tests can trigger and verify clean shutdown without `kill -9` |
 
 ---
 
@@ -503,10 +503,10 @@ aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durab
 | `Aouda:MaxConnections` | `int` | `100` | `AOUDA_MAXCONNECTIONS` | Kestrel `MaxConcurrentConnections` |
 | `Aouda:MaxConcurrentRequests` | `int` | `50` | `AOUDA_MAXCONCURRENTREQUESTS` | Concurrency limiter; returns 503 at capacity |
 | `Aouda:RequestQueueLimit` | `int` | `100` | — | Queue depth before 503 |
-| `Aouda:RequestTimeoutMs` | `int` | `30000` | `AOUDA_REQUESTTIMEOUTMS` | Must be ≥ 100 ms; returns `504 REQUEST_TIMEOUT` on breach — inside a write too (**BL-1034, next train**: it was a `500 INTERNAL_ERROR` there). A data write answered `504` applied nothing; one already applied when the timeout fired is `500 WRITE_APPLIED_RESPONSE_FAILED` |
+| `Aouda:RequestTimeoutMs` | `int` | `30000` | `AOUDA_REQUESTTIMEOUTMS` | Must be ≥ 100 ms; returns `504 REQUEST_TIMEOUT` on breach — inside a write too : it was a `500 INTERNAL_ERROR` there). A data write answered `504` applied nothing; one already applied when the timeout fired is `500 WRITE_APPLIED_RESPONSE_FAILED` |
 | `Aouda:Join` | `string` | `null` | `AOUDA_JOIN` / `--join` | Join-on-startup primary address (P16) |
 | `Aouda:Role` | `string` | `null` | `AOUDA_ROLE` / `--role` | Startup role hint, e.g., `witness` (P16) |
-| `AOUDA_CORS_ORIGINS` / `Aouda:CorsOrigins` | `string[]` | Hub + localhost | env/config | Default CORS policy origins; comma-separated |
+| `AOUDA_CORS_ORIGINS` / `Aouda:CorsOrigins` | `string` | Hub + localhost | env/config | Default CORS policy origins; comma-separated |
 
 ### Memory settings (`Aouda:Memory`)
 
@@ -569,7 +569,7 @@ Startup binding for `AoudaServerOptions`:
 
 `code defaults → appsettings.json (optional) → appsettings.{Env}.json → environment variables → AOUDA_* env vars → CLI flags (--data-path, --port, …)`
 
-{: .important }
+{:.important }
 **Release installs do not ship `appsettings.json`.** `Aouda.Setup` and `install-aouda.ps1` pass `--data-path` and `--port` on the Windows Service / systemd command line instead.
 
 Nested sections use `__` separator in env vars: `AOUDA_MEMORY__MAXTOTALRAMBYTES`.
@@ -580,21 +580,21 @@ Nested sections use `__` separator in env vars: `AOUDA_MEMORY__MAXTOTALRAMBYTES`
 
 ### A) API coverage matrix
 
-| Capability | .NET API | HTTP | Status | Notes |
+| Capability |.NET API | HTTP | Status | Notes |
 |---|---|---|---|---|
-| List databases | `client.Databases.ListAsync()` | `GET /api/databases` | ✅ | |
+| List databases | `client.Databases.ListAsync` | `GET /api/databases` | ✅ | |
 | Create database | `client.Databases.CreateAsync(name, opts)` | `POST /api/databases` | ✅ | |
-| Get database | — | `GET /api/databases/{db}` | ⚠️ Partial | HTTP endpoint exists; .NET client wrapper missing (see §2.18) |
-| Drop database | — | `DELETE /api/databases/{db}` | ⚠️ Partial | HTTP endpoint exists; .NET client wrapper missing |
-| Query (columnar) | `client.Table(t).ToColumnarAsync()` | `POST /api/databases/{db}/query` | ✅ | |
-| Query count | `client.Table(t).CountAsync()` | `POST /api/databases/{db}/query/count` | ✅ | |
+| Get database | — | `GET /api/databases/{db}` | ⚠️ Partial | HTTP endpoint exists;.NET client wrapper missing (see §2.18) |
+| Drop database | — | `DELETE /api/databases/{db}` | ⚠️ Partial | HTTP endpoint exists;.NET client wrapper missing |
+| Query (columnar) | `client.Table(t).ToColumnarAsync` | `POST /api/databases/{db}/query` | ✅ | |
+| Query count | `client.Table(t).CountAsync` | `POST /api/databases/{db}/query/count` | ✅ | |
 | Insert rows | `client.Table(t).InsertAsync(rows)` | `POST /api/databases/{db}/tables/{t}/rows` | ✅ | |
 | Schema DDL | `client.Schema.*` | `GET/POST/DELETE/PATCH /api/databases/{db}/tables/*` | ✅ | |
 | Server memory | — | `GET /api/server/memory` | ✅ | Operator/monitoring use |
 | Server metrics | — | `GET /api/server/metrics` | ✅ | Operator/monitoring use |
 | Per-db metrics | — | `GET /api/server/databases/{db}/metrics` | ✅ | Operator/monitoring use |
 | Global Perf metrics | — | `GET /api/admin/metrics[/{subsystem}]` | ✅ | 12 subsystems, 1 h history |
-| Health liveness | `client.GetHealthAsync()` | `GET /health` | ✅ | Always 200 if process alive |
+| Health liveness | `client.GetHealthAsync` | `GET /health` | ✅ | Always 200 if process alive |
 | Health readiness | — | `GET /ready` | ✅ | 503 if critical component unhealthy |
 | Health detailed | — | `GET /health/detailed` | ✅ | All 6 component checks |
 | Graceful shutdown | — | `POST /api/server/shutdown` | ✅ | Loopback only; 403 for non-loopback |
@@ -610,45 +610,45 @@ Nested sections use `__` separator in env vars: `AOUDA_MEMORY__MAXTOTALRAMBYTES`
 
 | Intended capability | Missing surface | Workaround | Planned source | Priority |
 |---|---|---|---|---|
-| Get single database info via .NET | `AoudaDatabasesApi.GetAsync(name)` | Call `ListAsync()` and filter | Backlog item (not formally tracked in P6 reports) | Medium |
-| Drop database via .NET | `AoudaDatabasesApi.DropAsync(name)` | Use HTTP `DELETE /api/databases/{db}` directly | Same backlog item | Medium |
+| Get single database info via.NET | `AoudaDatabasesApi.GetAsync(name)` | Call `ListAsync` and filter | Backlog item (not formally tracked in P6 reports) | Medium |
+| Drop database via.NET | `AoudaDatabasesApi.DropAsync(name)` | Use HTTP `DELETE /api/databases/{db}` directly | Same backlog item | Medium |
 | Prometheus metrics scrape | `GET /metrics` in Prometheus format | Use JSON API and adapt | Explicitly deferred in P4/P6 sources | Low |
-| Write concern status in .NET result | `InsertResult.WriteConcernStatus` | Read from HTTP response body (`writeConcernStatus`) | Backlog (P6 §10) | Low |
+| Write concern status in.NET result | `InsertResult.WriteConcernStatus` | Read from HTTP response body (`writeConcernStatus`) | Backlog (P6 §10) | Low |
 
-### .NET client examples
+###.NET client examples
 
 ```csharp
 // Construct client (database name required since P6)
 using var client = new AoudaClient("http://localhost:5000", "analytics");
 
 // List all databases
-var list = await client.Databases.ListAsync();
+var list = await client.Databases.ListAsync;
 foreach (var db in list.Databases)
-    Console.WriteLine($"  {db.Name} ({db.State})");
+ Console.WriteLine($" {db.Name} ({db.State})");
 
 // Create a database with a cap on its share of the server budget (HTTP field maxMemoryShareBytes)
 var created = await client.Databases.CreateAsync("trading", new CreateDatabaseOptions
 {
-    Durability = "strict",   // Lead S26, 0.6.0: "strict" (default), "os", "unlogged", "memory"
-    ReplicationMode = "Replicate",
-    MaxMemoryShareBytes = 2L * 1024 * 1024 * 1024,
-    DefaultTemperature = "Auto"
+ Durability = "strict", // Lead S26, 0.6.0: "strict" (default), "os", "unlogged", "memory"
+ ReplicationMode = "Replicate",
+ MaxMemoryShareBytes = 2L * 1024 * 1024 * 1024,
+ DefaultTemperature = "Auto"
 });
 
 // Query a table in the created database
 var tradeClient = new AoudaClient("http://localhost:5000", "trading");
 var result = await tradeClient.Table("orders")
-    .Where("status", "eq", "open")
-    .Select("id", "price", "qty")
-    .Limit(50)
-    .ToColumnarAsync();
+.Where("status", "eq", "open")
+.Select("id", "price", "qty")
+.Limit(50)
+.ToColumnarAsync;
 
 Console.WriteLine($"{result.RowCount} open orders returned in {result.Stats.ExecutionMs} ms");
 
 // Count (no row materialization)
 long count = await tradeClient.Table("orders")
-    .Where("status", "eq", "filled")
-    .CountAsync();
+.Where("status", "eq", "filled")
+.CountAsync;
 ```
 
 ### HTTP examples
@@ -656,9 +656,9 @@ long count = await tradeClient.Table("orders")
 ```bash
 # Create a database
 curl -s -X POST http://localhost:5000/api/databases \
-     -H "Content-Type: application/json" \
-     -d '{"name":"analytics","durability":"strict","replicationMode":"Replicate","maxMemoryShareBytes":1073741824}'
-# → 201 + { "name": "analytics", "state": "Active", ... }
+ -H "Content-Type: application/json" \
+ -d '{"name":"analytics","durability":"strict","replicationMode":"Replicate","maxMemoryShareBytes":1073741824}'
+# → 201 + { "name": "analytics", "state": "Active",... }
 
 # List databases
 curl -s http://localhost:5000/api/databases
@@ -666,8 +666,8 @@ curl -s http://localhost:5000/api/databases
 
 # Database-scoped query
 curl -s -X POST http://localhost:5000/api/databases/analytics/query \
-     -H "Content-Type: application/json" \
-     -d '{"database":"analytics","table":"events","limit":10}'
+ -H "Content-Type: application/json" \
+ -d '{"database":"analytics","table":"events","limit":10}'
 
 # Server-wide memory snapshot
 curl -s http://localhost:5000/api/server/memory
@@ -690,17 +690,17 @@ aouda start --bind 0.0.0.0:5000 --data-dir /var/aouda/data
 aouda stop --server http://localhost:5000
 
 # Database management
-aouda databases list   --server http://localhost:5000
+aouda databases list --server http://localhost:5000
 aouda databases create --name trading --server http://localhost:5000
-aouda databases get    --name trading --server http://localhost:5000
-aouda databases drop   --name trading --server http://localhost:5000
+aouda databases get --name trading --server http://localhost:5000
+aouda databases drop --name trading --server http://localhost:5000
 
 # One-off version check
 aouda version
 
 # Offline admin bootstrap (Aouda.Server.exe only)
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-    --password-stdin --data /var/aouda/data
+ --password-stdin --data /var/aouda/data
 ```
 
 ---
@@ -713,32 +713,32 @@ aouda version
 
 ```bash
 # 1. Start the server
-aouda start --data-dir ./data --bind 0.0.0.0:5000
+aouda start --data-dir./data --bind 0.0.0.0:5000
 
 # 2. Bootstrap admin user (interactive, or --json for automation)
 printf '%s' "s3cret" | aouda init --admin-email admin@example.com --admin-password-stdin \
-    --server http://localhost:5000
+ --server http://localhost:5000
 
 # 3. Create a database
 curl -s -X POST http://localhost:5000/api/databases \
-     -H "Content-Type: application/json" \
-     -d '{"name":"app","durability":"strict"}'
+ -H "Content-Type: application/json" \
+ -d '{"name":"app","durability":"strict"}'
 
 # 4. Verify readiness
 curl -s http://localhost:5000/ready
-# → { "status": "healthy", ... }
+# → { "status": "healthy",... }
 
 # 5. Insert and query data (an insert's rows are column arrays: Lead S12, 0.6.0)
 curl -s -X POST http://localhost:5000/api/databases/app/tables/users/rows \
-     -H "Content-Type: application/json" \
-     -d '{"database":"app","columns":["id","name","age"],"data":[[1],["Alice"],[30]]}'
+ -H "Content-Type: application/json" \
+ -d '{"database":"app","columns":["id","name","age"],"data":[[1],["Alice"],[30]]}'
 
 curl -s -X POST http://localhost:5000/api/databases/app/query \
-     -H "Content-Type: application/json" \
-     -d '{"database":"app","table":"users","limit":10}'
+ -H "Content-Type: application/json" \
+ -d '{"database":"app","table":"users","limit":10}'
 ```
 
-**Expected result:** server starts, admin bootstrapped, database `app` created, row inserted and returned.  
+**Expected result:** server starts, admin bootstrapped, database `app` created, row inserted and returned.
 **Common mistake:** omitting `"database"` from the request body — returns `400 MISSING_DATABASE`.
 
 ---
@@ -750,28 +750,28 @@ curl -s -X POST http://localhost:5000/api/databases/app/query \
 ```json
 // appsettings.Production.json
 {
-  "Aouda": {
-    "DataPath": "/var/aouda/data",
-    "Port": 5000,
-    "Memory": { "MaxTotalRamBytes": 8589934592 },
-    "Databases": {
-      "analytics": {
-        "MaxMemoryShareBytes": 4294967296,
-        "DefaultTemperature": "ColdPreferred",
-        "WriteConcern": "One"
-      },
-      "trading": {
-        "MaxMemoryShareBytes": 2147483648,
-        "DefaultTemperature": "HotOnly",
-        "WriteConcern": "Majority",
-        "WriteConcernTimeoutMs": 3000,
-        "OnWriteConcernTimeout": "Fail"
-      }
-    },
-    "Logging": {
-      "Console": { "FormatterName": "json" }
-    }
-  }
+ "Aouda": {
+ "DataPath": "/var/aouda/data",
+ "Port": 5000,
+ "Memory": { "MaxTotalRamBytes": 8589934592 },
+ "Databases": {
+ "analytics": {
+ "MaxMemoryShareBytes": 4294967296,
+ "DefaultTemperature": "ColdPreferred",
+ "WriteConcern": "One"
+ },
+ "trading": {
+ "MaxMemoryShareBytes": 2147483648,
+ "DefaultTemperature": "HotOnly",
+ "WriteConcern": "Majority",
+ "WriteConcernTimeoutMs": 3000,
+ "OnWriteConcernTimeout": "Fail"
+ }
+ },
+ "Logging": {
+ "Console": { "FormatterName": "json" }
+ }
+ }
 }
 ```
 
@@ -787,7 +787,7 @@ curl -s http://localhost:5000/api/databases
 curl -s http://localhost:5000/api/server/memory
 ```
 
-**Expected result:** both databases open at startup without manual `POST /api/databases` calls; memory partitioned as declared.  
+**Expected result:** both databases open at startup without manual `POST /api/databases` calls; memory partitioned as declared.
 **Common mistake:** declaring `MaxMemoryShareBytes` that exceeds the server `MaxTotalRamBytes` ceiling — server validates at startup.
 
 ---
@@ -821,7 +821,7 @@ curl -s http://localhost:5000/api/databases
 # → all databases back in Active state
 ```
 
-**Expected result:** clean WAL flush on shutdown; all data durable; databases re-open at startup without manual reconciliation.  
+**Expected result:** clean WAL flush on shutdown; all data durable; databases re-open at startup without manual reconciliation.
 **Common mistake:** calling `POST /api/server/shutdown` from outside the local machine — returns `403 Forbidden`.
 
 ---
@@ -852,7 +852,7 @@ curl -s http://localhost:5000/api/databases
 | `ServerMemoryUsageSnapshot.PerDatabaseUsage[db].Pressure` | `ServerMemoryBudgetManager` | `Low` / `Medium` / `High` / `Critical` |
 | `X-Correlation-ID` response header | `CorrelationIdMiddleware` | Trace requests through logs |
 | `aouda.query` OTel span | `AoudaActivitySources` | Root query span; child `scan`, `filter` spans |
-| `aouda.wal.write`, `aouda.wal.flush` OTel spans | `AoudaActivitySources` | A WAL append and a WAL flush; emitted by every write path (**Durability-1 S05, next train** — they were defined and never started) |
+| `aouda.wal.write`, `aouda.wal.flush` OTel spans | `AoudaActivitySources` | A WAL append and a WAL flush; emitted by every write path (— they were defined and never started) |
 | `/health/detailed` JSON | `HealthAggregator` | `healthy` / `degraded` / `unhealthy` per component |
 
 ### Tuning sequence
@@ -884,7 +884,7 @@ curl -s http://localhost:5000/api/databases
 | `504 REQUEST_TIMEOUT` on heavy query | Query exceeded `RequestTimeoutMs` | Increase timeout or add predicates to reduce scan scope |
 | `403 Forbidden` on `POST /api/server/shutdown` | Non-loopback caller | Only call from same machine (e.g., `curl -X POST http://localhost:5000/api/server/shutdown`) |
 | `/ready` returns 503 shortly after start | Startup delay window active | Wait for `StartupDelaySeconds` (default 10 s) before load-balancer routing |
-| `/ready` returns 503 after startup | Something listed in `reasons` is still missing (**BL-1393, 0.11.0**) | Read `reasons[].code`: `setup_required`, `database_pending` / `database_not_open` (a declared database), `configured_key_inactive`, or `component_unhealthy` (then call `/health/detailed`; check `catalog` and `wal`); inspect logs. All codes: [HTTP API](../reference/http-api.md#get-ready) |
+| `/ready` returns 503 after startup | Something listed in `reasons` is still missing (**BL-1393, 0.11.0**) | Read `reasons.code`: `setup_required`, `database_pending` / `database_not_open` (a declared database), `configured_key_inactive`, or `component_unhealthy` (then call `/health/detailed`; check `catalog` and `wal`); inspect logs. All codes: [HTTP API](../reference/http-api.md#get-ready) |
 | Database stays in `Creating` state after restart | Process crashed during `CreateDatabaseAsync` | Delete partial directory and retry `POST /api/databases`; or call admin cleanup |
 | High memory pressure on one database | Tables fully loaded in hot tier | Add `databases.<db>.maxMemoryShareBytes` cap; review table `StoragePolicy` |
 | Write concern timeouts on insert | Replica ACK slower than `WriteConcernTimeoutMs` | Increase timeout or switch `OnWriteConcernTimeout` to `DegradeAndLog`; check replication lag via `/admin/replication/topology` |
@@ -953,7 +953,7 @@ curl -s http://localhost:5000/api/databases
 
 ## 2.18 Known Gaps and Undone Work
 
-- **`AoudaDatabasesApi` missing `GetAsync` and `DropAsync`** — The `AoudaDatabasesApi` in `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` exposes only `ListAsync` and `CreateAsync`. `GET /api/databases/{db}` and `DELETE /api/databases/{db}` are fully implemented on the server side but have no .NET client wrapper. No formal backlog ID found in source materials; treat as medium-priority follow-on.
+- **`AoudaDatabasesApi` missing `GetAsync` and `DropAsync`** — The `AoudaDatabasesApi` in `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` exposes only `ListAsync` and `CreateAsync`. `GET /api/databases/{db}` and `DELETE /api/databases/{db}` are fully implemented on the server side but have no.NET client wrapper. No formal backlog ID found in source materials; treat as medium-priority follow-on.
 
 - **TypeScript multi-database client (P6 Epic C.3)** — The TypeScript `@aouda/client` multi-database wrappers are documented as delivered in P6 reports but are in the `aouda-client-ts` sibling repository and not verifiable at symbol level here. See `docs/tasks/P6-COMPLETION.md` §10.
 
@@ -990,8 +990,8 @@ curl -s http://localhost:5000/api/databases
 - `src/Aouda.Engine.Api/DatabaseManager.cs` — Multi-database orchestrator.
 - `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs` — Per-database memory coordination.
 - `src/Aouda.Engine.Storage/Registry/` — `DatabaseRegistry`, `DatabaseRegistryStore`, `DatabaseOptions`, `DatabaseState`.
-- `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` — .NET client database API.
-- `src/Aouda.Client/AoudaClient.cs` — Top-level .NET client entry point.
+- `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` —.NET client database API.
+- `src/Aouda.Client/AoudaClient.cs` — Top-level.NET client entry point.
 - `src/Aouda.Cli/Commands/` — `StartCommand`, `StopCommand`, `DatabasesCommandHandler`.
 - `src/Aouda.Server/Hosting/ServerHostRunner.cs` — Server lifecycle runner for CLI-hosted server.
 - `src/Aouda.Server/Controllers/ServerController.cs` — Memory, metrics, shutdown endpoints.

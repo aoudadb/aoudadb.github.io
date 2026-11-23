@@ -14,7 +14,7 @@ This is the minimal path for an AI agent to get a working Aouda database, connec
 
 ```bash
 # Pass flags directly (recommended) or use an optional appsettings.json in the working directory:
-aouda start --port 5433 --data-dir ./data
+aouda start --port 5433 --data-dir./data
 # Create database via POST /api/databases if not auto-created from config
 ```
 
@@ -26,23 +26,23 @@ Connect with TypeScript:
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5433",
-  database: "default",
+ serverUrl: "http://localhost:5433",
+ database: "default",
 });
 
-await client.connect();
+await client.connect;
 
 await client.table("events").insert({
-  id: 1,
-  name: "startup",
-  timestamp: new Date().toISOString(),
+ id: 1,
+ name: "startup",
+ timestamp: new Date.toISOString,
 });
 
-const result = await client.table("events").execute();
+const result = await client.table("events").execute;
 console.log(result.rows);
 ```
 
-Connect with .NET:
+Connect with.NET:
 
 ```csharp
 using Aouda.Client;
@@ -51,15 +51,15 @@ var client = new AoudaClient("http://localhost:5433", "default");
 
 await client.GetTable("events").InsertAsync(new Dictionary<string, object?>
 {
-    ["id"] = 1,
-    ["name"] = "startup",
-    ["timestamp"] = DateTime.UtcNow
+ ["id"] = 1,
+ ["name"] = "startup",
+ ["timestamp"] = DateTime.UtcNow
 });
 
-var rows = await client.GetTable("events").ToListAsync();
+var rows = await client.GetTable("events").ToListAsync;
 ```
 
-Data already held as columns inserts and bulk-loads as a `ColumnBatch` (`ColumnBatch.Of(ColumnBatchColumn.FromInt64s(...), ...)`,
+Data already held as columns inserts and bulk-loads as a `ColumnBatch` (`ColumnBatch.Of(ColumnBatchColumn.FromInt64s(...),...)`,
 then `InsertAsync(batch)` or `client.BulkLoadAsync(table, batches)`), without a dictionary per row (**Lead S13, 0.6.0**). See
 [.NET client](../clients/dotnet.md).
 
@@ -73,18 +73,18 @@ No server, no network, no auth. The database lives in your process.
 using Aouda.Abstractions;
 using Aouda.Embedded;
 
-await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync();
+await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync;
 
 await db.GetTable("cache").InsertAsync(new Dictionary<string, object?>
 {
-    ["key"] = "result:abc",
-    ["value"] = "42",
-    ["created_at"] = DateTime.UtcNow
+ ["key"] = "result:abc",
+ ["value"] = "42",
+ ["created_at"] = DateTime.UtcNow
 });
 
 var rows = await db.GetTable("cache")
-    .Where("key", "eq", "result:abc")
-    .ToListAsync();
+.Where("key", "eq", "result:abc")
+.ToListAsync;
 ```
 
 Use embedded mode for:
@@ -98,7 +98,7 @@ Use embedded mode for:
 ## Option C — Local server with app auth (for user-facing apps)
 
 ```bash
-aouda start --port 5433 --data-dir ./data
+aouda start --port 5433 --data-dir./data
 # Bootstrap server admin, then POST /api/databases with auth enabled — see auth/setup.md
 ```
 
@@ -106,11 +106,11 @@ Create does not return a key. Declare the principal, or mint a key on it. a prin
 
 ```typescript
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5433",
-  database: "default",
+ serverUrl: "http://localhost:5433",
+ database: "default",
 });
 
-await client.connect();
+await client.connect;
 
 // Sign up an app user
 await client.auth.signUp("alice@example.com", "Password123!");
@@ -128,10 +128,10 @@ All Aouda errors follow a stable machine-readable contract:
 
 ```json
 {
-  "error": "AUTH_TOKEN_EXPIRED",
-  "message": "The access token has expired.",
-  "suggestion": "Call POST /api/auth/refresh with your refreshToken.",
-  "requestId": "req_abc123"
+ "error": "AUTH_TOKEN_EXPIRED",
+ "message": "The access token has expired.",
+ "suggestion": "Call POST /api/auth/refresh with your refreshToken.",
+ "requestId": "req_abc123"
 }
 ```
 
