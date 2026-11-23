@@ -100,7 +100,7 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
 
 
-`orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Byte`, `Bool` and `Float32` are sortable (**BL-1774, next train**). `Guid` and vectors are valid column types and are **not** sortable. So are the six [array types](array-columns.md), which are valid column types that cannot be sorted on at all. (**BL-035, 0.9.0**)
+`orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Byte`, `Bool` and `Float32` are sortable (**BL-1774, 0.17.1**). `Guid` and vectors are valid column types and are **not** sortable. So are the six [array types](array-columns.md), which are valid column types that cannot be sorted on at all. (**BL-035, 0.9.0**)
 
 Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. (**BL-035, 0.9.0**) A subscription whose `conflate.key` names an [array column](array-columns.md) is refused with `ARRAY_COLUMN_UNSUPPORTED` (a named query that filters on one is already refused at `schema apply`). HTTP execute of the same name still works.
 
