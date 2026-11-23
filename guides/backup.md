@@ -87,7 +87,15 @@ server on it with `aouda start --data-path <dir>`.
   that fails — a full disk, a damaged blob, in any member or in the auth database itself — leaves it as it was: the operator's key still
   signs in, a restart opens it, and the restore can be run again. The data member a failed restore stopped in still refuses to open
   until a restore of it completes (above). A crash during the swap is finished by the next start: the old auth database before the
-  swap's commit, the restored one from it — never neither (**BL-1761, next train**).
+  swap's commit, the restored one from it — never neither (**BL-1761, next train**). The copy is **opened before the swap** — a
+  point-in-time restore's replay, an exact restore's first open — so a replay that is refused there (`PITR_KEYLESS_DELETE_UNRESOLVED`,
+  a damaged archived frame) fails the restore with its own code and leaves the working auth database in place, signing the operator
+  in; it used to run after the swap and quarantine the only auth database left (**BL-1766, next train**).
+- **A member that does not open fails the restore.** A restore answers success only when every member it restored is open: one whose
+  files were restored and that does not open (a database this server knows, at the reopen; one it did not know, at its registration)
+  is quarantined with the cause, and the restore answers `500 BACKUP_RESTORE_FAILED` (a point-in-time restore: `PITR_FAILED`) naming it
+  and its cause, and the members that did open. It used to answer success while the member's failure was only in the server log
+  (**Durability-1 S26, next train**). A cancelled restore returns only once every download it started has finished.
 - **A restore checks the space first.** Before anything stops, it compares what it will write — every member's backed-up files, the copy
   each auth database is restored into, the WAL a point-in-time restore stages — plus a margin of 16 MiB and 5 % with the free space of
   the data directory's volume, and refuses `507 DISK_FULL` (with `Retry-After`) naming both numbers when it does not fit; nothing is
@@ -353,6 +361,7 @@ refused key (401 / 403) has the authentication envelope instead, and a `507 DISK
 | A read meets a cold segment whose column file is missing or short | `COLD_SEGMENT_UNREADABLE`, HTTP 500, logged | The read is refused, not answered with nulls; restore from a backup |
 | `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |
 | A restore failed part-way over several databases | the message ends `Databases already restored: …`, and says the auth databases were not changed (**BL-1761, next train**) | Restore again once the cause is fixed; those databases are already at the restore, and the operator is still signed in |
+| A restored member did not open | `BACKUP_RESTORE_FAILED` 500 (a point-in-time restore: `PITR_FAILED` 500), the message naming each member that did not open, its quarantine and its cause, and `Restored and open: …` (**Durability-1 S26, next train**) | Fix the cause named, then restore the set again (it clears the quarantine), or unquarantine the member |
 | The data volume cannot hold the restore | `DISK_FULL` 507 + `Retry-After`, naming the bytes needed and free; offline, `DISK_FULL` and exit 1 (**BL-1761, next train**) | Nothing was changed: free space (or restore offline onto a larger volume) and retry |
 | A blob of the set or the WAL archive does not match its key | `BACKUP_BLOB_DAMAGED` 409, naming the file and the set | Restore another set: the destination's copy is damaged. The database the restore stopped in refuses to open until a restore of it completes (**BL-1739, next train**) |
 | A database whose restore did not complete | `RESTORE_INCOMPLETE`: the database is quarantined (an embedded open throws; an unquarantine answers 503 `RESTORE_INCOMPLETE`) | Run the restore again, or restore another set; a restore that completes clears it (**BL-1739, BL-1740, next train**) |
