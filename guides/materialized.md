@@ -605,6 +605,8 @@ DROP COLUMN, RENAME COLUMN and a changed column default mark the results stale *
 after it, so a crash in between cannot bring the old column back (**BL-810, 0.3.0**). A new expression for a derived
 column, and a column's new type, do the same: both rewrite stored values no change event carries. (**0.3.0**)
 
+(**BL-1326, next train**) A **primary-key change** of the source — a key cleared, changed or gained through a schema apply — marks every result of the table stale and rebuilds it too, because a result's identity follows its source's. A `filter` whose source loses its key rebuilds key-less (rows are then identified by their content), and a key column the result lacks is added. A change that would leave a `topNPerGroup` result without a source key is **refused** with `MATERIALIZED_QUERY_NEEDS_SOURCE_KEY` (a `Failed` entry in a schema apply, whose `reason` starts with the code; the code has no HTTP status of its own): no retry satisfies it — drop the `topNPerGroup` queries first, or keep a primary key.
+
 The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
 `stats.routedTo` over HTTP (JSON, and the frame response's end frame — **Lead S09, 0.6.0**: it was the `X-Aouda-Stats` header), `ClientQueryStats.RoutedTo` in the C# SDK,
 `result.stats.routedTo` in the TypeScript SDK.
@@ -723,6 +725,7 @@ Key implementation anchors:
 2. State transition:
    - MQ state immediately changes to `Rebuilding`.
    - The current result table remains readable throughout with stale data.
+   - (**BL-1552, next train**) A read that began before the swap answers the previous generation or the new one, whole; the previous generation's files are kept until the reads holding them end. A read whose query is dropped as it starts fails with the not-found error.
 3. Shadow build:
    - A new `MaterializedQueryMaintainer` is constructed from scratch.
    - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and a fallback rebuild). A query an `Auto` bulk load's pass folds or applies never opens this scan.
@@ -1252,10 +1255,12 @@ pass folds in the same waves: the fold an `Auto` load used to build as its segme
 given up when refused or spilled, and past 256 MB on an embedded engine with no governor — is gone, and the load holds no
 materialized-query memory while it streams.
 
+(**BL-1020, next train**) The wave's reservation is made **before** it folds, from what the earlier waves measured; a refusal shrinks that wave before it folds (down to a sixteenth, which still runs), and what the fold holds beyond its reservation is charged after it. (**BL-1101, next train**) A result whose key map the budget refuses is still written at full speed: the pass reads the result's cold segments once per wave, and a refused key-map load is retried only after the memory ledger is resampled (about every 10 s).
+
 (**WorkloadCore S09, 0.3.0**) **Maintenance asks for its memory before it takes a lock** (BL-859). Each maintenance unit — a queued
 apply, an ingest-fed drain (gone in **WorkloadCore S10**), a deferred pass — asks the memory budget for a grant (a queued apply in the `Streaming` class,
 ahead of waiting loads whose memory its backlog holds; a load's drain or pass in `Background`) before it takes its
-queries' locks, and waits in the queue; it is never refused part-way through an apply. A load's maintenance that cannot
+queries' locks, and waits in the queue; it is never refused part-way through an apply. (**BL-1030, next train**) An apply's own queued changes count toward its minimum grant, so a backlog that fills the budget still drains. A load's maintenance that cannot
 get memory within 30 s is refused before it starts, and its queries are left behind and rebuilt.
 
 If a pass fails while writing a query, that query is left behind and owes nothing further (it is not
@@ -1487,7 +1492,7 @@ other queries. (**WorkloadCore S10, 0.3.0**) The retry is a **grant wait**, not 
 lowest work class (`Maintenance`) for a grant of the room its refusal lacked, and rebuilds once the memory broker can serve it.
 Refused again, it asks for twice as much; once the ask exceeds the governed budget it stops, and the query stays behind (stale,
 readable) for a `:refresh` or a larger budget, with the reason in the log. So it is retried only when the room exists, at most
-log₂(budget ÷ floor) times, never from row 0 on a schedule.
+log₂(budget ÷ floor) times, never from row 0 on a schedule. A requeued rebuild that waits past a sampling tick logs why once a minute (no room, higher-priority work ahead, the WAL, or no rebuild slot).
 
 ### After a restart, a query is stale until it is rebuilt (**BL-786, 0.3.0**)
 
@@ -1507,6 +1512,8 @@ Before this release it did, and the query then read as current while missing who
 rebuild that scans the source table clears it: `:refresh`, a fallback rebuild, or the automatic retry
 of a deferred query (**WorkloadCore S10, 0.3.0**: the requeued rebuild, served when the memory budget has room). If a query stays stale after a load, that is the reason, and `:refresh` (pooled
 with `staleOnly`) is the remedy.
+
+(**BL-1035, next train**) A query whose maintenance **failed to apply** a change is rebuilt by the engine, not left for `:refresh`: a memory or WAL refusal waits for room as a refused rebuild does, and any other failure is rebuilt at once, a bounded number of times. (**BL-1375, next train**) A rebuild that publishes but cannot clear a mark recorded under it is followed by a bounded rebuild; a query still stale after it logs "still stale after N rebuild attempt(s)" and needs a `:refresh`.
 
 ## 2.11d What a query costs to maintain: the `amplification` object {#amplification}
 
@@ -1643,6 +1650,8 @@ Each of these is refused at create, with the reason in the error:
 | Two time buckets and no `window.column`, or a `window.column` that is not a bucket output; a `topNPerGroup` whose window column is missing, not in its group-by, or not a `Timestamp` / `Date` | No window column to apply the horizon to |
 | A query over a windowed result that declares **no** window, or a longer `keep` than its upstream's | Below its upstream's horizon the upstream ignores late rows and deletes, so a group kept there would go stale unseen. For the same reason a `filter`, `latestPerKey` or `firstPerKey` — which cannot declare a window — is refused over a windowed result |
 | A window over a source with **retention** (for a query over a windowed result: the first table up the chain that is not one) — and retention on a table that such a window computes from | A read below the window is computed from the source; once the source has dropped a range nothing can recompute it, and the window would change the answer ([below](#queries-over-a-table-with-retention)) |
+
+(**BL-1042, next train**) The window rule is checked again when an upstream is **created again** under queries that read it: an upstream re-created narrower than a dependant is refused (`400 INVALID_REQUEST`), not rebuilt to the new reach, and a schema apply that would break the rule is refused whole, before any change.
 
 ### The horizon {#the-horizon}
 

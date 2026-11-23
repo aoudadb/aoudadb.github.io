@@ -421,8 +421,8 @@ batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered ta
   insert with such a transform is refused before anything lands).
 - **An array's payload counts against the job's ingest buffer** (its raw bytes plus 32 a value, so a load of wide curves fills the buffer
   in fewer rows) and spills like any column.
-- **An edge table cannot have an array column** (refused when the column is added, with `ARRAY_COLUMN_UNSUPPORTED`), so a bulk
-  load never meets one.
+- **An edge table's array property loads as on any table** (**BL-1249, next train**; an edge table refused an array column
+  from 0.9.0 until then). Only its source, destination and label column cannot be an array.
 
 **The SDK factories.** C#: `ColumnBatchColumn.FromDoubleArrays`, `FromFloat32Arrays`, `FromInt32Arrays`, `FromInt64Arrays`,
 `FromByteArrays` and `FromStringArrays`, each `(string name, T[]?[] values, byte[]? absentBits = null)` — a `null` row is a null cell, and the rows are **copied**
@@ -518,8 +518,9 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
 - **The JSON fallback.** A batch with a column no frame can carry (an object column from `ColumnBatchBuilder`) is sent as a JSON
   column-array body of the same rows, after the frames before it. So is every batch when `:begin` does not list
   `column-batch-v2` in `acceptedAppendFormats`. The values loaded are the same either way.
-- **Absent is not null, and a bulk load applies no defaults.** A cell marked absent is stored as null, except that an absent
-  `autoIncrement` cell is generated (BL-1104, as for any `:append`). An insert (`InsertAsync(ColumnBatch)`) does apply defaults.
+- **Absent is not null, and a bulk load applies defaults as an insert does** (**BL-1104, next train**). A cell marked absent takes
+  its column's default (null when it has none), and an absent `autoIncrement` cell is generated, as for any `:append`. Until then a
+  bulk load stored an absent cell as null.
 - **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129: the
   column used to be dropped, the key stored as `0`). A null in another NOT NULL column is stored as the type's default unless the
   load asks for `Validation = BulkLoadValidation.Strict`; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
@@ -556,6 +557,7 @@ What it shares with C#, and what changed for it in the same session:
   **Lead S22, 0.6.0**, the SDK's own recovery does, safely: after a lost connection, a timeout or a `503` it asks the server
   where the job is (a `:begin` with the job's key) and sends the same body again, up to 4 times; the server skips the frames it
   holds, so a body sent twice is applied once — as the C# SDK has done since Lead S21a.
+- (**BL-1347, next train**) A failed or aborted job's `idempotencyKey` stays reserved for its beginner for the idempotency window (`IdempotencyWindowMinutes`) after its session is swept: another credential presenting it is `403 AUTH_POLICY_DENIED`. A restart forgets the reservation, as it forgets the session.
 - **A failed load leaves the job open; the same call with the same `idempotencyKey` resumes it** from `:begin`'s `nextSequence`
   (**Lead S22, 0.6.0**; it was `resumeFromRow`, gone): the bodies the server holds are not sent, and the rows of the frames
   skipped are checked against the server's count, so a load framed differently is refused `BULK_LOAD_CURSOR_MISMATCH` instead of
@@ -733,6 +735,9 @@ A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../re
 |---|---|---|
 | `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, 0.9.0**) | Loaded as a second row (not checked) — **except in a table with an Expression column (a formula table), whose keys are checked at every level, as `strict` checks them** (**BL-1488, 0.15.0**) |
 | `strict` | Refused | The job fails at its commit, nothing committed |
+
+(**BL-1104, next train**) An **absent** cell of a column that has a default is neither: it takes the column's default at either
+level, as an insert stores it. Only a null (or an absent cell of a column without a default) is what the table above describes.
 
 Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value
 in a column the row's own table (`_table`) does not have, even when another table of the job has it (**Lead group 6 review, next
@@ -988,7 +993,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.WriteConcernTimeout` | `TimeSpan` | `5m` | positive duration | Engine/API/client | Timeout does not roll back committed load. |
 | `BulkLoadOptions.AdditionalTables` | list | `null` | table names | Engine/API/client | Enables multi-table atomic load. |
 | `BulkLoadOptions.DeferIndexBuild` | bool | `true` | `true/false` | Engine/API/client | Deferred work reported in progress DTO. |
-| `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables. |
+| `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables: (**BL-1248, next train**) refused at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS` when missing (it failed the job at its first `:append` and `:commit` before). |
 | `BulkLoadOptions.MaxRowsPerSegment` | int? | `TargetRowsPerPage * 16` | positive int | Engine/API/client | Segment sizing knob. |
 | `BulkLoadOptions.ConflictPolicy` | enum | `Block` | `Block`, `FailFast` | Engine/API/client | Controls behavior for concurrent regular writes. |
 | `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, 0.6.0**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |

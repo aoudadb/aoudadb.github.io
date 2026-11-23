@@ -70,6 +70,7 @@ The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, 
 | `OIDC_TRUST_INVALID` | error | `principals` | offline | 78 | Give the trust an absolute https issuer, a non-empty audience and subject, and values without surrounding blanks. |
 | `OIDC_TRUST_DUPLICATE` | error | `principals` | offline and state | 78 | Declare the trust on one principal: a token that matches two principals' trusts is refused. |
 | `OIDC_TRUST_OVERLAP` | error | `principals` | offline and state | 78 | Add a claim that tells the two principals' tokens apart (or remove one trust): an overlap is refused, never resolved by order. |
+| `OIDC_TRUST_JWKS_CONFLICT` | warning | `principals` | state | — | Delete the runtime trust, or declare the trust with the issuer's key source: an issuer has one key source, and a declared trust wins (ADR 0071 D-18). |
 | `OIDC_TRUST_REDUNDANT` | warning | `principals` | offline | — | Remove the narrower trust: the wider one already matches every token it matches. |
 | `PASSWORD_SEED_INVALID` | error | `principals` | offline and state | 78 | Give the seed by reference ({ "file" }, { "env" }, or { "hash" } with the server's password-hasher output), meeting the password policy. |
 | `PASSWORD_SEED_NEEDS_EMAIL` | error | `principals` | offline | 78 | Name the principal by its email address (a person signs in with it), or give it a key instead of a password. |

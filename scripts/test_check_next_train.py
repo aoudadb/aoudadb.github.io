@@ -127,9 +127,9 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(cnt.check(self.root, self.released), [])
 
     def test_an_allow_listed_phase_card_stays_next_train(self):
-        """0.14.0 names BL-1463 for a Declare slice. A marker for the rest of that card is not stale."""
-        self.assertEqual(cnt._ALLOW, {"BL-1463", "BL-1464"})
-        self.write("a.md", "(**BL-1463, next train**) and (**BL-100, next train**)\n")
+        """A released section names BL-1020 as an open defect. A marker for its fix is not stale."""
+        self.assertEqual(cnt._ALLOW, {"BL-1020", "BL-1035", "BL-1099", "BL-1101", "BL-1104"})
+        self.write("a.md", "(**BL-1020, next train**) and (**BL-100, next train**)\n")
         findings = cnt.check(self.root, self.released)
         self.assertEqual([f.bl for f in findings], ["BL-100"])
 

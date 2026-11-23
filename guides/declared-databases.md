@@ -253,6 +253,7 @@ nothing (it is not read as an empty declaration that retracts every database).
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
 | `reload_failed` (the entry, when one is named) | (**BL-1427, 0.14.0**) The last reload stopped part-way; the steps before it are applied | The next reload that completes |
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of the declared databases was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
+| `access_converge_failed` (the auth database) | (**BL-1596, next train**) Only after a backup restore: the declared access section could not be converged. What the file removed is removed where the node writes; the rest waits. The server keeps running | The next converge that completes (a reload, a restore) |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 
 (**BL-1464, 0.16.0**) `root_user_unusable` and `configured_key_inactive` are gone with the settings they reported on.

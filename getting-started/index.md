@@ -1719,7 +1719,7 @@ curl -s -X POST http://localhost:5000/api/auth/_serverauth/principals/ops/keys \
 | `AUTH_CREDENTIAL_EXPIRED` | 401 | The key or session has expired. Remedy `renew` |
 | `AUTH_CREDENTIAL_REVOKED` | 401 | Revoked, or the principal is disabled. Remedy `none` |
 | `AUTH_POLICY_DENIED` | 403 | The statements do not allow it. Remedy `grant` |
-| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh of a disabled principal |
+| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh, with the newest unexpired token of its family, of a disabled principal (a rotated or expired token is `401 AUTH_REFRESH_TOKEN_INVALID`) |
 
 The list, including `remedy`, is [whoami and remedy](../auth/whoami.md). `AUTH_TOKEN_MISSING`, `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`, `AUTH_TOKEN_REVOKED`, `AUTHORIZATION_DENIED` and `INSUFFICIENT_PERMISSIONS` are not produced.
 

@@ -51,7 +51,7 @@ A session token carries the session (`aud` is the database limit; omit `database
 |---|---|
 | `AUTH_RESET_TOKEN_INVALID` | The OTP does not match. |
 | `AUTH_RESET_TOKEN_EXPIRED` | The latest token has expired. |
-| `AUTH_RESET_TOKEN_EXHAUSTED` | Too many attempts (default 5). |
+| `AUTH_RESET_TOKEN_EXHAUSTED` | Too many attempts (default 5). At most five codes are compared, however many requests are in flight; a request that cannot reserve an attempt is answered EXHAUSTED or `409 WRITE_CONFLICT` and compared nothing, and a refused (`503`) use of a right code gives its attempt back (**BL-1019, next train**). |
 
 An operator sets a password with `PUT /api/databases/{db}/admin/users/{id}/password` (`{ "password", "forcePasswordChange"? }`), which is `204` and revokes that principal's sessions. `{id}` is the principal's id. `POST …/admin/users/{id}/invite` sends the reset OTP.
 
@@ -74,7 +74,7 @@ An operator sets a password with `PUT /api/databases/{db}/admin/users/{id}/passw
 | `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | A phone factor already exists. |
 | `AUTH_MFA_CHALLENGE_INVALID` | Wrong code. |
 | `AUTH_MFA_CHALLENGE_EXPIRED` | The challenge expired. |
-| `AUTH_MFA_CHALLENGE_EXHAUSTED` | Too many attempts. |
+| `AUTH_MFA_CHALLENGE_EXHAUSTED` | Too many attempts, counted as for the reset token above (**BL-1019, next train**). |
 
 An operator enrolls a phone factor with `POST …/admin/users/{id}/mfa/enroll`.
 
