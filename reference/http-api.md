@@ -615,10 +615,13 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log, then the auth bootstrap, the declared schema files, roles, keys and replication) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this). (**BL-1462, 0.14.0**) The port is open for the whole start, and this answers every caller but the health probes, loopback included |
 | `SETUP_REQUIRED` | 503 | The server's data directory has never been set up and nothing is declared (no server key, no `a declared principal`), so it is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, 0.14.0**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
-| `INTERNAL_ERROR` | 500 | An internal error occurred |
-| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice. (**BL-1034, next train**) Also the answer when the request timeout fires after the write was applied — a `504 REQUEST_TIMEOUT` there said "not applied" — including a `rows/batch` whose timeout fired after some of its operations were applied (read the data to see which), and an edge or vector insert (`…/edges`, `…/vectors/{column}`), which this code now covers too |
+| `INTERNAL_ERROR` | 500 | An internal error occurred. (**Durability-1 S10, next train**) Also the answer to a read of a cold segment whose column file is missing or short: it is refused instead of answered with nulls, and the server log carries `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> found=<missing | n bytes | no pages> expected=<…>`; restore the database from a backup ([Backup and restore](../guides/backup.md)) |
+| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out — and, for an update, a delete, a truncate or a merge, a failure to write its deletion masks (a full disk) **after** it committed: the write is durable and visible, and the next open replays its log frame (**BL-1729, next train**). No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice. (**BL-1034, next train**) Also the answer when the request timeout fires after the write was applied — a `504 REQUEST_TIMEOUT` there said "not applied" — including a `rows/batch` whose timeout fired after some of its operations were applied (read the data to see which), and an edge or vector insert (`…/edges`, `…/vectors/{column}`), which this code now covers too |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. (**BL-1033, next train**) A statement that alone exceeds the read path's ceiling — one no retry can satisfy — is `400 STATEMENT_TOO_LARGE` instead, with no `Retry-After`; this code is the transient refusal, which a retry can satisfy once other work releases its memory. |
-| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`; a materialized result's maintenance is still admitted up to `MaxWalBytes`, so a result that is behind catches up and releases its WAL (**BL-787, next train**). Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
+| `DISK_FULL` | 507 | (**BL-1658, next train**) The disk the request had to write to is full — the WAL, a bulk load's files, the backup target. The request was **not applied** (a WAL write is cut back to where it started; a bulk load stops before its commit point; a backup publishes nothing). `Retry-After: 30`; there is no estimate of when an operator frees space. Answered by every write endpoint, a bulk load's `:commit` and `:append` (an `:append` once the job has failed with it), `POST /admin/backup/trigger`, and `POST /admin/backup/restore` before it changes anything, naming the bytes it needs and the bytes free (**BL-1761, next train**), with no database name in the message. Retry after freeing space; no restart is needed — except when the full disk failed a WAL `fsync` (or the cut-back itself): the log then stops and answers `WAL_FAILED` until a restart. The SDKs do not re-send a write refused with a `507` (a write is re-sent only after a refusal that proves it was not applied — the memory, WAL-capacity, server-at-capacity and start-up refusals — or a connection that never opened): it surfaces as the error; retry after `Retry-After`. |
+| `WAL_FAILED` | 503 | (**BL-1703, next train**) A write or an `fsync` of the database's WAL failed earlier, and the log refuses every write until the database is reopened — a later sync cannot prove the failed range reached the disk. The request was **not applied**. `Retry-After: 60`. Clears only at a restart of the server (or of the database); read the log for the first failure. The SDKs do not re-send a write refused with it (it is not among the refusals that prove "not applied" to them, above); retry after `Retry-After`. |
+| `PROMOTION_INCOMPLETE` | 409 | (**BL-1202, next train**) `POST /api/databases/{db}/tables/{name}/promote-all-cold-for-update`: some of the table's cold segments were not promoted for update (a segment whose rows could not be loaded, or that a coalesce replaced meanwhile). The message gives the counts and `details` each segment's status; the segments that were promoted **stay promoted**, and a second call is idempotent. Before, such a call answered `200 { "promoted": n }` counting every attempt. A capacity refusal part-way keeps its own status and code and says how many were promoted before it |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) `POST …/tables/{name}/rows/batch` only: operation `k` (`k` ≥ 1) was refused for capacity. Operations `0` to `k − 1` **were applied**; operation `k` and the ones after it were not. `details` names `appliedOperations=k`, `totalOperations=n` and the refusal's own code. **No `Retry-After`**, deliberately: re-sending the whole batch would apply its first `k` operations twice. Re-send only the remaining operations (`operations[k..]`) as a new batch. A refusal of operation `0` is still the plain `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` with `Retry-After`: nothing was applied. It used to be that plain refusal whatever `k` was, which both SDKs re-send |
 | `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `REQUEST_TIMEOUT` | 504 | The request ran past the server's request timeout (`Aouda:RequestTimeoutMs`, 30 s by default; the bulk-load `:append` / `:commit` and `:refresh` endpoints have their own). (**BL-1034, next train**) A data write answered `504` — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert, an edge or vector insert — **applied nothing**: the timeout is honoured only before the write's commit point, so it is safe to retry. A write the server had already applied when the timeout fired is answered `500 WRITE_APPLIED_RESPONSE_FAILED` instead (do not re-send it). Before, a timeout inside a table, branch, database, graph, vector or query endpoint was answered `500 INTERNAL_ERROR` "Failed to …", which a client could not tell from a bug, and an applied write that then timed out was answered `504`. (This row used to name the code `TIMEOUT`; the server has always sent `REQUEST_TIMEOUT`.) |
@@ -633,7 +636,7 @@ design relies on. Before, it was not exposed and a browser read `null`.
 These also appear as WebSocket `error` `code` values where noted.
 
 (**BL-944, 0.4.0**) **A refusal on a WebSocket is its own code.** A `stream_rows` write, a subscription's snapshot and a
-subscription's permission read that the server refused for capacity answer `MEMORY_BUDGET_EXCEEDED` or `WAL_CAPACITY_EXCEEDED`
+subscription's permission read that the server refused for capacity answer `MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `DISK_FULL` or `WAL_FAILED`
 (message ending "retry after N s"), and a write conflict `WRITE_CONFLICT` — wherever the refusal arose. (**BL-1033, next train**) A snapshot or a
 `stream_rows` statement that alone exceeds the read path's ceiling answers `STATEMENT_TOO_LARGE`, its message ending with the remedy
 and no "retry after". Before, a wrapped refusal
@@ -649,7 +652,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_MUTATION_VALUE_NODE_INVALID` | 400 (schema apply) | A `values` / `set` entry is an object node that is neither `{ "param": "<name>" }` nor `{ "value": <literal> }` |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
 | `DUPLICATE_PRIMARY_KEY` | 409 | *BL-636, 0.1.37.* An insert named a primary key a live row already holds. `details` carries the offending key. Use `op: "upsert"` (named mutation) or `mode: "upsert"` (write-stream) when the write is meant to replace. Previously surfaced as `500 INTERNAL_ERROR` |
-| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) A DELETE or UPDATE (table `PATCH` / `DELETE` rows, `rows/batch`, a named mutation) did not commit: it re-checks the rows it matched at its commit and runs again from its scan when another writer changed one, and another writer kept deleting or rewriting them through all 16 of its attempts. Nothing of it was applied (in `rows/batch`, the operations before it were). Retry the request with backoff. Previously surfaced as `500 INTERNAL_ERROR`. The C# SDK raises it as `AoudaRequestException` (`StatusCode` 409, `ErrorCode` `WRITE_CONFLICT`) and does not retry it itself. An admin auth write that keeps conflicting answers it in the auth payload shape |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) A DELETE or UPDATE (table `PATCH` / `DELETE` rows, `rows/batch`, a named mutation) did not commit: it re-checks the rows it matched at its commit and runs again from its scan when another writer changed one, and another writer kept deleting or rewriting them through all 16 of its attempts. Nothing of it was applied (in `rows/batch`, the operations before it were). Retry the request with backoff. (**BL-939, next train**) Also answered when a write read a table's key mode while an ALTER of that mode began ("… read its key mode as …"), and when a table that names its rows by logged id holds buffered rows whose logged ids are not known and flushing them was refused ("… logged ids are not known …"): nothing was applied; retry. Previously surfaced as `500 INTERNAL_ERROR`. The C# SDK raises it as `AoudaRequestException` (`StatusCode` 409, `ErrorCode` `WRITE_CONFLICT`) and does not retry it itself. An admin auth write that keeps conflicting answers it in the auth payload shape |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |
@@ -920,6 +923,35 @@ The endpoint performs a fast foreground switch, then returns `204`. All cleanup 
 | `404` | `DATABASE_NOT_FOUND` | Database does not exist or is already dropped |
 | `401` | `AUTH_CREDENTIAL_MISSING` | No credential on the admin listener. A bad credential is `AUTH_KEY_MALFORMED` or `AUTH_CREDENTIAL_INVALID`. `UNAUTHORIZED` is not produced |
 | `403` | `AUTH_POLICY_DENIED` | The credential's statements do not `manage` this database. `FORBIDDEN` is not produced |
+
+---
+
+#### `POST /api/databases/{db}/quarantine`
+
+Takes a database out of service on purpose. Returns `204 No Content`; the database stops being served and the decision is persisted: a restart keeps it quarantined. Needs `manage` on that database. The declaration does not declare quarantine: it is operator state. A database the server itself quarantined (a failed open, a failed point-in-time restore, a restore that did not complete) is in the same state; `GET /api/databases/{name}` shows it.
+
+| Status | Code | Condition |
+|--------|------|-----------|
+| `404` | `DATABASE_NOT_FOUND` | Database does not exist |
+| `400` | `INVALID_REQUEST` | The request was refused as invalid (the message says why) |
+
+---
+
+#### `POST /api/databases/{db}/unquarantine`
+
+Clears the quarantine and reopens the database: `204 No Content` when it opens. Needs `manage` on that database. Fix the cause first: the reopen runs the same checks as any open, so a database that was quarantined for a reason that still holds is refused again and **stays quarantined**.
+
+| Query parameter | Default | Meaning |
+|---|---|---|
+| `salvagePastCorruptWal` | `false` | Open past a damaged write-ahead-log frame: the damaged frame is skipped by its length and the frames after it are applied; **the skipped frame's writes are lost**. The choice is logged and counted. Leave it `false` unless the message of the refusal told you to and you accept the loss (the alternative is a restore from a backup) |
+
+| Status | Code | Condition |
+|--------|------|-----------|
+| `404` | `DATABASE_NOT_FOUND` | Database does not exist |
+| `400` | `INVALID_REQUEST` | The request was refused as invalid (the message says why) |
+| `503` | `LEGACY_WAL_PRESENT` | A leftover `insert.wal` from an older layout is in the database; it is refused again and the database stays quarantined |
+| `503` | `RESTORE_INCOMPLETE` | A restore of this database did not complete; it stays quarantined until a restore of it completes (**BL-1739, next train**) |
+| `503` | `DATABASE_QUARANTINED` | The reopen was refused again and the database stays quarantined; the message says why. For a damaged WAL segment it is the coded refusal `FILE_FORMAT_REFUSED: kind=wal-segment`, naming the segment and the position and the way on: `salvagePastCorruptWal=true`, or a restore (**BL-1741, next train**) |
 
 ---
 
@@ -3165,10 +3197,18 @@ retry from the failed operation. What each answer means for what was applied:
   applied, operation `k` and the later ones were not; `details` names `appliedOperations=k` and `totalOperations=n`. Re-send only
   `operations[k..]` (**Lead group 3 review, 0.6.0**; it was the plain capacity refusal, which re-sent the whole batch).
 - **`409 WRITE_CONFLICT`** (**BL-881, 0.3.0**) and **`409 DUPLICATE_PRIMARY_KEY`**: the refused operation applied nothing, the
-  operations before it stand and the ones after it did not run. The answer does not name the refused operation: read the data
-  before retrying anything but idempotent operations.
+  operations before it stand and the ones after it did not run. `details` names `failedOperation`, `appliedOperations` and `totalOperations` (**Durability-1 S11, next train**): retry from
+  the failed operation, or read the data first.
 - **`500 WRITE_APPLIED_RESPONSE_FAILED`**: every operation was applied and the server failed while answering. Do not re-send the
   batch (**Lead group 3 review, 0.6.0**). A `504 WRITE_CONCERN_TIMEOUT` likewise comes after every operation was applied.
+- **`507 DISK_FULL` and `503 WAL_FAILED`** (**BL-1658, BL-1703, next train**) follow the capacity rule: for operation 0 they are
+  the plain refusal, nothing applied; for operation `k` ≥ 1 the answer is `503 BATCH_PARTIALLY_APPLIED` with `refusalCode=DISK_FULL` or `WAL_FAILED`.
+
+**Which operation failed** (**Durability-1 S11, next train**). Every `400`, `409` and `500` an operation of the batch answers while the batch runs carries
+`failedOperation=k; appliedOperations=k; totalOperations=n` at the end of `details`, where `k` is the zero-based index of the
+operation that failed: operations `0` to `k − 1` were applied and stay applied, status and code unchanged. (A request refused before any operation runs — an empty or over-long list, a malformed operation — carries no such line: nothing was applied.) A `400` or `409` refused
+operation `k` before it applied; on a `500` that is not `WRITE_APPLIED_RESPONSE_FAILED` the line ends `; failedOperationOutcome=applied` when the engine knows operation `k` committed before the failure (a durable update whose deletion-mask write failed, **BL-1729, next train**: do not re-send it) and `; failedOperationOutcome=unknown` when it cannot say (read the row
+before re-sending it). **A batch is still not one transaction.**
 
 **Request Body:**
 
@@ -3225,9 +3265,9 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 | `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE, or a group inside one with no condition (**BL-1036, next train**); a JSON array or object in a `set` for a scalar column (**BL-1250, next train**) |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
 | `STATEMENT_TOO_LARGE` | 400 | (**BL-1033, next train**) The first operation's matches alone exceed the read path's ceiling; nothing was applied. No `Retry-After`: narrow or split the operation. See [`STATEMENT_TOO_LARGE`](#request-validation-errors-4xx) |
-| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity; operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
+| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `DISK_FULL`, `WAL_FAILED`); operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
 | `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
-| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were. `details` ends `failedOperation=k; appliedOperations=k; totalOperations=n` (**Durability-1 S11, next train**), as does every `400`, `409` and `500` an operation answers while the batch runs |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The batch was applied; the answer failed. Do not re-send |
 
 ---
@@ -3825,23 +3865,61 @@ those details with the resource mode.
 
 ---
 
-### Backup/Restore Endpoints
+### Backup and restore admin routes
 
-All endpoints live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
+All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
+A backup is one **set**: every database of the server, the auth database first, committed by a set record written last (**BL-1637, next train**). Every example below is a response captured from a running server, trimmed where an array repeats (a `pitr` entry per member).
 
 #### Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/admin/backup/trigger` | Trigger an immediate backup |
-| `GET` | `/admin/backup/list` | List available backups |
-| `POST` | `/admin/backup/restore/{id}` | Restore from a specific backup |
-| `GET` | `/admin/backup/schedule` | Get the current backup schedule |
-| `PUT` | `/admin/backup/schedule` | Update the backup schedule |
+| `POST` | `/admin/backup/trigger` | Back up every database as one set |
+| `GET` | `/admin/backup/list` | List the sets |
+| `GET` | `/admin/backup/{id}` | One set, with each member's cut and branches (**BL-1637, BL-335, next train**) |
+| `POST` | `/admin/backup/restore/{id}` | Restore a set: exactly, or with a `targetTime` in the body |
+| `POST` | `/admin/backup/restore` | Restore by `backupId` and/or `targetTime` |
+| `POST` | `/admin/backup/prune` | Apply the retention policy; a dry run unless `execute` is `true` (**BL-1635, next train**) |
+| `GET` | `/admin/backup/retention` | The saved retention policy |
+| `PUT` | `/admin/backup/retention` | Save the retention policy (**BL-1635, next train**) |
+| `GET` | `/admin/backup/schedule` | The backup schedule |
+| `PUT` | `/admin/backup/schedule` | Update the schedule |
+
+#### The error envelope
+
+Every error the backup controller raises is a JSON body with `error` (the message), a `code` from the list below, `details` (or `null`) and **`remedy`, a string that says what to do** (**BL-1637, next train**; `remedy` on these routes is a string, not the object other routes use). Two kinds of error on these routes do not come from it: a refused key (401 / 403) has the authentication envelope (`error` is the code, `remedy` an object), and a capacity refusal (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, 503) has the server's general one. A message that carries a database name or a path is redacted where it names a key-shaped value (**BL-1607, next train**).
+
+```json
+{"error":"Backup 'nope' not found.","code":"BACKUP_NOT_FOUND","details":null,"requestId":null,"remedy":"List the backups (GET /admin/backup/list) and name a set that is listed, or a target time after a complete set's cut."}
+```
+
+| Code | Status | Raised by |
+|------|--------|-----------|
+| `BACKUP_IN_PROGRESS` | 409 | trigger, restore, prune: another backup, restore or prune is running; restore also while a declaration reload runs |
+| `BACKUP_NOT_FOUND` | 404 | `{id}`, restore: no such set, or no complete set at or before `targetTime` |
+| `BACKUP_SET_INCOMPLETE` | 409 | restore: the set has no completion record, or a member has no manifest |
+| `BACKUP_SET_REFUSED` | 400 | restore: the set record is of another version or damaged |
+| `BACKUP_MANIFEST_REFUSED` | 400 | restore: a member's manifest is of another backup format (`found=<n> expected=4 backup=<id> path=<manifest>`). A set taken before this release has no set record and gets `BACKUP_SET_INCOMPLETE` first |
+| `BACKUP_DESTINATION_UNAVAILABLE` | 400 / 503 | 503: an `azure://` or `gcs://` destination, a provider that is not registered, a destination that cannot be reached; 400: restore, a member's backup cannot be read |
+| `BACKUP_ENGINE_NOT_READY` | 503 | the engine is not initialised yet |
+| `BACKUP_REQUEST_INVALID` | 400 | restore with neither `backupId` nor `targetTime` |
+| `BACKUP_TARGET_TIME_INVALID` | 400 | `targetTime` in the future, or at or before the set's cut; or the set is exact-restore-only (a member recorded no WAL root) |
+| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window; every member's window is checked before any engine stops, so nothing was changed (**BL-1740, next train**) |
+| `PITR_BULK_LOAD_UNAVAILABLE` | 409 | a bulk load committed before the target has no files in the store or the archive |
+| `PITR_KEYLESS_DELETE_UNRESOLVED` | 409 | a delete of a keyless table's row that the restore cannot apply (**BL-1624, next train**) |
+| `PITR_FAILED` | 500 | staging or replay failed; the database is quarantined (`POST /api/databases/{db}/unquarantine` after the cause is fixed) |
+| `BACKUP_RESTORE_FAILED` | 500 | any other failure in a restore |
+| `BACKUP_BLOB_DAMAGED` | 409 | restore: a blob of the set or the WAL archive does not match its key (its SHA-256 or its length); the message names the file, the database and the set, and the members already restored. Nothing was written under that file's name; the database the restore stopped in, if the restore had started changing it, is quarantined with `RESTORE_INCOMPLETE` until a restore of it completes — the message says which (**BL-1739, next train**) |
+| `BACKUP_FAILED` | 500 | a backup or prune failed for another reason; no set was committed |
+| `BACKUP_SCHEDULE_INVALID` | 400 | `PUT schedule` with a cron expression that is not five fields |
+| `BACKUP_RETENTION_INVALID` | 400 | `PUT retention` out of range, or `prune` with no policy saved |
+| `BACKUP_FENCE_TIMEOUT` | 503 | the backup could not take its fence within 5 seconds (**BL-337, next train**) |
+| `BACKUP_BUFFERS_UNSEALED` | 503 | a write buffer could not be sealed for the backup |
+| `BACKUP_BRANCH_UNAVAILABLE` | 409 | a branch could not be captured (**BL-335, next train**) |
 
 #### `POST /admin/backup/trigger`
 
-Trigger an immediate backup of all active databases. Runs concurrently across databases.
+Back up every database of the server as one set. Returns when the set is committed.
 
 **Request body** (optional):
 ```json
@@ -3854,72 +3932,119 @@ Trigger an immediate backup of all active databases. Runs concurrently across da
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `destination` | string? | null | Override backup destination; null = use configured default |
+| `destination` | string? | null | Override the destination. Null: the schedule's destination, else `Aouda:Archive:Destination`, else `<data path>/backups` |
 | `incremental` | bool | true | false = full backup |
 | `baseBackupId` | string? | null | Specific base backup ID; null = most recent |
 
-**Response** (`200 OK`):
+**Response** (`202 Accepted`):
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "createdUtc": "2026-01-28T14:30:00Z",
+  "backupId": "backup-2026-11-21-150259-e1638d21",
+  "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
   "basedOn": null,
-  "totalBytes": 104857600,
-  "newBytes": 10485760,
-  "fileCount": 150,
-  "newFileCount": 15,
-  "blobsUploaded": 15,
-  "blobsSkipped": 135,
-  "durationSeconds": 2.34
+  "totalBytes": 87871,
+  "newBytes": 87871,
+  "fileCount": 53,
+  "newFileCount": 53,
+  "blobsUploaded": 53,
+  "blobsSkipped": 0,
+  "durationSeconds": 0.367
 }
 ```
+
+The counts are totals over the members. An incremental backup records its base in `basedOn`.
 
 **Errors:**
 
 | Status | When |
 |--------|------|
-| 409 Conflict | A backup or restore is already in progress |
-| 503 Service Unavailable | Cloud destination not yet supported (S3/Azure/GCS), or engine not ready; (**BL-944, 0.4.0**) or the backup was refused for capacity (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, with `Retry-After`) |
-| 400 Bad Request | Destination path cannot be created or accessed |
-| 500 Internal Server Error | (**BL-944, 0.4.0**) The backup failed for another reason (an I/O error in the checkpoint, say). Before, every failure was answered 400 as if the destination were wrong |
+| 400 Bad Request | `BACKUP_DESTINATION_UNAVAILABLE`: the destination path cannot be created or accessed |
+| 409 Conflict | `BACKUP_IN_PROGRESS`, or `BACKUP_BRANCH_UNAVAILABLE` |
+| 503 Service Unavailable | `BACKUP_FENCE_TIMEOUT` or `BACKUP_BUFFERS_UNSEALED` (retry); `BACKUP_DESTINATION_UNAVAILABLE` for `azure://` / `gcs://` (**S3 is supported**) or a provider that is not registered; `BACKUP_ENGINE_NOT_READY`; (**BL-944, 0.4.0**) a backup refused for capacity (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, with `Retry-After`) |
+| 500 Internal Server Error | `BACKUP_FAILED` |
 
 #### `GET /admin/backup/list`
 
-List all backups at the configured destination, ordered newest-first.
+List the sets at the configured destination, newest first.
 
 **Response** (`200 OK`):
 ```json
 {
   "backups": [
     {
-      "backupId": "backup-2026-01-28-143000",
-      "createdUtc": "2026-01-28T14:30:00Z",
+      "backupId": "backup-2026-11-21-150259-e1638d21",
+      "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
       "basedOn": null,
-      "totalBytes": 104857600,
-      "newBytes": 10485760,
-      "fileCount": 150,
-      "newFileCount": 15,
-      "pitrEligible": true
+      "totalBytes": 87871,
+      "newBytes": 87871,
+      "fileCount": 53,
+      "newFileCount": 53,
+      "databases": ["_serverauth", "_settings", "shop"],
+      "pitrEligible": true,
+      "complete": true,
+      "members": [
+        { "database": "_serverauth", "pitrEligible": true },
+        { "database": "_settings", "pitrEligible": true },
+        { "database": "shop", "pitrEligible": true }
+      ]
     }
   ],
   "warning": null
 }
 ```
 
-`warning` is non-null when no destination is configured or when the destination is unavailable.
+- `complete` is `true` when the set's record is present, reads whole, and every database it names has its manifest. An incomplete set is listed and is never restored (`BACKUP_SET_INCOMPLETE`); its `pitrEligible` is `false`. A set taken before this release has no record and lists incomplete (**BL-1637, next train**).
+- `refused` appears (a string) when the set's record could not be read: another version, or damaged.
+- `members[].pitrEligible` is `true` when that database's manifest recorded the WAL-root incarnation a point-in-time restore needs. `pitrEligible` on the set is `true` only when every member is. A database without a WAL (`unlogged`, `memory`) has no incarnation, and its backups are exact-restore-only; a backup of a database that has one is eligible even at WAL position `0` (**BL-1010, next train**). A version-3 backup lists with `pitrEligible: false` and cannot be restored (below).
+- `warning` is non-null when the destination is unavailable or some listing failed.
 
-`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0 and (**BL-980, 0.4.0**) the WAL-root incarnation (epoch and root id) a point-in-time restore needs. Position `0` means *unknown* (ADR 0044 D-2); a backup without the incarnation is one of a database without a WAL, or one taken by an older build. Either way the backup is exact-restore-only, and a point-in-time restore of it is refused.
+#### `GET /admin/backup/{id}`
+
+One set: its record, and per member the manifest's cut, redo-start position and branches (**BL-1637, BL-335, next train**).
+
+**Response** (`200 OK`), abridged to one member:
+```json
+{
+  "backupId": "backup-2026-11-21-150259-e1638d21",
+  "complete": true,
+  "createdUtc": "2026-11-21T15:02:59.2808837+00:00",
+  "completedUtc": "2026-11-21T15:02:59.7414278+00:00",
+  "pitrEligible": true,
+  "members": [
+    {
+      "database": "shop",
+      "isAuthDatabase": false,
+      "authDatabaseKind": "None",
+      "linkedAuthDatabaseName": null,
+      "isInternal": false,
+      "manifestVersion": 4,
+      "createdUtc": "2026-11-21T15:02:59.7246936+00:00",
+      "walPosition": 406,
+      "redoStartPosition": 225,
+      "basedOn": null,
+      "pitrEligible": true,
+      "fileCount": 4,
+      "totalBytes": 2054,
+      "branches": []
+    }
+  ],
+  "missing": [],
+  "unrecorded": []
+}
+```
+
+`walPosition` is the WAL position at the backup's fence; `redoStartPosition` is the position a point-in-time restore replays from — earlier, so rows that were in a write buffer at the fence come back (**BL-1440, next train**). `branches[]` lists the branches the member's backup holds: `name`, `from`, `createdUtc`, `durabilityLevel`, `cutUtc`, `fileCount`, `bytes`. `missing` names members the record lists whose manifest is absent; `unrecorded` names manifests under the id that the record does not list. `404 BACKUP_NOT_FOUND` when there is no such set.
 
 #### `POST /admin/backup/restore/{id}`
 
-Restore from the backup with the given ID. The server engine is stopped, restored, and restarted — this is a blocking, server-wide operation.
+Restore the set with the given ID. The engines are stopped, restored and restarted: a blocking, server-wide operation.
 
-An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). An absent or empty body is an **exact restore** of that backup: the response omits `targetTime` and `pitr`.
+An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). An absent or empty body is an **exact restore** of that set: the response omits `targetTime` and `pitr`.
 
 **Request body** (optional):
 ```json
 {
-  "targetTime": "2026-01-28T14:32:00Z"
+  "targetTime": "2026-11-21T15:10:34Z"
 }
 ```
 
@@ -3929,19 +4054,19 @@ An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). 
 
 #### `POST /admin/backup/restore`
 
-Same operation, with both fields in the body. Omitting `backupId` while supplying `targetTime` selects the newest backup run whose `createdUtc` is at or before that time.
+Same operation, with both fields in the body. Omitting `backupId` while supplying `targetTime` selects the **newest complete set that lies wholly at or before that time**; `404` when there is none.
 
 **Request body**:
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "targetTime": "2026-01-28T14:32:00Z"
+  "backupId": "backup-2026-11-21-151032-22d0e575",
+  "targetTime": "2026-11-21T15:10:34Z"
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `backupId` | string? | null | Backup to restore. Null with a `targetTime` selects the newest run at or before that time. |
+| `backupId` | string? | null | Set to restore. Null with a `targetTime` selects the newest complete set at or before that time. |
 | `targetTime` | string? (ISO-8601) | null | Point-in-time target. Null with a `backupId` is an exact restore. |
 
 At least one of `backupId` or `targetTime` is required.
@@ -3949,51 +4074,95 @@ At least one of `backupId` or `targetTime` is required.
 **Response** (`200 OK`) — exact restore (`targetTime` / `pitr` omitted):
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "restoredUtc": "2026-01-28T15:00:00Z",
-  "filesRestored": 150,
-  "bytesDownloaded": 104857600,
+  "backupId": "backup-2026-11-21-150449-d1090a91",
+  "restoredUtc": "2026-11-21T15:04:56.1835586+00:00",
+  "filesRestored": 62,
+  "bytesDownloaded": 105587,
   "integrityVerified": true,
-  "durationSeconds": 8.12
+  "durationSeconds": 0.3148055,
+  "notInSet": [],
+  "branches": []
 }
 ```
 
 **Response** (`200 OK`) — point-in-time restore:
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "restoredUtc": "2026-01-28T15:00:00Z",
-  "filesRestored": 150,
-  "bytesDownloaded": 104857600,
+  "backupId": "backup-2026-11-21-151032-22d0e575",
+  "restoredUtc": "2026-11-21T15:10:36.7220017+00:00",
+  "filesRestored": 64,
+  "bytesDownloaded": 107857,
   "integrityVerified": true,
-  "durationSeconds": 8.12,
-  "targetTime": "2026-01-28T14:32:00Z",
+  "durationSeconds": 0.2210697,
+  "targetTime": "2026-11-21T15:10:34+00:00",
   "pitr": [
-    {
-      "database": "sales",
-      "replayed": true,
-      "transactionsReplayed": 4,
-      "rowsReplayed": 120,
-      "lastAppliedCommitUtc": "2026-01-28T14:31:58Z",
-      "stoppedAtTarget": true
-    }
-  ]
+    { "database": "_serverauth", "replayed": true, "transactionsReplayed": 0, "rowsReplayed": 0, "lastAppliedCommitUtc": null, "stoppedAtTarget": false },
+    { "database": "shop", "replayed": true, "transactionsReplayed": 2, "rowsReplayed": 2, "lastAppliedCommitUtc": "2026-11-21T15:10:32.4254192+00:00", "stoppedAtTarget": true }
+  ],
+  "notInSet": [],
+  "branches": []
 }
 ```
 
-`declarationConflict` (**BL-1379, 0.11.0**) is present only when the restored catalog conflicts with the databases declared in `aouda.json` (for example a declared link that differs from the recorded one): the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
+- `notInSet` lists registered databases that are not members of the restored set; they are left as they were (**BL-1637, next train**).
+- `branches[]` has one entry per member that has branches: `database`, `restored` (the branches an **exact** restore brought back) and `droppedBranches` (the branches a **point-in-time** restore dropped — a branch's history is not on its parent's timeline) (**BL-335, next train**).
+- `declarationConflict` (**BL-1379, 0.11.0**) is present only when the restored catalog conflicts with the databases declared in `aouda.json`: the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
+- A restore keeps each database's durability level: the level travels with the backup (**BL-1168, next train**). The first open after an exact restore flushes the restored write buffers and takes longer (**BL-1625, next train**).
 
-PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6). `lastAppliedCommitUtc` is that commit, in UTC.
+PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6) — a commit boundary, nothing finer. `lastAppliedCommitUtc` is that commit, in UTC.
 
 **Errors:**
 
 | Status | When |
 |--------|------|
-| 400 Bad Request | Neither field supplied; `targetTime` is in the future; `targetTime` is at or before the backup's `createdUtc`; or the backup recorded WAL position `0` (unknown — exact-restore-only, ADR 0044 D-2) |
-| 404 Not Found | Backup ID does not exist at the destination, or no backup run exists at or before `targetTime` |
-| 409 Conflict | A backup operation is already in progress |
-| 500 Internal Server Error | Point-in-time staging or replay failed — (**BL-980, 0.4.0**) among them a backup that records no WAL-root incarnation, and a replay that meets a WAL frame or catalog-DDL record this build does not read. The body names the database and the error. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. |
-| 503 Service Unavailable | Engine not initialized |
+| 400 Bad Request | `BACKUP_REQUEST_INVALID` (neither field); `BACKUP_TARGET_TIME_INVALID` (`targetTime` in the future, or at or before the set's cut — the message names both instants — or the set is exact-restore-only); `BACKUP_MANIFEST_REFUSED` or `BACKUP_SET_REFUSED` (another format); `BACKUP_DESTINATION_UNAVAILABLE` (a member's backup cannot be read) |
+| 404 Not Found | `BACKUP_NOT_FOUND`: the set does not exist at the destination, or no complete set lies at or before `targetTime` |
+| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `BACKUP_BLOB_DAMAGED` (**BL-1739, next train**); `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
+| 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine` — except an auth database's, which runs on its staged copy before the swap: a refusal there leaves the auth database in place, unquarantined (**BL-1766, next train**). `BACKUP_RESTORE_FAILED` for any other failure, among them a member whose files were restored and that did not open — the message names it, its quarantine and its cause, and `Restored and open: <names>` (a point-in-time restore answers this as `PITR_FAILED`) (**Durability-1 S26, next train**) |
+| 503 Service Unavailable | `BACKUP_ENGINE_NOT_READY`; `BACKUP_DESTINATION_UNAVAILABLE` |
+| 507 Insufficient Storage | `DISK_FULL` (**BL-1761, next train**): the data directory's volume cannot hold the restore — what it writes (every member's backed-up files, the copy each auth database is restored into, the WAL a point-in-time restore stages) and a margin of 16 MiB and 5 %. The message names the bytes needed and the bytes free; `Retry-After: 30`; the body has `error` and `code` (no `remedy`: the middleware answers it, as for every `507`). What an in-place restore deletes first is not credited |
+
+The 400s, the 404, the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE`, `PITR_WINDOW_UNAVAILABLE` (**BL-1740, next train**) and the 507 `DISK_FULL` (**BL-1761, next train**) are decided before any engine stops: nothing was changed. `BACKUP_BLOB_DAMAGED` says in its message which it was: a damaged catalog root, or a damaged first WAL segment a point-in-time restore checks before it starts, changed nothing (`Nothing of '<db>' was changed.` / `Nothing was changed.`); any other damaged blob, the other `PITR_*` codes and the 500s come after a member's files were changed. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on holds `restore.incomplete` and is quarantined with `RESTORE_INCOMPLETE` — it is not opened on a mixture of its old files and the backup's — until a restore of it completes, which clears the quarantine; `POST /api/databases/{db}/unquarantine` on it answers `503 RESTORE_INCOMPLETE` and leaves it quarantined (**BL-1739, BL-1740, next train**). **The auth databases are the exception** (**BL-1761, next train**): `_serverauth` and every other auth database of the set are restored last, each into a copy beside it, and swapped in by rename only once every member has restored — so a restore that fails anywhere, the auth database included, leaves them as they were (the message says so), and the operator's key still signs in to run the restore again. A crash during the swap is finished by the next start: the old auth database before the swap's commit, the restored one from it. Fix the cause the `remedy` names, then restore again.
+
+**`integrityVerified` is always `true` in a 200** (**BL-1739, next train**): every blob is checked against its SHA-256 and length as it is read, before the file gets its name, and a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`. The field stays for now and will be removed.
+
+#### `POST /admin/backup/prune`
+
+Apply the saved retention policy (**BL-1635, next train**). The body `{ "execute": false }` (the default) is a **dry run**: it returns the plan and deletes nothing. `{ "execute": true }` deletes exactly the plan it returns. With no policy saved the answer is `400 BACKUP_RETENTION_INVALID`.
+
+**Response** (`200 OK`), a dry run with policy `keepLast 3, keepDays 14, pitrWindow 7 days`:
+```json
+{
+  "executed": false,
+  "policy": { "keepLast": 3, "keepDays": 14, "pitrWindow": "7.00:00:00" },
+  "nowUtc": "2026-11-21T15:04:50.2970824+00:00",
+  "sets": [
+    { "backupId": "backup-2026-11-21-150449-d1090a91", "createdUtc": "2026-11-21T15:04:50.0405424+00:00", "complete": true, "keep": true, "rules": ["floor", "keepLast", "keepDays"] },
+    { "backupId": "backup-2026-11-21-150259-e1638d21", "createdUtc": "2026-11-21T15:02:59.7246936+00:00", "complete": true, "keep": true, "rules": ["keepLast", "keepDays", "baseOf:backup-2026-11-21-150449-d1090a91"] }
+  ],
+  "databases": [
+    { "database": "shop", "backupsDeleted": [], "blobsDeleted": 0, "bytesReclaimed": 0 }
+  ]
+}
+```
+
+`rules` names why a set is kept: `floor` (the newest complete, restorable set is always kept), `keepLast`, `keepDays`, `pitrWindow`, or `baseOf:<id>` (a kept set's incremental base). A set is kept or deleted whole. `blobGcWithheld` appears on a database when blob collection was withheld in its destination for the pass, with the reason (an unreadable kept manifest, or the WAL archive's manifest absent). `409 BACKUP_IN_PROGRESS`, `503`, `500 BACKUP_FAILED` as above.
+
+#### `GET /admin/backup/retention` and `PUT /admin/backup/retention`
+
+The saved policy (**BL-1635, next train**), persisted in the server's settings. **There is no default: with none saved nothing is pruned** (every field `null`).
+
+```json
+{ "keepLast": 3, "keepDays": 14, "pitrWindow": "7.00:00:00" }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `keepLast` | int? (≥ 1) | Keep the newest N sets |
+| `keepDays` | int? (≥ 1) | Keep the sets of the last N days |
+| `pitrWindow` | duration? (`d.hh:mm:ss`, > 0) | Keep what a point-in-time restore to any instant of this window needs |
+
+`PUT` saves the **whole** policy: a term not given is not kept, and all `null` clears it. `400 BACKUP_RETENTION_INVALID` names the field in `details` (`"keepLast"`) and the rule in `error` (`"keepLast must be at least 1."`). Retention runs after every successful scheduled backup and on `prune`.
 
 #### `GET /admin/backup/schedule`
 
@@ -4003,7 +4172,7 @@ Get the current backup schedule.
 ```json
 {
   "cronExpression": "0 2 * * *",
-  "destination": "./backups",
+  "destination": "/var/aouda/archive",
   "incremental": true
 }
 ```
@@ -4031,8 +4200,12 @@ Set `cronExpression` to null to disable scheduled backups.
 
 | Status | When |
 |--------|------|
-| 400 Bad Request | `cronExpression` is not a valid 5-field cron expression |
+| 400 Bad Request | `BACKUP_SCHEDULE_INVALID`: `cronExpression` is not a valid 5-field cron expression |
 | 503 Service Unavailable | (**BL-1016, 0.4.0**) The save was refused (`WAL_CAPACITY_EXCEEDED`, `MEMORY_BUDGET_EXCEEDED`); `Retry-After` is set and the schedule is unchanged — retry. (0.3.0 answered `200` and the schedule reverted at the next start.) |
+
+#### Branch routes during a backup
+
+While a backup captures (or uploads) a database's branches, creating or deleting a branch of that database answers `409 BRANCH_BUSY` with a `remedy`; retry when the backup is done (**BL-335, next train**).
 
 ---
 
@@ -5327,7 +5500,7 @@ every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [a
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
 | `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. An identity column is refused `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`, the same as a server-time column: use `applyTransforms` (**BL-1278, BL-1170, 0.9.0**). |
-| `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, 0.6.0**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), `"strict"` in a database at `os` (its WAL is not written through), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database is refused. See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
+| `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, 0.6.0**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database must name `"strict"` (**BL-1175, next train**: `"strict"` is allowed in a database at `os`, and the refusal message ends "Name durability 'strict' to load …"; a job whose every table names `strict` defaults to it). See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
 
 **Transform intent is mandatory for a table with write-time compute.**
 
@@ -5764,6 +5937,8 @@ queries current, read with the commit's `token` (which waits for them, as for an
 | `INVALID_REQUEST` | 400 | (**Lead S27a, 0.6.0**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
 | `IDENTITY_STAMP_REQUIRED` and the other insert-transform codes | 400 | (**BL-1277, 0.9.0**) `:commit` of a row the insert transform refuses. The code is the one a REST insert already returns for that row (`IDENTITY_STAMP_REQUIRED`, `TRANSFORM_DERIVED_READONLY`, `CONSTRAINT_CHECK_VIOLATION`, `TRANSFORM_ROUTE_UNMATCHED`, `TRANSFORM_ROUTE_AMBIGUOUS`, and the other codes the exception carries), with `rowErrors`. `GET {jobId}` shows `state: "failed"` and that `errorCode`. Nothing was committed. Fix the row and run the load again from `:begin`. A failure after the commit point is still the 500 below and must not be sent again. |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, 0.3.0**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, 0.3.0**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |
+| `DISK_FULL` | 507 | (**BL-1658, next train**) The disk filled before the job's commit point (segment files, the closing frame or the commit record). Nothing was committed; `Retry-After: 30`. Free space, then `:begin` the load again. `:append` answers it the same way. |
+| `WAL_FAILED` | 503 | (**BL-1703, next train**) The database's WAL stopped after an earlier failed write or sync; nothing was committed, `Retry-After: 60`; it clears at a restart. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, 0.3.0**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. (**BL-956, 0.4.0**) At most **30 s** (half of the 60 s a bulk-load request may be refused in a row), and `10` before any rate is measured — it was the time between periodic checkpoints, 300 s by default. |
 
 The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the

@@ -491,7 +491,7 @@ not at all. Each database now has **one stall curve** fed by all four, each with
 
 | Debt | Soft line | Hard line | What lies past the hard line |
 |---|---|---|---|
-| **WAL fill** — the database's log on disk | 70 % of `MaxWalBytes` (a checkpoint is forced) | 95 % | writes refused, `WAL_CAPACITY_EXCEEDED` |
+| **WAL fill** — the database's log on disk | 70 % of `MaxWalBytes` (a checkpoint is forced) | 95 % | source writes refused, `WAL_CAPACITY_EXCEEDED` (a result's maintenance is admitted to 100 %) |
 | **Maintenance lag** — the fullest materialized-query maintenance lane's backlog | half the backlog bound (32 MiB) | the bound (64 MiB) | a query marked behind, rebuilt from its source |
 | **Flush debt** — the write buffer's unflushed bytes | `T11` (15 % of the database's budget) | 2 × `T11` | the memory budget's queue |
 | **Hot bytes** — the hot tier | 80 % of the hot ceiling (`HotPacingWaterMark`) | the ceiling | flushes seal cold |
@@ -526,8 +526,10 @@ exceeded" refusal, and a bulk load's fixed 10 ms pause per 10,000 rows under hea
 ### The WAL's cap follows the disk and the workload (**BL-787, 0.3.0**)
 
 The WAL-fill debt above is measured against `MaxWalBytes` (`T23`), and its rungs are fractions of it: `T25` = 0.70 (a
-checkpoint is forced, and the stall curve starts slowing writers), `T26` = 0.85 (retention runs now), `T27` = 0.95 (source
-writes are refused, `503 WAL_CAPACITY_EXCEEDED`). The cap is not configurable; it is derived:
+checkpoint is forced, and the stall curve starts slowing writers), `T26` = 0.85 (retention runs now), `T27` = 0.95 (**source
+writes** are refused, `503 WAL_CAPACITY_EXCEEDED`; a materialized result's own maintenance is still admitted up to `MaxWalBytes`, so a
+result that is behind catches up and releases its WAL instead of pinning it — **BL-787, next train**; at `MaxWalBytes` everything but a
+checkpoint is refused). The cap is not configurable; it is derived:
 
 - **At open:** a tenth of the volume's free space, at least `min(256 MB, free / 4)` and at most 4 GiB.
 - **After a reclaim** (at most once a minute): the larger of that bootstrap — now over the free space **plus the WAL's own
@@ -546,7 +548,7 @@ up to 4 GiB.
 ```
 [WAL] Crossed T25 upward: 2,912 MiB on disk of MaxWalBytes 4,096 MiB (T25 2,867 MiB, T26 3,482 MiB, T27 3,891 MiB). A checkpoint is forced; the ingest stall curve starts slowing writers.
 [WAL] Crossed T26 upward: … Retention runs now.
-[WAL] Refusing source writes: … Each is answered 503 WAL_CAPACITY_EXCEEDED with Retry-After 12 s (reclaim rate 41.0 MiB/s); retention is running. …
+[WAL] Refusing source writes: … Each is answered 503 WAL_CAPACITY_EXCEEDED with Retry-After 12 s (reclaim rate 41.0 MiB/s); retention is running. A maintenance unit's derived writes are admitted up to MaxWalBytes (T23); a rebuild refused at this rung is deferred, not failed. …
 [WAL] Accepting writes again: …, after 95 s at the refuse rung, 1,204 write(s) refused.
 [WAL] Back under T25: ….
 [WAL] MaxWalBytes 4,096 MiB -> 6,144 MiB: the larger of a tenth of the … MiB the WAL can use (free + its own, 256 MiB-4 GiB) and twice the largest working set at a reclaim (3,072 MiB), at most half of it. T27 (refuse) is now 5,837 MiB.

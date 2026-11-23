@@ -61,10 +61,24 @@ _VERSION_HEADING = re.compile(r"^(#{1,6})[ \t]+v?(\d+\.\d+\.\d+)\b")
 _ANY_HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+train|planned|not\s+shipped", re.IGNORECASE)
 # A released mention of these is a slice. The rest of the card may still say `next train`.
-# Correctness-Hardening: five cards whose released changelog mention is the open defect, not the fix (0.4.0 "are BL-1020", 0.5.0
-# "(BL-1026 / BL-1035; answers stay correct)", 0.6.0 "reaches no database (BL-1099)", "still stores an absent cell as null - BL-1104",
-# "restarted ... BL-1101's"). The fixes are unreleased: remove an id here in the same commit that turns its markers into the version.
-_ALLOW = {"BL-1020", "BL-1035", "BL-1099", "BL-1101", "BL-1104"}
+# Durability-1 and Correctness-Hardening: cards whose released-changelog mention is an older, open note, not the fix
+# this train ships. Remove each id in the same commit that replaces its markers with the version
+# (dev/Release-And-Version-Bump.md section 2).
+_ALLOW = {
+    "BL-332",   # Studio's point-in-time restore: Studio 0.0.22 shipped the exact-restore page only
+    "BL-558",   # keyed-delete replay multiplicity: 0.1.31 shipped the first half; Durability-1 S05 closes the rest
+    "BL-787",   # the WAL ladder: 0.3.0 shipped the derived cap; Durability-1 S11 closes the residual (maintenance at T27)
+    "BL-1010",  # a backup at WAL position 0: 0.4.0 made it exact-restore-only
+    "BL-1020",  # Correctness-Hardening: 0.4.0 names the open defect
+    "BL-1035",  # Correctness-Hardening: 0.5.0 names the open defect
+    "BL-1099",  # Correctness-Hardening: 0.6.0 "reaches no database"
+    "BL-1101",  # Correctness-Hardening: 0.6.0 "restarted"
+    "BL-1104",  # Correctness-Hardening: 0.6.0 "still stores an absent cell as null"
+    "BL-1133",  # frameless multi-table loads: 0.6.0 names the gap
+    "BL-1145",  # a level move to `unlogged` / `memory`: 0.6.0 says it has no path yet
+    "BL-1147",  # a branch's `unlogged` tables: 0.6.0 says they do not have the rule yet
+    "BL-1485",  # a PITR across a created table: 0.14.0 lists it as a known issue
+}
 
 
 @dataclass(frozen=True)

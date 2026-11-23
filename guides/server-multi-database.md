@@ -207,7 +207,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | .NET client `client.Databases.ListAsync/CreateAsync` | ✅ | | | `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` | |
 | .NET client `client.Databases.GetAsync / DropAsync` | | | ❌ | P6 §5.2 (HTTP endpoints exist); `AoudaDatabasesApi.cs` has only List + Create | See §2.18 |
 | Admin management API under `/admin/*` (P16) | ✅ | | | `src/Aouda.Server/Controllers/Cluster|Backup|Config|Node|CapabilitiesController.cs`, P16 §5.3 | |
-| Runtime config persistence (`cluster-state.json`, `backup-config.json`) | ✅ | | | P16 §3.2, §5.6 | |
+| Runtime config persistence (`cluster-state.json`; the backup schedule is in the `_settings` database) | ✅ | | | P16 §3.2, §5.6 | |
 | Prometheus scrape format | | | ❌ | P4 §10 (deferred); P6 §10 | See §2.18 |
 | `ActiveConnections` counter | | ❌ | | `MetricsSummary` returns 0; P4 §10 | See §2.18 |
 | `aouda dev` as distinct ephemeral mode | | ❌ | | ADR 0026; P16 SA6 not evidenced; `aouda start` is the shipped entry point | See §2.18 |
@@ -232,7 +232,6 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
   Server/
     databases.json            ← registry of all database definitions
     cluster-state.json        ← runtime cluster config (P16, present if cluster joined)
-    backup-config.json        ← runtime backup schedule (P16)
   Databases/
     {dbName}/
       catalog/
@@ -349,8 +348,8 @@ Process start
 
 - `DatabaseManager` constructor accepts an optional `ServerMemoryBudgetManager?`; it is null in isolated test contexts.
 - `DatabasesController` validates that the `database` field in request bodies matches the `{db}` path segment; mismatch → `400 INVALID_REQUEST`.
-- `TableDurabilityOptions` null fields inherit database-level defaults. (**Lead S26, 0.6.0**) A table's `Level` may be `strict`, `unlogged` or `memory`; `os` is refused (a database level only), and `strict` is refused unless the database is at `strict`.
-- (**Lead S26, 0.6.0**) A database's `Durability` is read at every open. A database that has a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory` — the open is refused, since it would ignore the writes the WAL holds (no path yet: BL-1145).
+- `TableDurabilityOptions` null fields inherit database-level defaults. (**Lead S26, 0.6.0**) A table's `Level` may be `strict`, `unlogged` or `memory`; `os` is refused (a database level only), and `strict` is refused unless the database has a WAL (`strict` or `os`; **BL-1175, next train**).
+- (**Lead S26, 0.6.0**) A database's `Durability` is read at every open. A database that has a WAL (`strict`, `os`) reopened at `unlogged` or `memory` replays the WAL, flushes every row, closes cleanly and **retires the WAL** at that open — refused (`WAL_RETIREMENT_REFUSED`, WAL kept) when it cannot finish (**BL-1145, next train**; [Changing a level](write-durability.md#changing-a-level)).
 - Write concern resolution order: per-write → table → database → `One`.
 
 ---
@@ -853,6 +852,7 @@ curl -s http://localhost:5000/api/databases
 | `ServerMemoryUsageSnapshot.PerDatabaseUsage[db].Pressure` | `ServerMemoryBudgetManager` | `Low` / `Medium` / `High` / `Critical` |
 | `X-Correlation-ID` response header | `CorrelationIdMiddleware` | Trace requests through logs |
 | `aouda.query` OTel span | `AoudaActivitySources` | Root query span; child `scan`, `filter` spans |
+| `aouda.wal.write`, `aouda.wal.flush` OTel spans | `AoudaActivitySources` | A WAL append and a WAL flush; emitted by every write path (**Durability-1 S05, next train** — they were defined and never started) |
 | `/health/detailed` JSON | `HealthAggregator` | `healthy` / `degraded` / `unhealthy` per component |
 
 ### Tuning sequence

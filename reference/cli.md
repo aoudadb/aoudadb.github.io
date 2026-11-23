@@ -169,6 +169,108 @@ It does not know a runtime principal (it names `aouda whoami` and `aouda plan --
 
 `aouda init` talks to a running server in setup mode and creates the first operator (`POST /api/auth/setup`). The password is read from stdin.
 
+## `backup`
+
+(**Durability-1 S12, next train**) `aouda backup` takes, lists, shows, restores and prunes the server's backup sets and reads or sets the retention policy. It
+calls the admin API ([HTTP API](http-api.md#backup-and-restore-admin-routes)) with an operator key; `restore --to` needs no server. Concepts:
+[Backup and restore](../guides/backup.md).
+
+| Exit | Meaning |
+|---|---|
+| `0` | Done. |
+| `1` | Refused or failed (the server's code and its `remedy` are printed). |
+| `64` | Misuse. |
+| `69` | The server is unreachable, or answered 5xx. |
+| `77` | The key was refused. |
+| `78` | With `restore --to`: the directory is not empty or is in use. |
+
+Every verb takes `-s, --server <url>` (default `AOUDA_SERVER` / `AOUDA_URL`), `-t, --token <key>` (default `AOUDA_TOKEN`; prefer the variable, an argument shows in the process list), `--json`, and
+`--timeout <duration>` (`7d`, `12h`, `30m`, `90s`; default 1 hour for `create`, `restore` and `prune`, 30 seconds otherwise).
+
+| Verb | What it does |
+|---|---|
+| `backup create [--full]` | Back up every database as one set (auth databases first); the set record written last commits it. Incremental against the newest set unless `--full`. |
+| `backup list` | The sets: `ID  CREATED  COMPLETE  PITR  BYTES  DATABASES`. |
+| `backup show <id>` | One set: `complete`, the times, and per database its cut, WAL position, redo-start, manifest version, point-in-time eligibility, files, bytes and branches. |
+| `backup restore [<id>] [--target-time <instant>]` | Restore the set exactly, or to the last commit at or before the ISO 8601 instant (UTC when it has no offset). Without `<id>`, the newest complete set at or before `--target-time`. The server's engines stop for the restore. |
+| `backup restore <id> --to <dir> --from <destination>` | Restore into a new or empty data directory with **no server running**; start it with `aouda start --data-path <dir>`. `--from` is a path or `s3://bucket/prefix` (AWS credential chain). |
+| `backup prune [--dry-run]` | Apply the retention policy: prints each set, kept (with the rules that kept it) or deleted, then carries it out. `--dry-run` deletes nothing. With no policy saved: exit 1, `BACKUP_RETENTION_INVALID`. |
+| `backup retention [--keep-last N] [--keep-days N] [--pitr-window <duration>]` | Show the policy, or set it. Setting saves the **whole** policy: a term not given is not kept. No policy means nothing is pruned. |
+
+`restore --to` also takes `--archive <destination>` (with `--target-time`: the WAL archive's destination when it is not `--from`),
+`--s3-endpoint <url>` (an S3-compatible endpoint, path-style) and `--s3-region <region>`.
+
+A restore checks every blob against its key as it reads it: a blob that does not match refuses it with `BACKUP_BLOB_DAMAGED` (exit 1),
+naming the file and the set, and `verified yes` on a restore that completed means every blob matched (**BL-1739, next train**). With
+`--target-time`, every database's archive window is checked before anything is written: `PITR_WINDOW_UNAVAILABLE` leaves `--to` as it was
+(**BL-1740, next train**). A restore that stops part-way leaves the database it stopped in refusing to open (`RESTORE_INCOMPLETE`) — delete
+the directory and restore again.
+
+```text
+$ aouda backup list
+ID                                 CREATED                            COMPLETE  PITR  BYTES  DATABASES
+backup-2026-11-21-150851-4bccdc05  2026-11-21T15:08:51.8031954+00:00  yes       yes   87867  _serverauth, _settings, shop
+
+$ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z
+restored backup set backup-2026-11-21-150851-4bccdc05 to 2026-11-21T15:09:01+00:00
+files        53 (87867 bytes read)
+verified     yes
+pitr         _serverauth: 11 transactions, 13 rows replayed, last commit 2026-11-21T15:08:46.8577356+00:00
+pitr         _settings: 0 transactions, 0 rows replayed
+pitr         shop: 3 transactions, 3 rows replayed, last commit 2026-11-21T15:08:52.6389213+00:00
+
+$ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z --to /srv/aouda-data --from /backups/aouda
+restored backup set backup-2026-11-21-150851-4bccdc05 into /srv/aouda-data, staged to 2026-11-21T15:09:01.0000000+00:00 (replayed when the directory is first started)
+files        53 (87867 bytes read)
+verified     yes
+database     _serverauth (Strict, auth)
+database     _settings (Strict)
+database     shop (Strict)
+start it with: aouda start --data-path /srv/aouda-data
+```
+
+## `dump`
+
+(**Durability-1 S13, next train**) `aouda dump` writes a server's data databases to a directory in a format that no data-directory format version
+touches; [`aouda load`](#load) reads it. A dump is **not a backup** and holds secret-class values: [Dump and load](../guides/dump-load.md).
+
+| Exit | Meaning |
+|---|---|
+| `0` | The dump is complete. |
+| `1` | Refused or failed; the directory has no `dump.json`, so `load` refuses it. |
+| `64` | Misuse. |
+| `69` | The server is unreachable, or failing. |
+| `77` | The key was refused. |
+
+| Flag | Meaning |
+|---|---|
+| `-s, --server URL` | The server. Default `AOUDA_SERVER`, then `AOUDA_URL`. |
+| `--key-file FILE` / `--key-env NAME` | An operator key from a file or an environment variable. `--key` is not a flag. |
+| `-o, --out DIR` | The directory to write: new, or empty. |
+| `--database NAME` | Dump only this database (repeatable). Default: every data database. |
+| `--tables DB.TABLE,…` | Dump only these tables (repeatable). |
+| `--allow-writes` | Finish a dump whose database was written while it was dumped (recorded as not consistent). |
+| `--json` | Machine-readable output. |
+
+## `load`
+
+(**Durability-1 S13, next train**) `aouda load` loads a directory `aouda dump` wrote into a server of this or another version: databases, schema, rows
+(each table verified by row count and digest), materialized queries, then the dump's declaration planned against the server. Run it again to resume:
+a table already loaded is skipped. Exit `0` done, `2` done with the declaration left to adopt, `1` refused or failed, `64` misuse, `69` unreachable, `77` the key
+refused (and a table with a stamp column needs the server operator's key, `LOAD_RESTORE_REQUIRES_OPERATOR`). When the data is loaded and only the
+declaration's plan fails, `load` ends with the plan's own status (`1`, `69` or `77`) after the line `the data is loaded; …`: read that line before
+concluding nothing was written.
+
+| Flag | Meaning |
+|---|---|
+| `-s, --server URL`, `--key-file`, `--key-env` | As for `dump`. |
+| `-i, --in DIR` | The directory `aouda dump` wrote. |
+| `--database NAME`, `--tables DB.TABLE,…` | Load only these (repeatable). |
+| `--no-verify` | Skip the re-read of each loaded table. |
+| `--mq-timeout DURATION` | How long the materialized queries may take to be `Ready`. Default 30 minutes. |
+| `--no-declaration` | Do not plan the dump's declaration against the server. |
+| `--json` | Machine-readable output. |
+
 ## Other commands
 
 | Command | What it does |

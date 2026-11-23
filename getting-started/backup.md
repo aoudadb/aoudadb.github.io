@@ -8,7 +8,7 @@ parent: "Getting Started"
 
 This guide shows how to configure and use Aouda's backup and restore capabilities. It covers both local filesystem destinations and cloud storage via AWS S3 (including S3-compatible services such as MinIO and LocalStack).
 
-For the full backup subsystem reference — architecture, acceptance criteria, gap tracking, and test ledger — see [Functionality-Backup-And-Restore.md](../guides/backup.md).
+For what a backup holds, what a restore returns, retention and the error codes, see [Backup and Restore](../guides/backup.md). To bring data back on another host, see [Restore to a new host](../guides/restore-to-a-new-host.md). A dump is not a backup: [Dump and load](../guides/dump-load.md).
 
 ---
 
@@ -16,10 +16,10 @@ For the full backup subsystem reference — architecture, acceptance criteria, g
 
 Aouda uses **incremental, content-addressable backups**:
 
-1. A checkpoint is taken and a manifest is built — it lists every file and its SHA256 hash.
-2. Only blobs whose hash has not been uploaded before are written to the destination.
-3. The manifest is written last; it is the single source of truth for a backup.
-4. Restore verifies SHA256 hashes by default (configurable).
+1. The server takes one **fence** — a cut that a transaction in its commit section finishes before. Writers wait for it (the fence waits at most 5 seconds for commits in flight and is held at most 5 more) and are never failed by it, so **a backup needs no quiesced database** (**BL-337, next train**).
+2. For every database, a manifest is built — it lists every file and its SHA256 hash — and only blobs whose hash has not been uploaded before are written to the destination.
+3. The manifests are written per database and a **set record** is written last: a backup is one set of every database, and a set is complete only when its record is there.
+4. Restore checks every blob's SHA256 hash and length as it reads it, before the file gets its name: a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`, naming the file and the set, and the database it stopped in refuses to open (`RESTORE_INCOMPLETE`) until a restore of it completes (**BL-1739, next train**). A restore returns the backup exactly, or — with a `targetTime` — the last transaction that committed at or before that instant. Rows that were only in a write buffer when the backup ran come back too (**BL-1440, next train**).
 
 The same model works for both local and S3 destinations — only the destination implementation changes.
 
@@ -48,7 +48,7 @@ That is all that is needed for local backup. **`Enabled = true` with a `Destinat
 archive worker.** Archived WAL extends point-in-time recovery beyond the local write-volume window.
 `WalRetentionDays` is how long archived WAL is kept — it is not the local PITR window (that is
 write volume since the last backup). Exact restore and PITR over HTTP/SDK both work — see
-[Backup and Restore](../guides/backup.md#24-availability-status).
+[Backup and Restore](../guides/backup.md#1-what-is-and-is-not-available).
 
 ---
 
@@ -98,32 +98,9 @@ Credentials are resolved from the standard AWS chain in order:
 }
 ```
 
+The `minioadmin` keys are the defaults of a **throwaway MinIO or LocalStack container**; never write a real credential into a file (use the credential chain or an environment variable).
+
 `ForcePathStyle: true` is required for MinIO and LocalStack — they use path-style URLs (`http://host:port/bucket/key`) rather than virtual-hosted URLs (`http://bucket.host:port/key`).
-
-### Replica set backup node on S3
-
-```json
-{
-  "Aouda": {
-    "ReplicaSet": {
-      "Name": "prod-rs",
-      "Members": ["aouda-a:5433", "aouda-b:5433", "aouda-dr:5433"],
-      "ThisNode": {
-        "Address": "aouda-dr:5433",
-        "Backup": true,
-        "Archive": {
-          "Enabled": true,
-          "Destination": "s3://my-aouda-backups/prod-dr",
-          "WalRetentionDays": 14,
-          "S3": {
-            "Region": "eu-west-1"
-          }
-        }
-      }
-    }
-  }
-}
-```
 
 ---
 
@@ -211,19 +188,18 @@ if (restoreResult is RestoreBackupResult.Success s)
     Console.WriteLine($"Restored {s.Response.FilesRestored} files in {s.Response.DurationSeconds:F1}s");
 ```
 
-> **Point-in-time recovery.** Pass `targetTime` on restore (HTTP body, `RestoreBackupRequest`, or
-> `@aouda/client` `restore({ backupId, targetTime })`). Replay stops at the last transaction commit
-> at or before that instant. The local window is write volume since the last backup, not a number
-> of days — enable `Archive` to keep WAL beyond that. A backup with WAL position `0` is
-> exact-restore-only. Studio restores exact backup points only. See
-> [Backup and Restore](../guides/backup.md#24-availability-status)
+> **Point-in-time recovery.** Pass `targetTime` on restore (HTTP body, `RestoreBackupRequest`,
+> `@aouda/client` `restore({ backupId, targetTime })`, or `aouda backup restore --target-time`). Replay stops at the last transaction commit
+> at or before that instant — a commit boundary, nothing finer. The local window is write volume since the last backup, not a number
+> of days — enable `Archive` to keep WAL beyond that. A backup of a database without a WAL (`unlogged`, `memory`) is
+> exact-restore-only. The MCP `aouda_backup_restore` tool restores exactly only. See
+> [Backup and Restore](../guides/backup.md#4-what-a-point-in-time-restore-returns)
 > and [HTTP API](../reference/http-api.md#post-adminbackuprestoreid).
 
-> **Restore with the build that took the backup** (**architecture review, 0.3.0**). A 0.2.x
-> backup restored into this build opens, but its segments fail by name on read
-> (`SegmentFormatUnsupportedException`): restore it with 0.2.x, export, and reload. A clean restore
-> now brings back rows that were in hot segments; before, they were lost. See
-> [Backup and Restore](../guides/backup.md#b-restore-exact-backup).
+> **Restore with the build that took the backup.** A backup carries its own format (version 4 now). A build restores one version: a backup of
+> another version is listed but refused at restore, before anything is written. A set taken before this release has no set record, so the
+> refusal is `BACKUP_SET_INCOMPLETE` (409); a set whose manifest is of another version is `BACKUP_MANIFEST_REFUSED` (400), naming both versions. Restore it with the build that took it, or take a
+> new backup after the upgrade. See [Backup and Restore](../guides/backup.md#11-formats-and-upgrading).
 
 ---
 
@@ -250,6 +226,20 @@ curl -X POST http://localhost:5000/admin/backup/restore \
   -H "Content-Type: application/json" \
   -d '{"targetTime":"2026-05-01T12:00:00Z"}'
 
+# One set: each database's cut, redo-start position and branches
+curl http://localhost:5000/admin/backup/<backup-id> \
+  -H "Authorization: Bearer <admin-token>"
+
+# Retention (none by default), then a dry run of what it would delete
+curl -X PUT http://localhost:5000/admin/backup/retention \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "keepLast": 5, "pitrWindow": "7.00:00:00" }'
+curl -X POST http://localhost:5000/admin/backup/prune \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "execute": false }'
+
 # Get or update backup schedule
 curl http://localhost:5000/admin/backup/schedule \
   -H "Authorization: Bearer <admin-token>"
@@ -259,6 +249,21 @@ curl -X PUT http://localhost:5000/admin/backup/schedule \
   -H "Content-Type: application/json" \
   -d '{ "cronExpression": "0 2 * * *", "incremental": true }'
 ```
+
+### Command line
+
+```bash
+export AOUDA_SERVER=http://localhost:5000 AOUDA_TOKEN=<admin-token>
+aouda backup create                                   # one set, every database
+aouda backup list
+aouda backup show <backup-id>
+aouda backup restore <backup-id>                      # exact
+aouda backup restore --target-time 2026-05-01T12:00:00Z   # point in time: the newest set at or before it
+aouda backup retention --keep-last 5 --pitr-window 7d     # none by default
+aouda backup prune --dry-run
+```
+
+See the [CLI reference](../reference/cli.md#backup).
 
 ### TypeScript client
 
@@ -325,9 +330,11 @@ The test suite creates a fresh bucket per test run, exercises the full `IArchive
 | `AmazonServiceException` on first S3 operation | Invalid bucket, wrong region, or missing credentials | Verify bucket name and `Region`; check IAM permissions; set `AccessKeyId` / `SecretAccessKey` for explicit credentials |
 | `NoSuchBucket` | Bucket does not exist | Create the bucket first; Aouda does not create buckets automatically |
 | Timeout connecting to MinIO | Wrong `ServiceUrl` or container not running | Check `ServiceUrl` and `ForcePathStyle: true` |
-| Restore hash mismatch | Corrupted blob in S3 | Run `RestoreEngine.VerifyBackupAsync`; re-run backup to upload a fresh set |
-| `PitrWindowException` | Target outside the local write-volume window and the archive, or backup not PITR-eligible — (**BL-980, 0.4.0**) including a backup that records no WAL-root incarnation (a database without a WAL, or a backup taken by an older build) | Take a newer backup, enable archiving, or pick a later `targetTime`; an exact restore (no `targetTime`) of such a backup still works |
-| `NotSupportedException` for `azure://` or `gcs://` | Azure/GCS not yet implemented | Use `s3://` or a local path |
+| Restore answers `BACKUP_BLOB_DAMAGED` (409) | A blob in the destination does not match its key; nothing was written under its name (**BL-1739, next train**) | Restore another set, then take a new backup; the database the restore stopped in refuses to open (`RESTORE_INCOMPLETE`) until a restore of it completes |
+| `PITR_WINDOW_UNAVAILABLE` (409) | The local WAL and the archive do not reach back to the backup's replay position, or the backup predates an exact restore and the archive has no WAL for it. Decided before anything changes: nothing was changed (**BL-1740, next train**) | Pick a target inside the window, take a newer backup, enable archiving, or restore exactly (no `targetTime`) |
+| `BACKUP_SET_INCOMPLETE` (409) on a set taken before this release | The set has no completion record (and its manifest is format 3, not 4) | Restore it with the build that took it, or take a new backup |
+| `BACKUP_MANIFEST_REFUSED` (400) | A member's manifest is of another format | Restore it with the build that took it, or take a new backup |
+| `BACKUP_DESTINATION_UNAVAILABLE` (503) for `azure://` or `gcs://` | Azure and Google Cloud Storage are not supported | Use `s3://` or a local path |
 
 ---
 

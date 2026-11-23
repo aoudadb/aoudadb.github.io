@@ -238,7 +238,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Column nullable / rename / references | Yes | No | No | P36 S08–S10, S12 | Imperative PATCH + declarative apply |
 | Column default + description | Yes | No | No | P36 S11 | Declarative + catalog; default does not rewrite existing pages |
 | Primary key membership change | Yes | No | No | P36 S15 | Uniqueness scan + PK index rebuild; no `col_*.seg` rewrite |
-| Durable catalog DDL (WAL envelope, replica-consumed, PITR-replayed) | Yes | No | No | P36 S01–S02, BL-186 S06 | Generic `CatalogDdl` WAL tag; crash recovery still ignores it (catalog comes from the checkpoint) but point-in-time recovery replays it — see [Backup and restore](backup.md#24-availability-status) |
+| Durable catalog DDL (WAL envelope, replica-consumed, PITR-replayed) | Yes | No | No | P36 S01–S02, BL-186 S06 | Generic `CatalogDdl` WAL tag; crash recovery still ignores it (catalog comes from the checkpoint) but point-in-time recovery replays it — see [Backup and restore](backup.md#1-what-is-and-is-not-available) |
 | Pending jobs HTTP (`GET …/jobs`) | Yes | No | No | P36 S12 | Projects `ColumnRewrite` / `PkIndexRebuild` |
 | Studio column alter UI | Yes | No | No | P36 S14 | Alter / PK / reorder / default-description dialogs |
 | Identity-insert (ordinary insert + bulk-load) | Yes | No | No | BL-130, BL-131 — see HTTP API / Bulk Load / Getting Started | Request/job-scoped; does not flip schema `autoIncrement` |
@@ -786,7 +786,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `CreateTable` | No | A table exists in desired but not in actual. |
 | `AddColumn` | No | A column exists in desired table but not in actual. |
 | `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
-| `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies. |
+| `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies, after the table's writes settle (up to 60 s) and it is flushed — otherwise it is refused as a retryable conflict and reported `Failed` in the apply's result (**BL-1152, next train**). |
 | `UpdateSettings` | No | The database-level `settings.durability` (its `replicationFactor`) changed. |
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
@@ -1095,7 +1095,7 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database is at `strict`; a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-060). The retired `walEnabled` is a validation error naming `durability.level`. |
+| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database has a WAL (`strict` or `os`; in an `os` database a `strict` table's writes are synced to the WAL up to each commit — **BL-1175, next train**); a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-060). The retired `walEnabled` is a validation error naming `durability.level`. |
 | `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). Allowed values: non-negative integer, or `null` (inherit database default). |
 
 #### SchemaSettings (value of `settings`)

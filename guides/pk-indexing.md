@@ -183,7 +183,22 @@ Invariants:
 - A key names one logical row on a `Strict` table only (**BL-791, 0.3.0**). On `Recent` and `BestEffort` a table can hold
   two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
   `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
-  every copy of a matched key held in a segment.) On a `Strict` table a key cannot have two live copies, and the behaviour is unchanged.
+  every copy of a matched key held in a segment.) On a `Strict` table a key is meant to have one live copy, and an insert or upsert keeps it so. A table **switched to
+  `Strict` while it holds a key twice keeps both copies** until a keyed DELETE or UPDATE collapses them: the next DELETE or UPDATE
+  of that key removes **every** live copy that existed when it committed, live and after a crash or a point-in-time restore
+  (**BL-1628, BL-558, next train**; before, a `DELETE … WHERE Id = 4` answered success and the row stayed readable). Two shapes are
+  still collapsed only by a crash's replay, not by the live write (**BL-1668**, open): a duplicate that sits only in segments because the
+  table was flushed and reopened after the ALTER, and a `MergeAsync` over a duplicated buffer, which replaces one copy and leaves the
+  other. The ALTER does not refuse a table that holds duplicates (BL-1674). Under `BestEffort` an UPDATE or DELETE applies to **every** live copy its `where` matches — a
+  `where` on the key alone matches all of them — in every tier, and a crash replays exactly that (**BL-557**, proved by
+  `Durability1S09BestEffortEveryCopyTests`; the rule above is unchanged).
+- **Changing a table's mode away from `Strict` is safe under writes** (**BL-939, next train**): the ALTER waits for the table's writes in
+  flight (up to 60 s), flushes the table, then switches — and is refused (a retryable conflict, nothing changed) if the writes do not
+  finish or the flush fails. A write that read the old mode while the change began is answered `409 WRITE_CONFLICT` ("… read its key
+  mode as 'Strict', and a change of that mode began before the write was admitted …"; nothing applied; retry). On a table that names
+  its rows by logged id (no key, or a key that is not `Strict`), a DELETE, UPDATE, MERGE or upsert over buffered rows whose logged ids are not
+  known, when flushing them was refused, is answered `409 WRITE_CONFLICT` too ("… logged ids are not known …"). A schema apply reports such a refused
+  change as a **failed apply entry** with the message, not as an HTTP error.
 - Crash recovery honours the same rule (**BL-823, 0.3.0**). On `Recent` and `BestEffort` tables a DELETE, UPDATE or upsert logs
   the rows it marked — a buffered row by its logged id, a sealed one by segment and row — and the replay after a crash marks exactly
   those copies. Before, the log held only keys, so with two live copies of a key, deleting or updating one of them (or upserting the

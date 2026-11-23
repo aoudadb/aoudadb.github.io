@@ -24,7 +24,7 @@ Aouda settings come from several layers. Think of them as separate concerns:
 | **Optional operator config** | `appsettings.json`, `appsettings.{Environment}.json` | Developers, Docker/K8s operators | **No** — not included in Windows release publish |
 | **Environment variables** | `AOUDA_*` overrides for containers and CI | DevOps | Set on the service, container, or pod |
 | **CLI flags** | `--data-path`, `--port`, `--join`, etc. | Install scripts, manual starts, service `binPath` | Highest precedence at startup |
-| **Data-directory files** | `backup-config.json`, `cluster-state.json` | Runtime / API / Studio | Created under `{DataPath}` when changed |
+| **Data-directory files** | `cluster-state.json` | Runtime / API / Studio | Created under `{DataPath}` when changed. The backup schedule, destination and retention policy are not files: they live in the server's `_settings` database |
 | **Runtime API** (`PATCH /admin/config`) | Memory budgets, backup schedule, log level | Studio, automation | See §4 — not all fields persist |
 | **Declaration file** (`aouda.json`; **BL-1463, 0.16.0**) | The databases, their schema files and their roles: what exists | Developers, DevOps | **No** — you write it and name it with `Aouda:Declaration` |
 
@@ -182,7 +182,7 @@ To change data path or port after install, update the **service command line** (
 | **Listen port** | Service CLI / env / optional appsettings | Yes | Yes |
 | **Memory budgets** | `PATCH /admin/config` | **No** — in-memory only; reverts to startup-bound values | Reverts unless set in env/CLI/appsettings |
 | **Log level** (`/admin/config`) | `PATCH /admin/config` | **No** — in-memory only | Reverts |
-| **Backup schedule** | `PATCH /admin/config` or `/admin/backup` | **Yes** — persisted to `{DataPath}/backup-config.json` | Yes |
+| **Backup schedule, destination and retention policy** | `PUT /admin/backup/schedule`, `PUT /admin/backup/retention`, `aouda backup retention`, `PATCH /admin/config`, Studio | **Yes** — saved in the server's `_settings` database (`server.backup`) before it is applied (**BL-1016, 0.4.0**) and restored by a backup of that database. **No retention policy is set by default: nothing is pruned** (**BL-1635, next train**) | Yes |
 | **Cluster topology** | `POST /admin/cluster/join` etc. | **Yes** — `{DataPath}/cluster-state.json` | Yes |
 | **Drain flags** | `PATCH /admin/cluster/...` | **No** — in-memory only | Lost on restart |
 | **Database data, WAL, catalogs** | Engine | Yes (under `{DataPath}`) | Yes |
@@ -254,7 +254,7 @@ When a backup runs, destination resolution order is:
 
 ```
 1. Explicit destination on the backup request
-2. {DataPath}/backup-config.json  (from API / Studio / PATCH /admin/config)
+2. The saved destination in the `_settings` database  (from API / Studio / PATCH /admin/config)
 3. Aouda:Archive:Destination from startup config (env / appsettings / CLI)
 4. {DataPath}/backups             (implicit local fallback for on-demand triggers)
 ```

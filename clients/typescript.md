@@ -825,7 +825,7 @@ try {
 
 `bulkLoad` (and `bulkLoadJobs`) take `durability?: 'strict' | 'os'`, sent as `:begin`'s `options.durability`, and the handle's
 `durability` says the level the job committed at (`BulkLoadDurability`; an outcome read from `:status` carries it too). Omitted, the load
-takes the database's level for a load: `'os'` in a database at `os`, `'strict'` everywhere else.
+takes the database's level for a load: `'os'` in a database at `os` (`'strict'` when every table of the job names `strict`; **BL-1175, next train**), `'strict'` everywhere else.
 
 ```typescript
 const handle = await client.table('trades').bulkLoad(batches, { durability: 'os' });
@@ -834,8 +834,8 @@ handle.durability;   // 'os'
 
 `'os'` skips the fsync before the commit. After a power loss before the server has synced the job, the job is dropped whole and
 `GET .../bulk-load/{jobId}` reads `state: "lost"`, `errorCode: "BULK_LOAD_LOST"`: run the same `bulkLoad` again with the same
-`idempotencyKey`. `'strict'` in an `os` database, and `'os'` for a multi-table job, a table with vector columns, or an edge or
-vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060).
+`idempotencyKey`. `'os'` for a multi-table job, a table with vector columns, or an edge or
+vector table is refused `400 BULK_LOAD_INVALID_OPTIONS` — such a job in an `os` database names `durability: 'strict'`, which is allowed there (**BL-1175, next train**). See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060).
 
 ### Several jobs into one table (**Lead S18b, S22, 0.6.0**)
 
@@ -1504,26 +1504,82 @@ await client.admin.cluster.patchConfig({ heartbeatIntervalMs: 2000 });
 
 ### Backup Management (P16)
 
-```typescript
-// Trigger backup
-await client.admin.backup.trigger({ incremental: true });
+A backup is a **set** (one id, every database, the auth database first); see [Backup and restore](../guides/backup.md). Every call below is
+`client.admin.backup.*` and needs an administrator's key.
 
-// List backups
-const backups = await client.admin.backup.list();
+```typescript
+import {
+  AoudaApiError,
+  BACKUP_OPERATION_TIMEOUT_MS,
+  isBackupErrorCode,
+  type RetentionPolicy,
+} from '@aouda/client';
+
+// Trigger backup (a set for every database)
+const made = await client.admin.backup.trigger({ incremental: true });
+
+// List backups: `complete` is false for a set a member failed, `refused` says why a record could not be read
+const { backups } = await client.admin.backup.list();
+const restorable = backups.filter((b) => b.complete && b.refused === undefined);
+
+// One set: per member database, the manifest's cut, redo-start position and its branches
+const detail = await client.admin.backup.show(made.backupId);
+console.log(detail.members.map((m) => `${m.database} R=${m.redoStartPosition} P=${m.walPosition}`));
 
 // Restore exact backup
-await client.admin.backup.restore(backupId);
+await client.admin.backup.restore(made.backupId);
 
-// Point-in-time restore — last transaction commit <= targetTime
-await client.admin.backup.restore({
-  backupId,
-  targetTime: "2026-05-01T12:00:00Z",
+// Point-in-time restore — the last transaction commit <= targetTime; backupId is optional
+// (omitted, the server chooses the newest backup at or before the target)
+const restored = await client.admin.backup.restore({
+  backupId: made.backupId,
+  targetTime: '2026-05-01T12:00:00Z',
 });
+console.log(restored.pitr, restored.branches);
+
+// Retention: none by default (nothing is pruned). setRetention replaces the whole policy;
+// pitrWindow is a duration as the server writes it (d.hh:mm:ss)
+const policy: RetentionPolicy = { keepLast: 5, pitrWindow: '7.00:00:00' };
+await client.admin.backup.setRetention(policy);
+console.log(await client.admin.backup.getRetention());
+
+// Prune: a dry run by default; { execute: true } deletes what the server plans when it executes
+const plan = await client.admin.backup.prune();
+for (const set of plan.sets) console.log(set.backupId, set.keep ? 'kept' : 'deleted', set.rules);
+await client.admin.backup.prune({ execute: true });
 
 // Schedule
 const schedule = await client.admin.backup.getSchedule();
-await client.admin.backup.setSchedule({ cron: '0 2 * * *' });
+await client.admin.backup.setSchedule({ cronExpression: '0 2 * * *', incremental: schedule.incremental });
+
+// A backup error carries the server's code and a `remedyText`: what to do, as an instruction
+try {
+  await client.admin.backup.restore('no-such-backup');
+} catch (error) {
+  if (error instanceof AoudaApiError && isBackupErrorCode(error.code)) {
+    console.error(error.code, error.remedyText);
+  }
+}
 ```
+
+(**Durability-1 S14, next train**)
+
+- **`show`, `prune`, `getRetention` and `setRetention`**, the `{ backupId, targetTime }` form of `restore` and **`remedyText`** are new.
+  `setSchedule` takes `cronExpression` — a `cron` property was never part of the contract and is refused by the compiler (this page used to show it).
+- **A backup call that runs long is not cut off at the client's 30 s default.** `trigger`, `restore` (both forms) and an *executed*
+  `prune` wait up to `BACKUP_OPERATION_TIMEOUT_MS` (one hour) and take a last argument `{ timeout?, signal? }`; every other backup
+  call keeps the client's default. A call that times out may still be running on the server — a retry meets `409 BACKUP_IN_PROGRESS`.
+- **`remedyText`** is set on the `AoudaApiError` of every `/admin/backup/*` error (`BACKUP_ERROR_CODES` is the closed list;
+  `isBackupErrorCode` narrows). It is a different member from `remedy`, which stays the structured auth remedy of a `403`.
+  A backup call can also meet `DISK_FULL` (507) and `WAL_FAILED` (503): the server applied nothing, but with a `retryPolicy` set (the
+  default is none) the client re-sends `trigger`, `restore` and `prune` only after a refusal that proves "not applied" — `503`
+  `MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVER_STARTING`, `SETUP_REQUIRED`, `429 SERVER_AT_CAPACITY` — or a connection that
+  never opened, so these two reach your code: retry after `Retry-After` yourself. `setSchedule` and `setRetention` replace the whole value,
+  so a repeat changes nothing, and they are re-sent after any transient failure, these two included.
+- **After a restore, discard the consistency token your data clients hold.** A restore rewinds the node; a token from before it is
+  ahead of the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a fresh client, or
+  stop passing the old token — `AoudaClient` has no call that clears its token store; a `MemoryConsistencyTokenStore` you passed as
+  `consistencyTokenStore` can `forget(database)`. Studio discards its data clients after a restore it ran.
 
 ### Configuration (P16)
 
@@ -1569,7 +1625,7 @@ const caps = await client.admin.capabilities();
 | `aouda_cluster_health` | Health, readiness, replication health, and optional detail + node info |
 | `aouda_backup_trigger` | Trigger an immediate backup |
 | `aouda_backup_list` | List existing backups |
-| `aouda_backup_restore` | Restore a backup by ID |
+| `aouda_backup_restore` | Restore a backup by ID — an **exact** restore only: it takes no `targetTime`, and point-in-time restore, retention and prune are not offered to an agent (**Durability-1 S14, next train**) |
 | `aouda_backup_get_schedule` | Get current backup schedule |
 | `aouda_backup_set_schedule` | Update backup schedule |
 | `aouda_cluster_join` | Join this node to a replica set |
