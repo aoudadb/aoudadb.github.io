@@ -288,6 +288,12 @@ parameter is bound to the column of the same name (**BL-1390, 0.11.0**; see [Get
 Query results arrive as column-batch frames and are read into typed columns; the values are the ones the JSON answer would
 give.
 
+**Combinations the builder refuses before sending anything** (`InvalidOperationException`; each would otherwise have asked the server for something it cannot carry, and answered something else):
+
+- `SelectExpr` with a join, in either order — a joined query computes no column (**Correctness-Hardening S08, next train**). A join whose two key columns can never compare surfaces as an `AoudaException` with `ErrorCode` `JOIN_KEY_TYPE_MISMATCH` and `StatusCode` 400.
+- `DeleteAsync`, `UpdateAsync`, `SubscribeAsync` and `TruncateAsync` on a query narrowed by `LatestPerKey` / `FirstPerKey`, `Join` / `JoinWhere`, an aggregate, `GroupBy` or `Distinct`; a `Skip` on a delete or an update; a `Limit` on an update; and `TruncateAsync` with a `Where`, a `Limit` or a `Skip` — the wire carries only the `Where` conditions (and a delete's `OrderBy` / `Limit`), so these used to act on every row the filter matched (**BL-857, next train**). A `Limit` is a limit whatever its value: `Limit(1000)`, the read default's value, is sent on a delete (the server deletes at most 1,000 rows) and refused on an update and a truncate like any other; before, it was taken for no limit — a delete sent none and removed every matching row, an update and a truncate went through (**Correctness-Hardening S27, next train**).
+- A collection passed to the single-row overload of `InsertAsync` (`InsertAsync(new[] { entity })`): pass the collection to the many-rows overload. Dictionary rows given to the single-entity overload are inserted as rows (**BL-1242, next train**).
+
 Predicates, operators and pagination: [Getting Started: Working with data](../getting-started/index.md#5-working-with-data)
 and the [Query guide](../guides/query.md). Named queries: [Named queries](../guides/named-queries.md).
 
@@ -373,10 +379,10 @@ null is stored as null, and a null `autoIncrement` cell is not generated.
 How it is sent: as **one column-batch frame**, written straight from the batch's arrays, once the server has advertised frames
 (the `Accept-Post` header on any earlier response from a `/rows` endpoint); as **JSON column arrays** of the same rows before
 that, for a batch that holds a column no frame can carry, and for one over 1,000,000 rows or 4,096 columns. Either way the
-table ends up with the same values, with one exception: a `NaN` or `±Infinity` in a double column has no JSON form, so the
-JSON path throws `ArgumentException` for it before sending anything, while a frame writes it. On a new client the first
-column-batch insert goes as JSON (nothing has advertised frames yet), so a batch holding one fails there. The batch is
-checked before anything is sent (`ColumnBatch.Validate()`, §6), so a malformed batch throws `ArgumentException` naming the
+table ends up with the same values. A `NaN` or `±Infinity` in a double column is refused on every path, whichever body the
+batch would ride: `Validate()` throws `ArgumentException` naming the column and row before anything is sent
+(**BL-1110, next train**; before, the JSON body threw a different `ArgumentException` and a frame was refused by the server with
+`AoudaRequestException`). The batch is checked before anything is sent (`ColumnBatch.Validate()`, §6), so a malformed batch throws `ArgumentException` naming the
 column and row, and nothing is inserted. An empty batch sends nothing.
 
 Like every insert, a column-batch insert is re-sent only after a failure that proves the server applied nothing (§8).
@@ -420,8 +426,8 @@ Every factory takes optional bitmaps: **bit *i* is row *i***, least significant 
 
 - **`nullBits`**: the row is null. Its value in the array is ignored.
 - **`absentBits`**: the row does not carry this column at all. On an insert, an absent `autoIncrement` cell is generated and an
-  absent cell of a column with a default takes the default. ⚠️ A **bulk load** does not apply defaults: there an absent cell is
-  stored as null (an absent `autoIncrement` cell is still generated), **BL-1104**.
+  absent cell of a column with a default takes the default — on a bulk load too (**BL-1104, next train**; before, a bulk load
+  stored an absent cell as null). An absent `autoIncrement` cell is generated on both.
 
 ```csharp
 static byte[] Bits(int rows, Func<int, bool> isSet)
@@ -466,7 +472,8 @@ ColumnBatch batch = builder.Build();   // the builder is reset for the next batc
 `batch.Validate()` checks the batch the way the server's frame reader would and throws `ArgumentException` naming the column (and
 row) of the first problem: an empty or repeated column name, a value array or bitmap shorter than the rows, a string code
 outside its dictionary or pointing at a `null` dictionary entry on a row that is neither null nor absent, a timestamp a
-`DateTime` cannot hold, a scale above 18. The SDK calls it before sending any batch; call it yourself to fail earlier.
+`DateTime` cannot hold, a scale above 18, a double cell (or an object column's `double` / `float`) that is `NaN` or `±Infinity`
+on a row that is neither null nor absent (**BL-1110, next train**). The SDK calls it before sending any batch; call it yourself to fail earlier.
 
 ### The arrays are not copied
 
@@ -492,8 +499,25 @@ JSON, queries, named queries, subscriptions, typed and untyped) and both WebSock
 | `String[]` (**BL-035, 0.9.0**) | `string[]` |
 
 A null cell is `null` and an empty array is empty. The `byte[]` of a `Byte[]` column is told from a scalar `Byte` by the column's
-type, never by the value's shape: sent to a scalar `Byte` column it travels as base64 text and is refused as not a number —
-except a base64 text made only of digits, which is read as that number (BL-1265). Do not send a `byte[]` to a `Byte` column.
+type, never by the value's shape. A `byte[]` travels as its base64 text, which a `String` column stores as sent and which the
+three bytes `D3 4D 76` spell as the numeric text `"0012"`. So the SDK refuses a `byte[]` bound to a column that is neither
+`Byte[]` nor `String` before sending (**BL-1265, next train**), on every write that carries values — `InsertAsync`, `UpdateAsync`,
+`BatchAsync`'s updates, the write stream (insert and upsert), `BulkLoadAsync`, `BulkLoadMultiTableAsync` (the table a row's `_table`
+names) and `BulkLoadJobsAsync` — with `ArgumentException`. The same holds for a `ReadOnlyMemory<byte>` or `Memory<byte>` (also sent
+as base64), and for a `byte[]` in a column batch's object column (`ColumnBatchBuilder`'s `SetObject`), which is sent as JSON:
+
+```text
+ArgumentException: Column 's' (row 0) is Byte; a byte[] is sent as base64 text, which a Byte column would read as a number — send a byte, or use a Byte[] column.
+```
+
+Before, `"0012"`-shaped bytes were stored in a `Byte` column as `12` and others refused by the server. To know the column's type
+the SDK reads the table (`GET …/tables/{name}`) the first time a row holds a `byte[]`, keeps it per client and table, reads it again
+when a `byte[]` names a column it does not know or a write that used it fails, and reads it fresh at the start of each bulk load. A
+row without a `byte[]` costs nothing. The read needs `Read` on the table: a principal that may write a table but not read it gets
+that refusal when a row holds a `byte[]`, and nothing is sent. A table that does not exist, and a column it does not have, are left
+to the server, as before. ⚠️ Outside a bulk load the SDK does not notice that someone else changed a column's type: if a table is
+dropped and re-made with a `String` or `Byte[]` column turned `Byte` (or the type altered) after this client read it, a `byte[]`
+sent there is still stored as a number until a write fails or a new client is made (**BL-1650**).
 
 ```csharp
 var samples = client.GetTable("Samples");
@@ -636,8 +660,8 @@ when batches come from a pipeline you do not control, call `Validate()` as you b
 
 **The JSON fallback.** A batch with a column no frame can carry (an object column from a `ColumnBatchBuilder`) is sent as JSON
 column arrays of the same rows, after the frames before it. The same happens to every batch when the server does not accept
-frames. The table ends up with the same values either way — except that a `NaN` or `±Infinity` in a double column has no
-JSON form and makes such a batch throw `ArgumentException` — and it is still one load with one resume cursor.
+frames. The table ends up with the same values either way, and it is still one load with one resume cursor. A `NaN` or
+`±Infinity` in a double column is refused by `Validate()` on both (**BL-1110, next train**; before, a framed load stored it — the server now refuses one too).
 
 **Resume works inside a batch.** If a load fails part-way (§8), run it again with the same `IdempotencyKey` and the same batches
 from the start: the server says which row it needs next, and the SDK skips everything before it, even when that row is in the
@@ -1126,7 +1150,7 @@ handles (namespace `Aouda.Client` unless noted):
 
 | Exception | When |
 |---|---|
-| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. |
+| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. (**BL-1033, next train**) `400 STATEMENT_TOO_LARGE` — a statement that alone exceeds the server's read-path memory ceiling — is this exception, never retried; `Details` says how to narrow it (it was a `503` the policy retried to its bound). |
 | `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, 0.11.0**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
 | `AoudaServerStartingException` (**0.15.0**) | `503 SERVER_STARTING` or `503 SETUP_REQUIRED`: the server is up and not ready. A subclass of `AoudaServiceUnavailableException`; `RetryAfter` is the server's wait (`null` for `SETUP_REQUIRED`). Retried first, waiting `Retry-After` (§3a), and never counted by the circuit breaker or `AuthFailurePolicy`. |
@@ -1134,7 +1158,7 @@ handles (namespace `Aouda.Client` unless noted):
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |
 | `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY`, a `507 DISK_FULL` (the write was not applied; the client does not re-send it) (**BL-1658, next train**) — with `StatusCode` set. |
 | `CircuitBreakerOpenException` | The circuit breaker is open; the call was not attempted. |
-| `ArgumentException` | A column batch failed `Validate()` (§6), or a factory refused its input (a decimal with too many places, a bitmap too short). Nothing was sent for that batch. |
+| `ArgumentException` | A column batch failed `Validate()` (§6), or a factory refused its input (a decimal with too many places, a bitmap too short), or a row held a `byte[]` for a column that is neither `Byte[]` nor `String` (§6, **BL-1265, next train**). Nothing was sent for that batch or row. |
 
 Bulk load adds its own (namespace `Aouda.Client.Exceptions`):
 

@@ -292,10 +292,13 @@ A subscription is a read, and it is held to the rules of the HTTP read it mirror
   A write stream (`stream_open`) needs `write` on the table. Up to 0.8.0 a subscribe and a `stream_open` asked no role check, so a
   credential HTTP refused (the anonymous key, a user with no role) could read, and write, a table that has no partition or row
   security over the socket.
-- **The same rows.** A subscription's snapshot returns what an HTTP query by the same credential returns, and its change events
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  and one that does not receives only its own partitions'. Granting a role is described in
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **The same rows.** A subscription's snapshot returns what an HTTP query by the same credential returns — the rows its `read`
+  statements' `where`s admit, with its `filter` — and its change events are judged by the same compiled condition the snapshot
+  scans with, so a live event is delivered exactly when the snapshot would have returned its row (**BL-1573, next train**; up to
+  0.16.0 live events were judged by a separate evaluator, which could answer differently from the query on a typed comparison). A
+  statement whose condition the server cannot evaluate at all admits no row, live as in the snapshot. A live event the server
+  cannot judge ends that subscription with an `error` frame `INTERNAL_ERROR` (it was dropped for every subscriber of the table).
+  Access is described in [Authorization](../auth/authorization.md).
 - **Permissions are re-read on every `subscribe`**, a first subscribe included. A subscribe whose permissions cannot be read is
   **refused** (`PERMISSION_REVOKED`), or refused with a retryable capacity code (`SERVICE_UNAVAILABLE`, `MEMORY_BUDGET_EXCEEDED`, …)
   when the read is refused for capacity — never admitted on a stale answer.
@@ -305,6 +308,12 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
   role check, ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
   **not re-snapshotted**: rows that became visible are not pushed, only events from the re-key on. Resubscribe to read the rows
   that were already there.
+- **A resume whose policy admits no row is an open stream.** A `subscribe` with `resume_from` whose statements admit no row of the
+  table is not refused: it continues offered no event, as a fresh `subscribe` with the same statements gets an empty snapshot and
+  stays open, and it widens when the statements do (**BL-1588, next train**; up to 0.16.0 it ended with `PERMISSION_REVOKED`).
+  `PERMISSION_REVOKED` ends a stream when a re-key takes away the rows it admitted — a resumed stream included. The server keeps
+  nothing of a closed connection, so a stream whose rows were taken away while it was disconnected resumes open and is offered no
+  row, like one that never had any.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   (operation `insert`, on the first batch the grant decides, and again if the deciding grants change), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
   event**. The `cross_partition_access` flag alone
@@ -375,6 +384,16 @@ named query's bound `where` and row-level security do not apply to it.
 
 **Conflation.** A conflated subscription sends what it holds before it sends a notice, so a held change from before a range delete
 never arrives after it.
+
+**Embargo.** A subscription read through an embargoed statement (`embargoSeconds`, see
+[Authorization](../auth/authorization.md#embargo)) holds each change until its row time is old enough, and its notices go through the
+same hold (**BL-1317, next train**). A held change the notice covers is never released after it: a held insert is dropped, and a held
+change to a row you hold is dropped when the notice covers your copy too, or becomes a `delete` of your copy when the statement removed
+the row. The notice's time is never inside the embargo window: when it is later than your cutoff — `now − embargoSeconds` plus one
+tick at the send (for a `Date` column, the next day at midnight UTC) — it is sent with the cutoff instead. Every row you were given
+lies below the cutoff, so you drop exactly the rows the statement's time would have dropped. A subscription whose embargo releases
+nothing (a table with no row time) gets no notice. Up to 0.16.0 the notice was sent at once with the statement's time, and a held row
+it covered could arrive after it — a row the server no longer had.
 
 **Times.** The notices carry ISO strings; rows on the JSON wire carry a `Timestamp` as .NET ticks (an `Int64`, 100 ns since
 0001-01-01 UTC) and a `Date` as its day number (days since the Unix epoch). Compare them as the same instant, at full precision — the

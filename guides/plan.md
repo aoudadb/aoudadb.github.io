@@ -153,7 +153,7 @@ offline plan into a call to a server. The key is sent only as the bearer to the 
 server key elsewhere) — and is printed nowhere. The URL is an absolute `http://` or `https://` URL with no user name, query or fragment; there is no `--insecure`.
 
 **What is sent, and what is not.** The candidate carries every declared database entry, the access section as written (`server` and each auth database's
-`signup`, `roles` and `principals`, a stored key as the id and SHA-256 the file declares, a password seed's reference left out; **BL-1464, 0.16.0**), every
+`signup`, `roles` and `principals`, a stored key as the id and SHA-256 the file declares, a password seed as the marker `{ "seeded": true }` and nothing else — no reference, path or value; **BL-1464, 0.16.0**, **BL-1595, next train**), every
 schema file as its **merged document** (the overlay applied where the plan ran), and the paths of the declaration and schema files as **labels** for the findings
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 is `400` (an unknown member). It never carries a key, a password, a secret file's content or path, or an environment variable's name. The server opens
@@ -167,6 +167,8 @@ seeds are not read, and the derived keys are not checked. A stored key's `id` an
 
 **A body is only ever planned.** The server refuses a posted declaration without `dryRun=true` (`400 RELOAD_CANDIDATE_NOT_APPLIED`): what a reload applies is always
 the server's own files, which the next start reads too. To apply, change the files on the server and run `aouda reload`.
+
+(**BL-1595, next train**) The posted access section is checked against the file's own grammar, from its root: an unknown member, or a `databases` or root that is not an object, is refused (`400`), not dropped. A finding about a posted candidate stays located at `Aouda:Declaration`, with the pointer into the candidate in its message.
 
 ### Exit status against a server
 

@@ -266,6 +266,23 @@ Aouda extends its columnar storage model with two new primitives alongside the e
 - Routes insert batches by source-node partition key (edges from the same source live in the same partition).
 - Builds and exposes adjacency-aware traversal operators over the table — its sealed CSR segments (pruned by their `src` / `dst` statistics) and its write buffer, on one snapshot per traversal (**BL-813, 0.3.0**).
 - Late-arriving edges are flushed inline like any other edge; `_delta/` segments are removed (**ColumnarRead, 0.3.0**).
+- Stores **edge properties** — every column besides the source, destination and label — as ordinary columns (ADR 0027), scalars
+  and arrays alike. What each write path stores in them (**BL-1249, next train**):
+
+  | Write path | A property column |
+  |---|---|
+  | Bulk load (`BulkLoadAsync`, `:append` JSON rows or ACB2 frames) | what the row sent; an absent or null cell as on a tabular table (the column's `default`, else `null`; under `coerce` a `NOT NULL` column with no default takes its type's default) |
+  | Row API (`InsertRowsAsync`, `POST …/rows`; `PATCH`, `POST …/rows/batch` to change one) | what the row sent, as on a tabular table |
+  | `InsertEdgesAsync`, `POST …/edges` (source, destination and label only) | `null`. A table with a property that cannot be `null` — `NOT NULL`, with a `default`, or computed on write — refuses the call (`400 INVALID_REQUEST`, nothing written): write those edges through the row API or a bulk load |
+
+  Before, a bulk load stored every property at its type's default (`0`, `false`, an empty GUID, `null` for a string) whatever the
+  row sent, and so did `InsertEdgesAsync` / `POST …/edges`; only the row API kept them.
+
+  An edge inserted through `POST …/edges` keeps the `null` it was stored with when a property's `default` or nullability changes
+  later: the change first writes the table's buffered rows and edges to segments (**BL-1249, next train**), so it reaches only edges
+  written after it — in the running server and after a crash replays the log. If they cannot be written out at that moment, the
+  change is refused with nothing changed; retry it. A property **added** after an edge was stored reads as on a tabular table (the
+  column's `default` at the change, else `null`).
 
 Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, not separate tables. They may appear on any tabular table:
 - `DataType.Vector` — fixed-dimension dense float vectors. Each insert batch is WAL-framed, buffered in a per-column `VectorHraBuffer`, and flushed per IVF cell. Cold sealing optionally writes RaBitQ or PQ companion files.
@@ -895,7 +912,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | MdVector retrieval | Stage 2 | `DataType.MdVector` data is stored but not queryable for MaxSim retrieval | Callers who insert `MdVector` in Stage 1 should plan to re-run `BulkLoadAsync` after Stage 2 lands to populate FDE |
 | TypeScript graph/vector method APIs | Missing | TS SDK consumers cannot traverse edges or run ANN natively | Evidence in P20-COMPLETION §5.2 is cross-repo only; no TS source confirmed in this workspace |
 | HTTP REST graph/vector endpoints | Partial | An HTTP client can create edge tables and vector tables, insert edges and vectors, traverse, take a k-hop neighborhood or a shortest path, and search nearest neighbors ([REST endpoints](#rest-endpoints)); it cannot delete an edge or a vector | No route for `DeleteEdgeAsync` / `DeleteVectorAsync`. (**Pass-10**: this row said the operators had no controller; `GraphVectorController` exposes them) |
-| Edge/vector bulk-load native support | Partial | `BulkLoadAsync` for tabular tables is shipped; edge-table and vector-column bulk-load paths gated by BL-071 | `InsertEdgesAsync` / `InsertVectorsAsync` check `AwaitBulkLoadLockReleaseAsync` defensively; actual edge/vector bulk-load path tracked separately |
+| Edge/vector bulk-load native support | Available | `BulkLoadAsync` (and `:begin` / `:append` / `:commit`) loads an edge table — every column, properties included (**BL-1249, next train**) — and a table with a `Vector` column, which commits and is searched by `NearestNeighborsAsync` (**BL-1248, next train**: every such load failed at its commit, `Missing column N in manifest`). A load names its `embeddingModelVersion`; an ACB2 frame cannot carry a `Vector` column (`400 INVALID_REQUEST` at `:append`), so a vector-bearing table loads from JSON rows or the engine. `MdVector` columns are not bulk-loaded | A load's segments are visible only once it commits (**BL-1248, next train**: a traversal or a nearest-neighbour search could see an uncommitted or aborted edge or vector load's segments) |
 
 ---
 

@@ -140,6 +140,7 @@ If you do not configure schema management explicitly:
 | `On` (default) | `404` | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` (**BL-1177, 0.7.1**) | allowed |
 | `Extend` | the table is inferred from the rows and created | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | allowed |
 
+- **Creating a missing table needs an unconditional `write`** (**BL-1578, next train**): under `Extend`, a caller whose `write` carries a `where` gets `403 AUTH_POLICY_DENIED` and nothing is created, because the table does not exist yet to apply the condition to.
 - **`InferenceMode` decides only what an insert into a missing table does.** `On` does not create a missing table; only `Extend`
   does. `Off` and `On` differ only in the `404`'s message.
 - **The declarative lock belongs to the table, not the mode.** A table that schema apply *created* refuses HTTP DDL in every mode:

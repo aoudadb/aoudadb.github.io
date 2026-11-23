@@ -747,8 +747,8 @@ that arrives in a bucket folds into that bucket's one group.
   is sized by the window's groups, not the history's.
 - **A read below the horizon is charged to the read's budget**, as its computed groups grow. A part that fits half of what the read
   may still grow to is folded at once; a larger one in bucket-aligned pieces, one held at a time, as a stored read holds one
-  segment. A single bucket that alone outgrows the read-path ceiling is refused `503` + `Retry-After`, as a stored read of that size
-  is. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
+  segment. A single bucket that alone outgrows the read-path ceiling is refused, as a stored read of that size is —
+  `400 STATEMENT_TOO_LARGE` with no `Retry-After` (**BL-1033, next train**); it was `503` + `Retry-After`, which no retry could satisfy. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
   history keyset-paged 10,000 at a time needed 8.5 MB against a 512 MB server's 4 MB read ceiling, and was refused on every retry.
 
 ## Formula tables: what they cost (**ADR 0072, 0.14.0**) {#formula-tables-what-they-cost}
@@ -895,7 +895,10 @@ retryable error while it grows, rather than after.
 Two more join them in 0.3.0 (**BL-817, BL-776, 0.3.0**). A `DELETE` or `UPDATE` whose matched rows do not fit the read
 budget is refused with the same `503` / `MEMORY_BUDGET_EXCEEDED` and changes nothing — it used to hold every matched row, charged to
 nothing (691 MB for a 300,000-row delete under a 64 MB budget that refused the same `SELECT`); narrow the predicate and delete or
-update in pieces. And `POST …/materialized-queries/{name}/query` is held to `MaxResultRows` and the read budget like every other
+update in pieces. (**BL-1033, next train**) **A statement that alone exceeds the read path's ceiling** — its matches, or a read's held result,
+more than the database's transient budget (`T15`) even with nothing else running — is refused `400 STATEMENT_TOO_LARGE` with **no
+`Retry-After`**, because the same statement is refused the same way on an idle server; it was the `503`, and a client that honoured its
+`Retry-After` looped. The `503` is now only the refusal a retry can satisfy: other work held the memory. And `POST …/materialized-queries/{name}/query` is held to `MaxResultRows` and the read budget like every other
 read; page a large result through `/query` with a filter and a limit. Embedded hosting (`Advisory`) records both and refuses
 neither. The cold-metadata figure in `/server/memory` now also counts the read path's segment handles (each cold segment's footer,
 page indexes and deletion mask), which its eviction rung releases under pressure (**BL-816, 0.3.0**).

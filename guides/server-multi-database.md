@@ -503,7 +503,7 @@ aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durab
 | `Aouda:MaxConnections` | `int` | `100` | `AOUDA_MAXCONNECTIONS` | Kestrel `MaxConcurrentConnections` |
 | `Aouda:MaxConcurrentRequests` | `int` | `50` | `AOUDA_MAXCONCURRENTREQUESTS` | Concurrency limiter; returns 503 at capacity |
 | `Aouda:RequestQueueLimit` | `int` | `100` | — | Queue depth before 503 |
-| `Aouda:RequestTimeoutMs` | `int` | `30000` | `AOUDA_REQUESTTIMEOUTMS` | Must be ≥ 100 ms; returns 504 on breach |
+| `Aouda:RequestTimeoutMs` | `int` | `30000` | `AOUDA_REQUESTTIMEOUTMS` | Must be ≥ 100 ms; returns `504 REQUEST_TIMEOUT` on breach — inside a write too (**BL-1034, next train**: it was a `500 INTERNAL_ERROR` there). A data write answered `504` applied nothing; one already applied when the timeout fired is `500 WRITE_APPLIED_RESPONSE_FAILED` |
 | `Aouda:Join` | `string` | `null` | `AOUDA_JOIN` / `--join` | Join-on-startup primary address (P16) |
 | `Aouda:Role` | `string` | `null` | `AOUDA_ROLE` / `--role` | Startup role hint, e.g., `witness` (P16) |
 | `AOUDA_CORS_ORIGINS` / `Aouda:CorsOrigins` | `string[]` | Hub + localhost | env/config | Default CORS policy origins; comma-separated |

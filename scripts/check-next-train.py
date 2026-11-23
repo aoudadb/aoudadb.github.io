@@ -34,8 +34,8 @@ realtime API-key re-check that is `BL-1001` today, BL-1498). Every other mention
 A line of a released section that says the work is NOT shipped (`not yet shipped`, `unreleased`, `next train`, `planned`) does
 not count: the 0.13.0 section names BL-1380 that way.
 
-`_ALLOW` names a card whose released mention is a slice, not the whole card. BL-1463 and BL-1464 shipped Declare's slices in
-0.14.0; the access-model cut is the rest of those cards and is still `next train`. Remove an id from that set in the same commit
+`_ALLOW` names a card whose released mention is not the fix: a slice of the card, or a known-issue note about the defect the card now
+fixes (BL-1020, BL-1035, BL-1099, BL-1101 and BL-1104: the 0.4.0 - 0.6.0 sections name them as open). Remove an id from that set in the same commit
 that replaces its markers with the version. Exit status 1 when a marker is stale, 0 otherwise.
 """
 
@@ -61,17 +61,23 @@ _VERSION_HEADING = re.compile(r"^(#{1,6})[ \t]+v?(\d+\.\d+\.\d+)\b")
 _ANY_HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+train|planned|not\s+shipped", re.IGNORECASE)
 # A released mention of these is a slice. The rest of the card may still say `next train`.
+# Durability-1 and Correctness-Hardening: cards whose released-changelog mention is an older, open note, not the fix
+# this train ships. Remove each id in the same commit that replaces its markers with the version
+# (dev/Release-And-Version-Bump.md section 2).
 _ALLOW = {
-    # Durability-1: cards whose released-changelog mention is an older, open note, not the fix this train ships. Remove each id in the
-    # same commit that replaces its markers with the version (dev/Release-And-Version-Bump.md section 2).
     "BL-332",   # Studio's point-in-time restore: Studio 0.0.22 shipped the exact-restore page only
+    "BL-558",   # keyed-delete replay multiplicity: 0.1.31 shipped the first half; Durability-1 S05 closes the rest
+    "BL-787",   # the WAL ladder: 0.3.0 shipped the derived cap; Durability-1 S11 closes the residual (maintenance at T27)
     "BL-1010",  # a backup at WAL position 0: 0.4.0 made it exact-restore-only
+    "BL-1020",  # Correctness-Hardening: 0.4.0 names the open defect
+    "BL-1035",  # Correctness-Hardening: 0.5.0 names the open defect
+    "BL-1099",  # Correctness-Hardening: 0.6.0 "reaches no database"
+    "BL-1101",  # Correctness-Hardening: 0.6.0 "restarted"
+    "BL-1104",  # Correctness-Hardening: 0.6.0 "still stores an absent cell as null"
     "BL-1133",  # frameless multi-table loads: 0.6.0 names the gap
     "BL-1145",  # a level move to `unlogged` / `memory`: 0.6.0 says it has no path yet
     "BL-1147",  # a branch's `unlogged` tables: 0.6.0 says they do not have the rule yet
     "BL-1485",  # a PITR across a created table: 0.14.0 lists it as a known issue
-    "BL-558",   # keyed-delete replay multiplicity: 0.1.31 shipped the first half; Durability-1 S05 closes the rest
-    "BL-787",   # the WAL ladder: 0.3.0 shipped the derived cap; Durability-1 S11 closes the residual (maintenance at T27)
 }
 
 
