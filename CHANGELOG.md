@@ -15,6 +15,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 _(nothing yet)_
 
+## 0.17.1 — 2026-11-23
+
+Server **0.17.1** / `@aouda/client` unchanged (**0.17.0**) / `Aouda.Client` **0.17.1** (NuGet lockstep). Studio pin unchanged. No data-directory format bump (stays at **21**).
+
+- **`ORDER BY` sorts `Byte`, `Bool` and `Float32` (BL-1774).** Named-query `orderBy` / `orderByChoices` / `perKey.orderBy` and ad-hoc `ORDER BY` accept those types. `Guid`, arrays and vectors stay unordered. Pages: [Browser-tier read limits](guides/browser-tier-read-limits.md), [HTTP API](reference/http-api.md).
+
 ## 0.17.0 — 2026-11-23
 
 Server **0.17.0** / `@aouda/client` **0.17.0** (npm when [aouda-client-ts#79](https://github.com/aoudadb/aouda-client-ts/pull/79) merges) / `Aouda.Client` **0.17.0**. Studio pin stays **0.16.0** until its train. Data-directory format **21**; backup manifest **4**. Correctness-Hardening + Durability-1 + current refresh rebuilds.
