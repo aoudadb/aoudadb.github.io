@@ -4,9 +4,9 @@ nav_order: 2
 parent: "Clients"
 ---
 
-# Aouda .NET Client SDK (`Aouda.Client`)
+# Aouda.NET Client SDK (`Aouda.Client`)
 
-_Domain: .NET client library for a remote Aouda server_
+_Domain:.NET client library for a remote Aouda server_
 _Package: `Aouda.Client` on NuGet (targets `net10.0`)_
 _Repo: `aouda` (`src/Aouda.Client/`)_
 
@@ -14,12 +14,12 @@ _Repo: `aouda` (`src/Aouda.Client/`)_
 
 ## 1) What This Covers
 
-`Aouda.Client` is the official .NET client for an Aouda server. It provides:
+`Aouda.Client` is the official.NET client for an Aouda server. It provides:
 
-- **Queries**: a fluent query builder over `client.GetTable(name)` (untyped) and `client.GetTable<T>()` (typed)
+- **Queries**: a fluent query builder over `client.GetTable(name)` (untyped) and `client.GetTable<T>` (typed)
 - **Inserts**: single rows, lists of rows, typed objects, batched writers, and column batches (**Lead S13, 0.6.0**)
 - **Bulk load**: the `:begin` / `:append` / `:commit` protocol behind one call, from rows or from column batches
-  (**Lead S13, 0.6.0**), with resume after a failure
+ (**Lead S13, 0.6.0**), with resume after a failure
 - **Schema, materialized queries, named queries and mutations, streaming, backup and admin APIs**
 - **Resilience**: retries that never duplicate a write (**Lead S02, 0.6.0**), and a circuit breaker
 - **Authentication**: server auth and application auth
@@ -97,10 +97,10 @@ using Aouda.Client.Auth;
 
 using var client = new AoudaClient(new AoudaClientOptions
 {
-    ServerUrl = "https://db.example.com",
-    DatabaseName = "myapp",
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
-    Timeout = TimeSpan.FromSeconds(30),
+ ServerUrl = "https://db.example.com",
+ DatabaseName = "myapp",
+// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
+ Timeout = TimeSpan.FromSeconds(30),
 });
 ```
 
@@ -122,17 +122,17 @@ a start window of a few seconds used up the three retries in under a second and 
 **Three retries are not a wait.** About 15 s of `Retry-After` is all a call spends; a start longer than that ends in `AoudaServerStartingException` for the caller. Wait for the server first:
 
 ```csharp
-await client.WaitUntilReadyAsync();                              // up to AoudaClient.DefaultReadyTimeout, 60 s
-await client.WaitUntilReadyAsync(TimeSpan.FromMinutes(3));       // longer, for a big declared schema
+await client.WaitUntilReadyAsync; // up to AoudaClient.DefaultReadyTimeout, 60 s
+await client.WaitUntilReadyAsync(TimeSpan.FromMinutes(3)); // longer, for a big declared schema
 ```
 
 | Member | What it is |
 |---|---|
 | `AoudaClient.DefaultReadyTimeout` | `60 s`: the deadline `WaitUntilReadyAsync` uses when it is given none |
 | `Task WaitUntilReadyAsync(TimeSpan? timeout = null, CancellationToken ct = default)` | Polls `GET /ready` until it answers `200` |
-| `Task<ReadinessStatus> GetReadinessAsync(CancellationToken ct = default)` | One request to `GET /ready`: the answer whether it is `200` or a `503` with a body. The counterpart of the TypeScript client's `admin.health.ready()` |
+| `Task<ReadinessStatus> GetReadinessAsync(CancellationToken ct = default)` | One request to `GET /ready`: the answer whether it is `200` or a `503` with a body. The counterpart of the TypeScript client's `admin.health.ready` |
 | `record ReadinessStatus(bool Ready, IReadOnlyList<ReadinessIssue> Issues)` | |
-| `record ReadinessIssue(string Code, string Message, string? Subject, int? Done, int? Total)` | One reason the server is not ready: `Code` (`schema_applying`, `database_pending`, `server_starting`, `configured_key_inactive`, ...: [the list](../reference/http-api.md#get-ready)), `Subject` (the database), `Done` / `Total` (progress) |
+| `record ReadinessIssue(string Code, string Message, string? Subject, int? Done, int? Total)` | One reason the server is not ready: `Code` (`schema_applying`, `database_pending`, `server_starting`, `configured_key_inactive`,...: [the list](../reference/http-api.md#get-ready)), `Subject` (the database), `Done` / `Total` (progress) |
 | `AoudaNotReadyException : AoudaException` | `ErrorCode` `CLIENT_SERVER_NOT_READY`; `Waited`, `Issues`, `LastFailure`; `InnerException` is the last connection error |
 
 How the wait behaves:
@@ -142,7 +142,7 @@ How the wait behaves:
 - **It fails at once** with `AoudaException` (not `AoudaNotReadyException`) on `404`, `401`, `403` and any other `4xx`: that is a wrong URL or a proxy in the way, and waiting cannot change it.
 - **Backoff** is 250 ms, doubling to 2 s, raised to a `Retry-After` the server sent, and no sleep passes the deadline.
 - **The probe sends no credential** and never touches the circuit breaker, the health counters or `AuthFailurePolicy`: waiting for a server to start is not an authentication failure.
-- **When the deadline passes**, the exception message names the server's last step: `The Aouda server http://aouda:5000 was not ready after 60 s (GET /ready); still missing: schema_applying (deposit): Applying the schema file ...: 1 of 2 done.`, or `...; last answer: connection failed: Connection refused.` when the server never answered. `Issues` carries the same, as data.
+- **When the deadline passes**, the exception message names the server's last step: `The Aouda server http://aouda:5000 was not ready after 60 s (GET /ready); still missing: schema_applying (deposit): Applying the schema file...: 1 of 2 done.`, or `...; last answer: connection failed: Connection refused.` when the server never answered. `Issues` carries the same, as data.
 
 ⚠️ **Gate on `/ready`, never on `/health`.** `/health` answers `200` in every state, including while the server is still starting (**BL-1462, 0.14.0**), so a loop that waits for `/health` passes at once. `WaitUntilReadyAsync` waits for `/ready`.
 
@@ -163,26 +163,26 @@ The package is released with `Aouda.Client` (same version train) and adds two ex
 
 ```csharp
 AddAouda(this IServiceCollection services, IConfiguration section,
-         Action<AoudaClientOptions>? configure = null, Action<AoudaStartupOptions>? startup = null)
+ Action<AoudaClientOptions>? configure = null, Action<AoudaStartupOptions>? startup = null)
 AddAouda(this IServiceCollection services, Action<AoudaClientOptions> configure,
-         Action<AoudaStartupOptions>? startup = null)
+ Action<AoudaStartupOptions>? startup = null)
 ```
 
 **`appsettings.json`** (the section name is yours; here `Aouda`):
 
 ```json
 {
-  "Aouda": {
-    "ServerUrl": "http://aouda:5000",
-    "DatabaseName": "deposit",
-    "ApiKeyFile": "/run/secrets/deposit_service_key",
-    "ApplicationName": "quote-service",
-    "Timeout": "00:00:15",
-    "AutoReconcileSchema": false,
-    "FailFastOnAuthFailure": true,
-    "WaitUntilReadyOnStart": true,
-    "ReadyTimeout": "00:02:00"
-  }
+ "Aouda": {
+ "ServerUrl": "http://aouda:5000",
+ "DatabaseName": "deposit",
+ "ApiKeyFile": "/run/secrets/deposit_service_key",
+ "ApplicationName": "quote-service",
+ "Timeout": "00:00:15",
+ "AutoReconcileSchema": false,
+ "FailFastOnAuthFailure": true,
+ "WaitUntilReadyOnStart": true,
+ "ReadyTimeout": "00:02:00"
+ }
 }
 ```
 
@@ -197,22 +197,22 @@ using Microsoft.Extensions.DependencyInjection;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAouda(
-    builder.Configuration.GetSection("Aouda"),
-    configure: options => options.DefaultReadPreference = ReadPreference.Primary);
+ builder.Configuration.GetSection("Aouda"),
+ configure: options => options.DefaultReadPreference = ReadPreference.Primary);
 
-builder.Services.AddSingleton<QuoteReader>();
+builder.Services.AddSingleton<QuoteReader>;
 
-var app = builder.Build();
+var app = builder.Build;
 app.MapGet("/quotes/{ticker}", async (string ticker, QuoteReader reader) => await reader.LastAsync(ticker));
-app.Run();
+app.Run;
 
 public sealed class QuoteReader(IAoudaClient aouda)
 {
-    public async Task<object?> LastAsync(string ticker)
-    {
-        var rows = await aouda.GetTable("quotes").Where("ticker", "eq", ticker).Limit(1).ToListAsync();
-        return rows.FirstOrDefault();
-    }
+ public async Task<object?> LastAsync(string ticker)
+ {
+ var rows = await aouda.GetTable("quotes").Where("ticker", "eq", ticker).Limit(1).ToListAsync;
+ return rows.FirstOrDefault;
+ }
 }
 ```
 
@@ -252,47 +252,40 @@ What it registers and what it refuses:
 
 ## 4) Queries
 
-`GetTable(name)` returns a `RemoteTableQuery`, a fluent builder; `ToListAsync()` runs it and returns
+`GetTable(name)` returns a `RemoteTableQuery`, a fluent builder; `ToListAsync` runs it and returns
 `List<Dictionary<string, object?>>`.
 
 ```csharp
 var cheap = await client.GetTable("products")
-    .Where("price", "lt", 25)
-    .Select("id", "name", "price")
-    .OrderBy("price")
-    .Limit(50)
-    .ToListAsync();
+.Where("price", "lt", 25)
+.Select("id", "name", "price")
+.OrderBy("price")
+.Limit(50)
+.ToListAsync;
 
-long open = await client.GetTable("orders").Where("status", "eq", "open").CountAsync();
+long open = await client.GetTable("orders").Where("status", "eq", "open").CountAsync;
 ```
 
-`GetTable<T>()` (table name from the type, or `[AoudaTable("orders")]` from `Aouda.Abstractions.Attributes`) returns an
+`GetTable<T>` (table name from the type, or `[AoudaTable("orders")]` from `Aouda.Abstractions.Attributes`) returns an
 `AoudaTable<T>`: the same filters, ordering and paging (`Where`, `Select`, `OrderBy`, `Skip`, `Limit`, `ToListAsync`,
 `CountAsync`) with typed results, but no aggregates. Aggregates (`GroupBy`, `GroupByBucket`, `Count`, `Sum`, `Min`, `Max`,
-`Avg`, `CountDistinct`, run by `AggregateAsync()`) are on the untyped builder that `GetTable(name)` returns
+`Avg`, `CountDistinct`, run by `AggregateAsync`) are on the untyped builder that `GetTable(name)` returns
 (**ColumnarRead S16, 0.3.0**):
 
 ```csharp
 ClientColumnarResult perCustomer = await client.GetTable("orders")
-    .Where("status", "eq", "open")
-    .GroupBy("customer")
-    .Count()
-    .Sum("total")
-    .AggregateAsync();
-// Columns: customer, COUNT, SUM_total — one row per group (perCustomer.ToRows(), or GetColumn<T>(name))
+.Where("status", "eq", "open")
+.GroupBy("customer")
+.Count
+.Sum("total")
+.AggregateAsync;
+// Columns: customer, COUNT, SUM_total — one row per group (perCustomer.ToRows, or GetColumn<T>(name))
 ```
 
 A row type may be a positional record or any type with a single public constructor and no parameterless one: each constructor
-parameter is bound to the column of the same name (**BL-1390, 0.11.0**; see [Getting Started](../getting-started/index.md)).
-
-Query results arrive as column-batch frames and are read into typed columns; the values are the ones the JSON answer would
-give.
-
-**Combinations the builder refuses before sending anything** (`InvalidOperationException`; each would otherwise have asked the server for something it cannot carry, and answered something else):
-
-- `SelectExpr` with a join, in either order — a joined query computes no column (**Correctness-Hardening S08, next train**). A join whose two key columns can never compare surfaces as an `AoudaException` with `ErrorCode` `JOIN_KEY_TYPE_MISMATCH` and `StatusCode` 400.
-- `DeleteAsync`, `UpdateAsync`, `SubscribeAsync` and `TruncateAsync` on a query narrowed by `LatestPerKey` / `FirstPerKey`, `Join` / `JoinWhere`, an aggregate, `GroupBy` or `Distinct`; a `Skip` on a delete or an update; a `Limit` on an update; and `TruncateAsync` with a `Where`, a `Limit` or a `Skip` — the wire carries only the `Where` conditions (and a delete's `OrderBy` / `Limit`), so these used to act on every row the filter matched (**BL-857, next train**). A `Limit` is a limit whatever its value: `Limit(1000)`, the read default's value, is sent on a delete (the server deletes at most 1,000 rows) and refused on an update and a truncate like any other; before, it was taken for no limit — a delete sent none and removed every matching row, an update and a truncate went through (**Correctness-Hardening S27, next train**).
-- A collection passed to the single-row overload of `InsertAsync` (`InsertAsync(new[] { entity })`): pass the collection to the many-rows overload. Dictionary rows given to the single-entity overload are inserted as rows (**BL-1242, next train**).
+parameter is bound to the column of the same name. A join whose two key columns can never compare surfaces as an `AoudaException` with `ErrorCode` `JOIN_KEY_TYPE_MISMATCH` and `StatusCode` 400.
+- `DeleteAsync`, `UpdateAsync`, `SubscribeAsync` and `TruncateAsync` on a query narrowed by `LatestPerKey` / `FirstPerKey`, `Join` / `JoinWhere`, an aggregate, `GroupBy` or `Distinct`; a `Skip` on a delete or an update; a `Limit` on an update; and `TruncateAsync` with a `Where`, a `Limit` or a `Skip` — the wire carries only the `Where` conditions (and a delete's `OrderBy` / `Limit`), so these used to act on every row the filter matched. A `Limit` is a limit whatever its value: `Limit(1000)`, the read default's value, is sent on a delete (the server deletes at most 1,000 rows) and refused on an update and a truncate like any other; before, it was taken for no limit — a delete sent none and removed every matching row, an update and a truncate went through.
+- A collection passed to the single-row overload of `InsertAsync` (`InsertAsync(new { entity })`): pass the collection to the many-rows overload. Dictionary rows given to the single-entity overload are inserted as rows.
 
 Predicates, operators and pagination: [Getting Started: Working with data](../getting-started/index.md#5-working-with-data)
 and the [Query guide](../guides/query.md). Named queries: [Named queries](../guides/named-queries.md).
@@ -312,12 +305,12 @@ await orders.InsertAsync(new Dictionary<string, object?> { ["id"] = 1L, ["custom
 // Many rows: returns the number inserted
 int n = await orders.InsertAsync(new List<Dictionary<string, object?>>
 {
-    new() { ["id"] = 2L, ["customer"] = "Globex", ["total"] = 500m },
-    new() { ["id"] = 3L, ["customer"] = "Initech", ["total"] = 75m },
+ new { ["id"] = 2L, ["customer"] = "Globex", ["total"] = 500m },
+ new { ["id"] = 3L, ["customer"] = "Initech", ["total"] = 75m },
 });
 
 // A typed object: [AutoIncrement] properties are filled in from the server's generated values
-await client.GetTable<Order>().InsertAsync(new Order { Customer = "Acme", Total = 99.99m });
+await client.GetTable<Order>.InsertAsync(new Order { Customer = "Acme", Total = 99.99m });
 ```
 
 Every `InsertAsync` takes `identityInsert: true` to store explicit `autoIncrement` values as they are (see
@@ -329,7 +322,7 @@ Rows go to the server as one binary column-batch frame once the server has adver
 arrays before that (see [the insert endpoint](../reference/http-api.md#post-apidatabasesdbtablesnamerows)). Nothing about the call
 changes.
 
-For rows that arrive one at a time, `orders.CreateBatchWriter()` buffers them and sends them as batched inserts (by default
+For rows that arrive one at a time, `orders.CreateBatchWriter` buffers them and sends them as batched inserts (by default
 every 1,000 rows or 20 ms). Its `AddAsync` returns once the row is buffered; a failure surfaces on a later call, on
 `FlushAsync`, or on disposal.
 
@@ -344,9 +337,9 @@ using Aouda.Protocol;
 using Aouda.Protocol.BulkLoad;
 
 var batch = ColumnBatch.Of(
-    ColumnBatchColumn.FromStrings("customer", new[] { "Acme", "Globex", "Initech" }),
-    ColumnBatchColumn.FromDecimals("total", new[] { 249.99m, 500m, 75.5m }, scale: 2),
-    ColumnBatchColumn.FromTimestamps("placedAt", new DateTime?[] { DateTime.UtcNow, null, DateTime.UtcNow }));
+ ColumnBatchColumn.FromStrings("customer", new { "Acme", "Globex", "Initech" }),
+ ColumnBatchColumn.FromDecimals("total", new { 249.99m, 500m, 75.5m }, scale: 2),
+ ColumnBatchColumn.FromTimestamps("placedAt", new DateTime? { DateTime.UtcNow, null, DateTime.UtcNow }));
 
 InsertResult result = await client.GetTable("orders").InsertAsync(batch);
 // result.RowsInserted == 3
@@ -357,9 +350,9 @@ server's `InsertResult`:
 
 - `RowsInserted`: the rows inserted.
 - `GeneratedValues`: the values the server generated, as column arrays. `Columns` names the generated columns and `Data`
-  holds one array per column with one cell per row of the batch, `null` where the row gave its own value. Read one row with
-  `ForRow(row)` (a dictionary, or `null` when that row generated nothing) or one value with `TryGet(row, column, out value)`.
-  Cells arrive as JSON values (`JsonElement`). `GeneratedValues` is `null` when nothing was generated.
+ holds one array per column with one cell per row of the batch, `null` where the row gave its own value. Read one row with
+ `ForRow(row)` (a dictionary, or `null` when that row generated nothing) or one value with `TryGet(row, column, out value)`.
+ Cells arrive as JSON values (`JsonElement`). `GeneratedValues` is `null` when nothing was generated.
 
 In the example the table's `autoIncrement` key `id` is not in the batch, so every row's id is generated:
 
@@ -368,7 +361,7 @@ using System.Text.Json;
 
 if (result.GeneratedValues is { } generated && generated.TryGet(0, "id", out var value))
 {
-    long firstId = value is JsonElement e ? e.GetInt64() : Convert.ToInt64(value);
+ long firstId = value is JsonElement e ? e.GetInt64 : Convert.ToInt64(value);
 }
 ```
 
@@ -380,9 +373,9 @@ How it is sent: as **one column-batch frame**, written straight from the batch's
 (the `Accept-Post` header on any earlier response from a `/rows` endpoint); as **JSON column arrays** of the same rows before
 that, for a batch that holds a column no frame can carry, and for one over 1,000,000 rows or 4,096 columns. Either way the
 table ends up with the same values. A `NaN` or `±Infinity` in a double column is refused on every path, whichever body the
-batch would ride: `Validate()` throws `ArgumentException` naming the column and row before anything is sent
-(**BL-1110, next train**; before, the JSON body threw a different `ArgumentException` and a frame was refused by the server with
-`AoudaRequestException`). The batch is checked before anything is sent (`ColumnBatch.Validate()`, §6), so a malformed batch throws `ArgumentException` naming the
+batch would ride: `Validate` throws `ArgumentException` naming the column and row before anything is sent
+(before, the JSON body threw a different `ArgumentException` and a frame was refused by the server with
+`AoudaRequestException`). The batch is checked before anything is sent (`ColumnBatch.Validate`, §6), so a malformed batch throws `ArgumentException` naming the
 column and row, and nothing is inserted. An empty batch sends nothing.
 
 Like every insert, a column-batch insert is re-sent only after a failure that proves the server applied nothing (§8).
@@ -398,26 +391,26 @@ static factory on `ColumnBatchColumn`, then the batch with `ColumnBatch.Of(...)`
 
 | Factory | Values | Sent as |
 |---|---|---|
-| `FromInt64s(name, long[] values, byte[]? nullBits = null, byte[]? absentBits = null)` | 64-bit integers | `Int64` |
-| `FromDoubles(name, double[] values, nullBits, absentBits)` | doubles | `Double` |
-| `FromBools(name, bool[] values, nullBits, absentBits)` | booleans | `Bool` |
-| `FromTimestamps(name, DateTime[] values, nullBits, absentBits)` | instants. A `DateTimeKind.Local` value is converted to UTC; an `Unspecified` one is taken as UTC. | `Timestamp` |
-| `FromTimestampTicks(name, long[] unixTicks, nullBits, absentBits)` | instants as 100-nanosecond ticks since the Unix epoch, UTC (`ColumnBatchTime.ToUnixTicks` converts a `DateTime` or `DateTimeOffset`) | `Timestamp` |
-| `FromDecimals(name, decimal[] values, byte scale, nullBits, absentBits)` | decimals at one scale (0–18), each sent as its unscaled 64-bit integer (`123.45` at scale 2 is `12345`). A value with more decimal places than `scale`, or one whose unscaled value does not fit a `long`, throws `ArgumentException` naming the column and row; nothing is rounded. | `ScaledDecimal` |
-| `FromScaledDecimals(name, long[] unscaled, byte scale, nullBits, absentBits)` | unscaled values you already have (`12345` at scale 2 is `123.45`) | `ScaledDecimal` |
-| `FromStrings(name, string?[] values, byte[]? absentBits = null)` | strings, dictionary-encoded for you (each distinct value stored once); a `null` element is a null row | `String` |
-| `FromDictionary(name, string[] dictionary, int[] codes, nullBits, absentBits)` | a string column you already hold encoded (a Parquet or Arrow dictionary column): the distinct values and one index per row. A null or absent row's code is ignored, and the dictionary may hold values no row uses. | `String` |
-| `FromNulls(name, int rows, byte[]? absentBits = null)` | a column whose every row is null (or, with `absentBits`, absent) | `Null` |
+| `FromInt64s(name, long values, byte? nullBits = null, byte? absentBits = null)` | 64-bit integers | `Int64` |
+| `FromDoubles(name, double values, nullBits, absentBits)` | doubles | `Double` |
+| `FromBools(name, bool values, nullBits, absentBits)` | booleans | `Bool` |
+| `FromTimestamps(name, DateTime values, nullBits, absentBits)` | instants. A `DateTimeKind.Local` value is converted to UTC; an `Unspecified` one is taken as UTC. | `Timestamp` |
+| `FromTimestampTicks(name, long unixTicks, nullBits, absentBits)` | instants as 100-nanosecond ticks since the Unix epoch, UTC (`ColumnBatchTime.ToUnixTicks` converts a `DateTime` or `DateTimeOffset`) | `Timestamp` |
+| `FromDecimals(name, decimal values, byte scale, nullBits, absentBits)` | decimals at one scale (0–18), each sent as its unscaled 64-bit integer (`123.45` at scale 2 is `12345`). A value with more decimal places than `scale`, or one whose unscaled value does not fit a `long`, throws `ArgumentException` naming the column and row; nothing is rounded. | `ScaledDecimal` |
+| `FromScaledDecimals(name, long unscaled, byte scale, nullBits, absentBits)` | unscaled values you already have (`12345` at scale 2 is `123.45`) | `ScaledDecimal` |
+| `FromStrings(name, string? values, byte? absentBits = null)` | strings, dictionary-encoded for you (each distinct value stored once); a `null` element is a null row | `String` |
+| `FromDictionary(name, string dictionary, int codes, nullBits, absentBits)` | a string column you already hold encoded (a Parquet or Arrow dictionary column): the distinct values and one index per row. A null or absent row's code is ignored, and the dictionary may hold values no row uses. | `String` |
+| `FromNulls(name, int rows, byte? absentBits = null)` | a column whose every row is null (or, with `absentBits`, absent) | `Null` |
 
 A `Decimal(p,s)` column stores a scaled 64-bit integer, so `FromDecimals` at the column's scale (or `FromScaledDecimals`) sends
 exactly what it stores. See [`Decimal(p,s)`](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020).
 
 **Nullable overloads.** `FromInt64s`, `FromDoubles`, `FromBools`, `FromTimestamps` and `FromDecimals` also take a nullable array
-(`long?[]`, `double?[]`, `bool?[]`, `DateTime?[]`, `decimal?[]`, plus `scale` for decimals, then an optional `absentBits`). A
+(`long?`, `double?`, `bool?`, `DateTime?`, `decimal?`, plus `scale` for decimals, then an optional `absentBits`). A
 `null` element is a null row and the null bitmap is built for you:
 
 ```csharp
-var qty = ColumnBatchColumn.FromInt64s("qty", new long?[] { 10, null, 30 });
+var qty = ColumnBatchColumn.FromInt64s("qty", new long? { 10, null, 30 });
 ```
 
 ### Null and absent bitmaps
@@ -426,54 +419,7 @@ Every factory takes optional bitmaps: **bit *i* is row *i***, least significant 
 
 - **`nullBits`**: the row is null. Its value in the array is ignored.
 - **`absentBits`**: the row does not carry this column at all. On an insert, an absent `autoIncrement` cell is generated and an
-  absent cell of a column with a default takes the default — on a bulk load too (**BL-1104, next train**; before, a bulk load
-  stored an absent cell as null). An absent `autoIncrement` cell is generated on both.
-
-```csharp
-static byte[] Bits(int rows, Func<int, bool> isSet)
-{
-    var bits = new byte[(rows + 7) / 8];
-    for (int i = 0; i < rows; i++)
-        if (isSet(i)) bits[i >> 3] |= (byte)(1 << (i & 7));
-    return bits;
-}
-
-// Rows 0 and 2 take the column's default; row 1 gives "rush".
-var note = ColumnBatchColumn.FromStrings("note", new string?[] { null, "rush", null }, absentBits: Bits(3, i => i != 1));
-```
-
-### Making the batch
-
-- **`ColumnBatch.Of(params ColumnBatchColumn[] columns)`** takes its row count from the columns, which must agree; a
-  `FromNulls` column counts as its `rows`. It throws `ArgumentException` when the lengths differ or there is no column.
-- **`new ColumnBatch(int rowCount, IReadOnlyList<ColumnBatchColumn> columns)`** sets the row count yourself. Arrays longer than
-  `rowCount` are allowed and the rows past it are not sent, so you can refill the same large arrays and send a shorter batch.
-- **`ColumnBatchBuilder`** builds a batch row by row when your data arrives as rows but you still want to hand the SDK batches:
-
-```csharp
-var builder = new ColumnBatchBuilder();
-foreach (var trade in trades)
-{
-    builder.BeginRow();
-    builder.Column("symbol").SetString(trade.Symbol);
-    builder.Column("price").SetDecimal(trade.Price);
-    builder.Column("ts").SetTimestampTicks(ColumnBatchTime.ToUnixTicks(trade.Time));
-    builder.EndRow();   // a column this row did not set is absent in it
-}
-ColumnBatch batch = builder.Build();   // the builder is reset for the next batch
-```
-
-  The builder decides each column's kind from its values: an integer column that meets a fraction becomes a decimal at the
-  largest scale it meets. Values that disagree otherwise, and `SetObject`, make an object column, which no frame can carry: a
-  batch with one is sent as JSON column arrays instead (§7).
-
-### Checking a batch
-
-`batch.Validate()` checks the batch the way the server's frame reader would and throws `ArgumentException` naming the column (and
-row) of the first problem: an empty or repeated column name, a value array or bitmap shorter than the rows, a string code
-outside its dictionary or pointing at a `null` dictionary entry on a row that is neither null nor absent, a timestamp a
-`DateTime` cannot hold, a scale above 18, a double cell (or an object column's `double` / `float`) that is `NaN` or `±Infinity`
-on a row that is neither null nor absent (**BL-1110, next train**). The SDK calls it before sending any batch; call it yourself to fail earlier.
+ absent cell of a column with a default takes the default — on a bulk load too. The SDK calls it before sending any batch; call it yourself to fail earlier.
 
 ### The arrays are not copied
 
@@ -491,32 +437,32 @@ JSON, queries, named queries, subscriptions, typed and untyped) and both WebSock
 
 | Server type | CLR type |
 |---|---|
-| `Double[]` (**BL-035, 0.9.0**) | `double[]` |
-| `Float32[]` (**BL-035, 0.9.0**) | `float[]` |
-| `Int32[]` (**BL-035, 0.9.0**) | `int[]` |
-| `Int64[]` (**BL-035, 0.9.0**) | `long[]` |
-| `Byte[]` (**BL-035, 0.9.0**) | `byte[]` |
-| `String[]` (**BL-035, 0.9.0**) | `string[]` |
+| `Double` (**BL-035, 0.9.0**) | `double` |
+| `Float32` (**BL-035, 0.9.0**) | `float` |
+| `Int32` (**BL-035, 0.9.0**) | `int` |
+| `Int64` (**BL-035, 0.9.0**) | `long` |
+| `Byte` (**BL-035, 0.9.0**) | `byte` |
+| `String` (**BL-035, 0.9.0**) | `string` |
 
-A null cell is `null` and an empty array is empty. The `byte[]` of a `Byte[]` column is told from a scalar `Byte` by the column's
-type, never by the value's shape. A `byte[]` travels as its base64 text, which a `String` column stores as sent and which the
-three bytes `D3 4D 76` spell as the numeric text `"0012"`. So the SDK refuses a `byte[]` bound to a column that is neither
-`Byte[]` nor `String` before sending (**BL-1265, next train**), on every write that carries values — `InsertAsync`, `UpdateAsync`,
+A null cell is `null` and an empty array is empty. The `byte` of a `Byte` column is told from a scalar `Byte` by the column's
+type, never by the value's shape. A `byte` travels as its base64 text, which a `String` column stores as sent and which the
+three bytes `D3 4D 76` spell as the numeric text `"0012"`. So the SDK refuses a `byte` bound to a column that is neither
+`Byte` nor `String` before sending, on every write that carries values — `InsertAsync`, `UpdateAsync`,
 `BatchAsync`'s updates, the write stream (insert and upsert), `BulkLoadAsync`, `BulkLoadMultiTableAsync` (the table a row's `_table`
 names) and `BulkLoadJobsAsync` — with `ArgumentException`. The same holds for a `ReadOnlyMemory<byte>` or `Memory<byte>` (also sent
-as base64), and for a `byte[]` in a column batch's object column (`ColumnBatchBuilder`'s `SetObject`), which is sent as JSON:
+as base64), and for a `byte` in a column batch's object column (`ColumnBatchBuilder`'s `SetObject`), which is sent as JSON:
 
 ```text
-ArgumentException: Column 's' (row 0) is Byte; a byte[] is sent as base64 text, which a Byte column would read as a number — send a byte, or use a Byte[] column.
+ArgumentException: Column 's' (row 0) is Byte; a byte is sent as base64 text, which a Byte column would read as a number — send a byte, or use a Byte column.
 ```
 
 Before, `"0012"`-shaped bytes were stored in a `Byte` column as `12` and others refused by the server. To know the column's type
-the SDK reads the table (`GET …/tables/{name}`) the first time a row holds a `byte[]`, keeps it per client and table, reads it again
-when a `byte[]` names a column it does not know or a write that used it fails, and reads it fresh at the start of each bulk load. A
-row without a `byte[]` costs nothing. The read needs `Read` on the table: a principal that may write a table but not read it gets
-that refusal when a row holds a `byte[]`, and nothing is sent. A table that does not exist, and a column it does not have, are left
+the SDK reads the table (`GET …/tables/{name}`) the first time a row holds a `byte`, keeps it per client and table, reads it again
+when a `byte` names a column it does not know or a write that used it fails, and reads it fresh at the start of each bulk load. A
+row without a `byte` costs nothing. The read needs `Read` on the table: a principal that may write a table but not read it gets
+that refusal when a row holds a `byte`, and nothing is sent. A table that does not exist, and a column it does not have, are left
 to the server, as before. ⚠️ Outside a bulk load the SDK does not notice that someone else changed a column's type: if a table is
-dropped and re-made with a `String` or `Byte[]` column turned `Byte` (or the type altered) after this client read it, a `byte[]`
+dropped and re-made with a `String` or `Byte` column turned `Byte` (or the type altered) after this client read it, a `byte`
 sent there is still stored as a number until a write fails or a new client is made (**BL-1650**).
 
 ```csharp
@@ -525,68 +471,68 @@ var samples = client.GetTable("Samples");
 // a dictionary row with CLR arrays (sent as JSON)
 await samples.InsertAsync(new Dictionary<string, object?>
 {
-    ["Id"] = 300L,
-    ["D"] = new[] { 1.5, -0.0, 5e-324 },
-    ["F"] = new[] { 0.1f },
-    ["I"] = new[] { 1, 2, 3 },
-    ["L"] = new[] { 9007199254740993L },
-    ["B"] = new byte[] { 1, 2, 3 },
-    ["S"] = new[] { "a", "日本語" },
+ ["Id"] = 300L,
+ ["D"] = new { 1.5, -0.0, 5e-324 },
+ ["F"] = new { 0.1f },
+ ["I"] = new { 1, 2, 3 },
+ ["L"] = new { 9007199254740993L },
+ ["B"] = new byte { 1, 2, 3 },
+ ["S"] = new { "a", "日本語" },
 });
 
-var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
-// rows[0]["D"] is a double[] { 1.5, -0.0, 5E-324 } — the bits of -0 are kept (8000000000000000);
-// rows[0]["F"] is a float[], ["L"] a long[], ["B"] a byte[], ["S"] a string[]
+var rows = await samples.Where("Id", "eq", 300L).ToListAsync;
+// rows[0]["D"] is a double { 1.5, -0.0, 5E-324 } — the bits of -0 are kept (8000000000000000);
+// rows[0]["F"] is a float, ["L"] a long, ["B"] a byte, ["S"] a string
 ```
 
-- **The arrays in a result are shared, not copied per read: do not change them.** Copy one (`(double[])value.Clone()`) before
-  you do.
+- **The arrays in a result are shared, not copied per read: do not change them.** Copy one (`(double)value.Clone`) before
+ you do.
 - **A value the SDK cannot read as its column's type throws** (`InvalidDataException`); nothing maps to a default. Mapping to an
-  object is **exact**: `ToObjects<T>` assigns a property whose type is assignable from the CLR type above (`double[]`,
-  `IReadOnlyList<double>`, `object`) and throws `InvalidCastException` otherwise — a `double[]` property for a `Float32[]` column
-  throws, no element is converted. Typed subscriptions are **not** exact: they go through System.Text.Json, so an `int[]` column fills a `double[]` property and a
-  `float[]` property is filled from the widened text, an `object` property gets a `JsonElement`, and a failure arrives as an
-  `InvalidOperationException` (BL-1245). Give a typed subscription the exact CLR type above.
-  A `Timestamp` column fills a `DateTime`, `DateTime?` or `DateTimeOffset` property in the snapshot **and in every change**
-  (**BL-1381, 0.11.0**; 0.10.0 did it for the snapshot only and a change threw); a `long` property does not read.
-  `ToDataTable` columns have the array type.
-- **A POCO with array properties writes and creates its columns** (**BL-1374, 0.9.1**). `double[]`, `float[]`, `int[]`, `long[]`,
-  `byte[]` and `string[]` properties map to `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` and `String[]` (nullable
-  columns; a `byte[]` is the `Byte[]` column, a scalar `byte` stays `Byte`). `GetTable<T>().InsertAsync` / `InsertManyAsync` /
-  `BulkLoadAsync`, `GetTable(name).InsertAsync(entity)`, `UpdateAsync(new { … })`, `AutoCreateSchema` and the default reconcile all
-  take them. The match is on the exact CLR type: `uint[]`, `short[]`, `bool[]`, `decimal[]`, `int?[]`, jagged arrays and
-  `List<T>` / `IReadOnlyList<T>` properties are refused (`NotSupportedException` naming the property) before anything is sent;
-  mark them `[AoudaIgnore]`. In 0.9.0 every typed write of such a POCO threw `unsupported type 'Int32[]'`.
-- **Writes** take the same arrays: dictionary rows (as JSON; a row whose only array values are `byte[]` may go in a frame, as base64 text, with the same result), `UpdateAsync`, named-mutation arguments and
-  `batchParam` rows. A NaN or infinity element is refused by the server (`AoudaRequestException`, status 400), and locally
-  (`ArgumentException`, before sending) in a `batchParam` row and on the write stream:
+ object is **exact**: `ToObjects<T>` assigns a property whose type is assignable from the CLR type above (`double`,
+ `IReadOnlyList<double>`, `object`) and throws `InvalidCastException` otherwise — a `double` property for a `Float32` column
+ throws, no element is converted. Typed subscriptions are **not** exact: they go through System.Text.Json, so an `int` column fills a `double` property and a
+ `float` property is filled from the widened text, an `object` property gets a `JsonElement`, and a failure arrives as an
+ `InvalidOperationException` (BL-1245). Give a typed subscription the exact CLR type above.
+ A `Timestamp` column fills a `DateTime`, `DateTime?` or `DateTimeOffset` property in the snapshot **and in every change**
+ (**BL-1381, 0.11.0**; 0.10.0 did it for the snapshot only and a change threw); a `long` property does not read.
+ `ToDataTable` columns have the array type.
+- **A POCO with array properties writes and creates its columns** (**BL-1374, 0.9.1**). `double`, `float`, `int`, `long`,
+ `byte` and `string` properties map to `Double`, `Float32`, `Int32`, `Int64`, `Byte` and `String` (nullable
+ columns; a `byte` is the `Byte` column, a scalar `byte` stays `Byte`). `GetTable<T>.InsertAsync` / `InsertManyAsync` /
+ `BulkLoadAsync`, `GetTable(name).InsertAsync(entity)`, `UpdateAsync(new { … })`, `AutoCreateSchema` and the default reconcile all
+ take them. The match is on the exact CLR type: `uint`, `short`, `bool`, `decimal`, `int?`, jagged arrays and
+ `List<T>` / `IReadOnlyList<T>` properties are refused (`NotSupportedException` naming the property) before anything is sent;
+ mark them `[AoudaIgnore]`. In 0.9.0 every typed write of such a POCO threw `unsupported type 'Int32'`.
+- **Writes** take the same arrays: dictionary rows (as JSON; a row whose only array values are `byte` may go in a frame, as base64 text, with the same result), `UpdateAsync`, named-mutation arguments and
+ `batchParam` rows. A NaN or infinity element is refused by the server (`AoudaRequestException`, status 400), and locally
+ (`ArgumentException`, before sending) in a `batchParam` row and on the write stream:
 
-  ```text
-  AoudaRequestException: Column 'D': Element 0 of the Double[] value is NaN; array elements must be finite numbers (NaN and ±Infinity are refused).
-  AoudaRequestException: ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot be used in a where …
-  ```
+ ```text
+ AoudaRequestException: Column 'D': Element 0 of the Double value is NaN; array elements must be finite numbers (NaN and ±Infinity are refused).
+ AoudaRequestException: ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double; an array column cannot be used in a where …
+ ```
 
-  The client does not check the limits itself; the server's refusal comes back as the typed exception.
+ The client does not check the limits itself; the server's refusal comes back as the typed exception.
 - **A column batch** takes the factories `ColumnBatchColumn.FromDoubleArrays`, `FromFloat32Arrays`, `FromInt32Arrays`,
-  `FromInt64Arrays`, `FromByteArrays` and `FromStringArrays`, each `(string name, T[]?[] values, byte[]? absentBits = null)`: a
-  `null` row is a null cell, and the rows are **copied** into the column (as the nullable scalar factories copy; the non-nullable
-  ones keep your array). `Validate()` checks the limits and finiteness, and every send calls it, so a bad batch throws
-  `ArgumentException` before anything is sent.
+ `FromInt64Arrays`, `FromByteArrays` and `FromStringArrays`, each `(string name, T? values, byte? absentBits = null)`: a
+ `null` row is a null cell, and the rows are **copied** into the column (as the nullable scalar factories copy; the non-nullable
+ ones keep your array). `Validate` checks the limits and finiteness, and every send calls it, so a bad batch throws
+ `ArgumentException` before anything is sent.
 
-  ```csharp
-  var batch = ColumnBatch.Of(
-      ColumnBatchColumn.FromInt64s("Id", new[] { 301L, 302L }),
-      ColumnBatchColumn.FromDoubleArrays("D", new double[]?[] { new[] { 1.0, 2.0 }, null }),
-      ColumnBatchColumn.FromStringArrays("S", new string[]?[] { new string[0], new[] { "x" } }));
-  await samples.InsertAsync(batch);   // 301: D=[1,2] S=[]   302: D=null S=[x]
-  ```
+ ```csharp
+ var batch = ColumnBatch.Of(
+ ColumnBatchColumn.FromInt64s("Id", new { 301L, 302L }),
+ ColumnBatchColumn.FromDoubleArrays("D", new double? { new { 1.0, 2.0 }, null }),
+ ColumnBatchColumn.FromStringArrays("S", new string? { new string[0], new { "x" } }));
+ await samples.InsertAsync(batch); // 301: D=[1,2] S= 302: D=null S=[x]
+ ```
 - **POCO schema inference and POCO writes with an array property are refused** (`NotSupportedException`) until Embedded maps CLR
-  array properties (BL-1213). Reading into a POCO with an array property works with `ToObjects<T>()`, `ToListAsync<T>()` or
-  `GetTable<T>(tableName)`; `GetTable<T>()` without a name infers the type's schema and throws `NotSupportedException`.
+ array properties (BL-1213). Reading into a POCO with an array property works with `ToObjects<T>`, `ToListAsync<T>` or
+ `GetTable<T>(tableName)`; `GetTable<T>` without a name infers the type's schema and throws `NotSupportedException`.
 - **The write stream** (`stream_rows`) holds at most `Aouda:WebSocket:StreamingWrites:MaxBatchBytes` (1 MiB by default) of JSON a
-  message, so one large array row is refused there (`INVALID_STREAM_ROWS`); use an insert or a named mutation.
-- **The C# named-client generator** (`aouda generate csharp`, [Build apps](../guides/build-apps.md)) writes `double[]`, `float[]`, `int[]`, `long[]`, `byte[]` and `string[]` for
-  array columns and parameters (a non-optional property defaults to `System.Array.Empty<T>()`).
+ message, so one large array row is refused there (`INVALID_STREAM_ROWS`); use an insert or a named mutation.
+- **The C# named-client generator** (`aouda generate csharp`, [Build apps](../guides/build-apps.md)) writes `double`, `float`, `int`, `long`, `byte` and `string` for
+ array columns and parameters (a non-optional property defaults to `System.Array.Empty<T>`).
 
 ## 7) Bulk load
 
@@ -597,18 +543,18 @@ its guarantees and its sizing advice are in the [Bulk Load guide](../guides/bulk
 ### From rows
 
 ```csharp
-IAsyncEnumerable<IReadOnlyDictionary<string, object?>> rows = ReadRowsAsync();
+IAsyncEnumerable<IReadOnlyDictionary<string, object?>> rows = ReadRowsAsync;
 
 BulkLoadJobHandle handle = await client.BulkLoadAsync("orders", rows, new BulkLoadOptions
 {
-    IdempotencyKey = "orders-2026-10-18",
+ IdempotencyKey = "orders-2026-10-18",
 });
 Console.WriteLine($"{handle.RowsLoaded} rows, job {handle.JobId}");
 ```
 
 Overloads take an `IAsyncEnumerable<IReadOnlyDictionary<string, object?>>` or an
 `IReadOnlyList<IReadOnlyDictionary<string, object?>>`. The same calls exist on a table (`client.GetTable("orders").BulkLoadAsync(rows)`)
-and a typed table loads objects (`client.GetTable<Order>().BulkLoadAsync(orders)`, from an `IEnumerable<T>` or
+and a typed table loads objects (`client.GetTable<Order>.BulkLoadAsync(orders)`, from an `IEnumerable<T>` or
 `IAsyncEnumerable<T>`). The SDK packs the rows into column-batch frames itself.
 
 ### From column batches (**Lead S13, 0.6.0**)
@@ -620,21 +566,21 @@ in between.
 using Aouda.Client;
 using Aouda.Protocol.BulkLoad;
 
-async IAsyncEnumerable<ColumnBatch> ReadBatchesAsync()
+async IAsyncEnumerable<ColumnBatch> ReadBatchesAsync
 {
-    await foreach (var group in ReadRowGroupsAsync())   // e.g. one Parquet row group at a time
-    {
-        yield return ColumnBatch.Of(
-            ColumnBatchColumn.FromInt64s("id", group.Ids),
-            ColumnBatchColumn.FromDictionary("symbol", group.SymbolDictionary, group.SymbolCodes),
-            ColumnBatchColumn.FromScaledDecimals("price", group.PriceUnscaled, scale: 4),
-            ColumnBatchColumn.FromTimestampTicks("ts", group.UnixTicks));
-    }
+ await foreach (var group in ReadRowGroupsAsync) // e.g. one Parquet row group at a time
+ {
+ yield return ColumnBatch.Of(
+ ColumnBatchColumn.FromInt64s("id", group.Ids),
+ ColumnBatchColumn.FromDictionary("symbol", group.SymbolDictionary, group.SymbolCodes),
+ ColumnBatchColumn.FromScaledDecimals("price", group.PriceUnscaled, scale: 4),
+ ColumnBatchColumn.FromTimestampTicks("ts", group.UnixTicks));
+ }
 }
 
-var handle = await client.BulkLoadAsync("trades", ReadBatchesAsync(), new BulkLoadOptions
+var handle = await client.BulkLoadAsync("trades", ReadBatchesAsync, new BulkLoadOptions
 {
-    IdempotencyKey = "trades-2026-10-18",
+ IdempotencyKey = "trades-2026-10-18",
 });
 ```
 
@@ -647,21 +593,20 @@ var handle = await client.BulkLoadAsync("trades", ReadBatchesAsync(), new BulkLo
 | `RemoteTableQuery.BulkLoadAsync(IAsyncEnumerable<ColumnBatch>` / `IReadOnlyList<ColumnBatch>` / `ColumnBatch, …)` | the same three, on `client.GetTable("trades")` |
 
 **How batches become `:append` bodies.** A body holds up to `AppendBatchSize` rows (lowered to the server's `maxRowsPerAppend`
-when that is smaller) and about `MaxAppendBytes` bytes, as consecutive frames, numbered across the job's bodies (**Lead S21a, next
-train**). Several small batches share one body, one frame each; a large batch is cut across several bodies. Batches of a few thousand rows or more load fastest, since each batch is at
+when that is smaller) and about `MaxAppendBytes` bytes, as consecutive frames, numbered across the job's bodies. Several small batches share one body, one frame each; a large batch is cut across several bodies. Batches of a few thousand rows or more load fastest, since each batch is at
 least one frame. Your source is read on a thread-pool thread, one batch at a time and at most one body ahead of what the server
 has accepted: the next body is built while the previous one is in flight.
 
-**Each batch is checked before any of it is sent** (`Validate()`, §6). A malformed batch throws `ArgumentException` naming its
+**Each batch is checked before any of it is sent** (`Validate`, §6). A malformed batch throws `ArgumentException` naming its
 column, and the load is not committed. The rows of earlier batches that were already appended stay in the open session, which the
 server reclaims when it has been idle long enough. Until then it holds the table's bulk-load lock, so a new load into that
 table without the same `IdempotencyKey` waits (or fails with `ConflictPolicy = BulkLoadConflictPolicy.FailFast`). To avoid that
-when batches come from a pipeline you do not control, call `Validate()` as you build them.
+when batches come from a pipeline you do not control, call `Validate` as you build them.
 
 **The JSON fallback.** A batch with a column no frame can carry (an object column from a `ColumnBatchBuilder`) is sent as JSON
 column arrays of the same rows, after the frames before it. The same happens to every batch when the server does not accept
 frames. The table ends up with the same values either way, and it is still one load with one resume cursor. A `NaN` or
-`±Infinity` in a double column is refused by `Validate()` on both (**BL-1110, next train**; before, a framed load stored it — the server now refuses one too).
+`±Infinity` in a double column is refused by `Validate` on both (before, a framed load stored it — the server now refuses one too).
 
 **Resume works inside a batch.** If a load fails part-way (§8), run it again with the same `IdempotencyKey` and the same batches
 from the start: the server says which row it needs next, and the SDK skips everything before it, even when that row is in the
@@ -678,10 +623,10 @@ job order, as its commit returns. (**Lead S21b, 0.6.0**) A job's last column-bat
 `:commit` request — and job N+1 is begun once that body of job N is written, so N's finalize and commit overlap N+1's rows too:
 
 ```csharp
-IEnumerable<IReadOnlyList<ColumnBatch>> days = ReadDays();   // or IAsyncEnumerable<ColumnBatch> per job, or row streams
+IEnumerable<IReadOnlyList<ColumnBatch>> days = ReadDays; // or IAsyncEnumerable<ColumnBatch> per job, or row streams
 
 await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLoadOptions { IdempotencyKey = "trades-2026-10" }))
-    Console.WriteLine($"{handle.JobId}: {handle.RowsLoaded} rows, token {handle.Token}");
+ Console.WriteLine($"{handle.JobId}: {handle.RowsLoaded} rows, token {handle.Token}");
 ```
 
 | Method | Each job is |
@@ -691,19 +636,16 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 | `AoudaClient.BulkLoadJobsAsync(string tableName, IEnumerable<IAsyncEnumerable<IReadOnlyDictionary<string, object?>>> jobs, …)` | a stream of row objects |
 
 - **Each job is a job of its own**: committed, visible and answered on its own, in order. Its handle is exactly what
-  `BulkLoadAsync` would have returned for it.
-- **One job sending and one committing** (**Lead S21b, 0.6.0**; it was "one `:append` and one `:commit` in flight"). Job
-  N+2 is begun only after job N's handle. The next job is asked of `jobs` once the previous job's rows are all sent.
-- **The first failure ends the sequence**, after every earlier job's handle, and no later job commits: (**Lead S21b, next
-  train**) each job is begun naming the one before it (`afterJobId`), and the server refuses the commit of a job whose predecessor
-  did not commit. The job in flight when you stop reading (`break`) early is aborted — unless its commit point had passed, in which
-  case it is committed (its handle is not yielded).
+ `BulkLoadAsync` would have returned for it.
+- **One job sending and one committing** each job is begun naming the one before it (`afterJobId`), and the server refuses the commit of a job whose predecessor
+ did not commit. The job in flight when you stop reading (`break`) early is aborted — unless its commit point had passed, in which
+ case it is committed (its handle is not yielded).
 - **`IdempotencyKey` keys each job**: job `i` is keyed `{key}.{i}`. Repeating the call with the same key and the same jobs replays
-  the jobs that committed (their handles say `WasResumed`) and resumes the first that did not.
+ the jobs that committed (their handles say `WasResumed`) and resumes the first that did not.
 - **`ConflictPolicy = FailFast` runs the jobs one at a time**: a job queued behind the lock would be refused.
 - `Progress` may be called from two jobs at once.
 - Each commit still drains its job into segments of its own: prefer one long job where you can
-  ([Sizing a session](../guides/bulk-load.md#sizing-a-session-fewer-longer-one-commit)). Jobs are for loads that arrive as several.
+ ([Sizing a session](../guides/bulk-load.md#sizing-a-session-fewer-longer-one-commit)). Jobs are for loads that arrive as several.
 
 ### Options that matter
 
@@ -720,14 +662,14 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 | `PostLoadMqBehavior` | `ClientPostLoadMqBehavior.Auto` | `Skip` leaves the load's materialized queries behind until you refresh them. |
 | `WriteConcern` / `WriteConcernTimeout` | `Acknowledged` / 5 minutes | Replica acknowledgement at commit. |
 | `IdentityInsert` | `false` | Store explicit `autoIncrement` values as they are; every row must give them. |
-| `Durability` | `null` (the database's level for a load) | (**Lead S26c, 0.6.0**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os` (`Strict` when every table of the job names `strict`; **BL-1175, next train**), `Strict` everywhere else. A multi-table job, or one into an edge or vector table, needs `Strict` in an `os` database. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
+| `Durability` | `null` (the database's level for a load) | (**Lead S26c, 0.6.0**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os` (`Strict` when every table of the job names `strict`;), `Strict` everywhere else. A multi-table job, or one into an edge or vector table, needs `Strict` in an `os` database. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
 | `ApplyTransforms` / `PreTransformed` | `false` / `false` | A table with derived columns, checks or transforms needs exactly one of them. |
 | `ConflictPolicy` | `BulkLoadConflictPolicy.Block` | `FailFast` fails at once when another load holds the table. |
 | `Progress` | none | An `IProgress<BulkLoadProgress>` called after each `:append` and at commit. `BulkLoadProgress` carries deferred-work counters, not rows: the per-`:append` report is empty, so count rows in your source. |
 
 The handle reports `RowsLoaded`, `PerTableRowCounts`, `SegmentsCreated`, `ExpiredRows`, `WasResumed`, `Token` (the commit's
 consistency token), `Durability` (the job's level; **Lead S26c, 0.6.0**), `MqStatus` / `MqFrontierToken`, and offers
-`WaitForMaterializedQueriesAsync()` and `GetProgressAsync()`.
+`WaitForMaterializedQueriesAsync` and `GetProgressAsync`.
 A handle returned for a key whose job had already committed (nothing sent) has the job's `RowsLoaded` and `Token`, but an empty
 `PerTableRowCounts` and `SegmentsCreated` 0.
 
@@ -744,40 +686,40 @@ date, which is not read) the backoff applies. A write whose repeat is **not** a 
 server already applied would apply it twice:
 
 - **Inserts** (rows, typed objects, column batches), updates, deletes, named mutations and a bulk-load `:commit` are re-sent
-  **only after a failure that proves the server applied nothing**: a connection that was never opened (refused, unreachable,
-  or a host name that did not resolve), a TLS handshake that failed before the request was sent, or a capacity refusal, which
-  the server answers only for a request it did not apply. Any other `503`, a `504`, a **timeout or a lost answer** proves
-  nothing — the server may have committed — so the error reaches you instead of a second copy of the rows. Check before you
-  insert again. (**Lead group 3 review, 0.6.0**) A failure after a write was applied is never answered as a capacity
-  refusal.
+ **only after a failure that proves the server applied nothing**: a connection that was never opened (refused, unreachable,
+ or a host name that did not resolve), a TLS handshake that failed before the request was sent, or a capacity refusal, which
+ the server answers only for a request it did not apply. Any other `503`, a `504`, a **timeout or a lost answer** proves
+ nothing — the server may have committed — so the error reaches you instead of a second copy of the rows. Check before you
+ insert again. (**Lead group 3 review, 0.6.0**) A failure after a write was applied is never answered as a capacity
+ refusal.
 - **A `:commit` refused for capacity has failed its job.** The server answers every repeat of it with the same `503`, so the
-  SDK's re-sends end in `AoudaCapacityException`. Wait its `RetryAfter`, then run the load again: it starts a fresh job and
-  sends every row (the key is free again).
+ SDK's re-sends end in `AoudaCapacityException`. Wait its `RetryAfter`, then run the load again: it starts a fresh job and
+ sends every row (the key is free again).
 - **A bulk-load `:append` is re-sent only by the SDK, after asking where the job is** (**Lead S21a, 0.6.0**). A job's frames
-  are numbered and the server applies each number once, so a body sent again loads none of its rows twice. An `:append` that
-  fails in transit (a connection error, a timeout, a `503`) is answered by a `:begin` with the job's key — which stops the
-  server's stale request and answers the job's `nextSequence` — and then the same body again, up to four attempts with a short
-  back-off (a `503`'s `Retry-After` when it gives one). Only then does it throw `BulkLoadAppendFailedException`, carrying the
-  `IdempotencyKey`, `RowsSent` and `RowsDurablyCommitted`. Recover by running the same load again with the same `IdempotencyKey`,
-  the same source and the same body bounds: the SDK sends `:begin` with that key, the server answers with the job's next frame,
-  and the SDK sends nothing below it — and throws `BulkLoadCursorMismatchException`, sending nothing, if the frames it skips do
-  not carry the rows the server holds (until Lead S21a it resumed by rows, from `resumeFromRow`, and threw on the first failed
-  `:append`). Do not add a retry of your own around `:append`. A `:commit` names the frames the SDK sent, and the server commits
-  nothing unless it applied exactly those. (**Lead S21b, 0.6.0**) The body that commits a job is recovered the same way, with
-  two more outcomes: if the job committed before the answer was lost, the keyed `:begin` replays it and the SDK returns its handle
-  (`WasResumed`); if its commit is still running, the server says so and the SDK waits (not counted as an attempt, up to
-  `RequestTimeout`), then asks again.
+ are numbered and the server applies each number once, so a body sent again loads none of its rows twice. An `:append` that
+ fails in transit (a connection error, a timeout, a `503`) is answered by a `:begin` with the job's key — which stops the
+ server's stale request and answers the job's `nextSequence` — and then the same body again, up to four attempts with a short
+ back-off (a `503`'s `Retry-After` when it gives one). Only then does it throw `BulkLoadAppendFailedException`, carrying the
+ `IdempotencyKey`, `RowsSent` and `RowsDurablyCommitted`. Recover by running the same load again with the same `IdempotencyKey`,
+ the same source and the same body bounds: the SDK sends `:begin` with that key, the server answers with the job's next frame,
+ and the SDK sends nothing below it — and throws `BulkLoadCursorMismatchException`, sending nothing, if the frames it skips do
+ not carry the rows the server holds (until Lead S21a it resumed by rows, from `resumeFromRow`, and threw on the first failed
+ `:append`). Do not add a retry of your own around `:append`. A `:commit` names the frames the SDK sent, and the server commits
+ nothing unless it applied exactly those. (**Lead S21b, 0.6.0**) The body that commits a job is recovered the same way, with
+ two more outcomes: if the job committed before the answer was lost, the keyed `:begin` replays it and the SDK returns its handle
+ (`WasResumed`); if its commit is still running, the server says so and the SDK waits (not counted as an attempt, up to
+ `RequestTimeout`), then asks again.
 - **Other `:append` failures are not wrapped.** A `500`, a `413` or another `4xx` surfaces as the exception for its status
-  (§9: `AoudaException`, `AoudaRequestException`, …), and three codes as their own exceptions: `BULK_LOAD_INVALID_STATE` (the job is no longer
-  open) as `BulkLoadAbortedException`, `BULK_LOAD_MISSING_DISCRIMINATOR` as `BulkLoadMissingDiscriminatorException` and
-  `BULK_LOAD_CURSOR_MISMATCH` as `BulkLoadCursorMismatchException` (its `NextSequence`, `ServerRows` and `ClientRows` say where
-  the job and the load disagree). A `400` for the body's rows leaves the job open, so the same key resumes it from the frame the
-  server needs next — and fails there again until the source is fixed.
+ (§9: `AoudaException`, `AoudaRequestException`, …), and three codes as their own exceptions: `BULK_LOAD_INVALID_STATE` (the job is no longer
+ open) as `BulkLoadAbortedException`, `BULK_LOAD_MISSING_DISCRIMINATOR` as `BulkLoadMissingDiscriminatorException` and
+ `BULK_LOAD_CURSOR_MISMATCH` as `BulkLoadCursorMismatchException` (its `NextSequence`, `ServerRows` and `ClientRows` say where
+ the job and the load disagree). A `400` for the body's rows leaves the job open, so the same key resumes it from the frame the
+ server needs next — and fails there again until the source is fixed.
 - **Set your own `IdempotencyKey` if you may need to resume.** (**Lead group 3 review, 0.6.0**) A failed load whose key
-  the SDK generated is aborted (a best-effort `:abort`), since nobody else knows the key — with two exceptions. A transient
-  `:append` failure keeps the job: its `BulkLoadAppendFailedException` hands you the generated key in `IdempotencyKey`, and
-  running the load again with that key resumes it. And once `:commit` has been sent the job is not aborted: the server's
-  commit decides it. A job under your own key is never aborted for a failure, only for a cancellation (§7).
+ the SDK generated is aborted (a best-effort `:abort`), since nobody else knows the key — with two exceptions. A transient
+ `:append` failure keeps the job: its `BulkLoadAppendFailedException` hands you the generated key in `IdempotencyKey`, and
+ running the load again with that key resumes it. And once `:commit` has been sent the job is not aborted: the server's
+ commit decides it. A job under your own key is never aborted for a failure, only for a cancellation (§7).
 - `:begin` carries the idempotency key, so a repeat of it finds the same job.
 
 A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was lost surfaces as an error, never silently.
@@ -786,7 +728,7 @@ A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was 
 
 ## 8a) Subscriptions: which listener takes which
 
-`client.GetTable(name).SubscribeAsync()` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
+`client.GetTable(name).SubscribeAsync` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
 `In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, 0.9.0**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
@@ -817,7 +759,7 @@ the subscription with an `InvalidDataException` naming the column. No converter 
 ### Subscribing across partitions
 
 On a partitioned table that requires a partition filter, a subscription that names no partition is refused with
-`PARTITION_FILTER_REQUIRED`. `RemoteTableQuery.WithCrossPartitionAccess()` reaches
+`PARTITION_FILTER_REQUIRED`. `RemoteTableQuery.WithCrossPartitionAccess` reaches
 `SubscribeAsync` as well as the query methods (**BL-1227, 0.9.0**; until this train a subscription had no way to send it), and
 `SubscribeOptions.CrossPartitionAccess` asks for the same. Either asks; **neither cancels the other**. The client sends
 `cross_partition_access: true` on the `subscribe` message only when asked, and sends it again on every resubscribe after a reconnect.
@@ -828,19 +770,19 @@ using Aouda.Client;
 
 // On the query builder
 await foreach (var evt in client.GetTable("orders")
-    .WithCrossPartitionAccess()
-    .SubscribeAsync(ct))
+.WithCrossPartitionAccess
+.SubscribeAsync(ct))
 {
-    Console.WriteLine($"{evt.Type} v{evt.Version}");
+ Console.WriteLine($"{evt.Type} v{evt.Version}");
 }
 
 // Or in the options
 var options = new SubscribeOptions { CrossPartitionAccess = true };
 await foreach (var evt in client.GetTable("orders")
-    .Where("status", "eq", "open")
-    .SubscribeAsync(options, ct))
+.Where("status", "eq", "open")
+.SubscribeAsync(options, ct))
 {
-    Console.WriteLine(evt.Type);
+ Console.WriteLine(evt.Type);
 }
 ```
 
@@ -862,22 +804,22 @@ var args = new Dictionary<string, object?> { ["status"] = "open" };
 
 // ExecuteAsync(name, args, ct, orderByIndex, atLeast, crossPartitionAccess)
 var open = await client.NamedQueries.ExecuteAsync(
-    "orders_by_status", args, ct, crossPartitionAccess: true);
+ "orders_by_status", args, ct, crossPartitionAccess: true);
 
 // BatchAsync: the flag is on the item
 var slots = await client.NamedQueries.BatchAsync(
-    new[]
-    {
-        new NamedQueryBatchInput("orders_by_status", args, crossPartitionAccess: true),
-        new NamedQueryBatchInput("customer_card", new Dictionary<string, object?> { ["id"] = 7 }),
-    },
-    ct);
+ new
+ {
+ new NamedQueryBatchInput("orders_by_status", args, crossPartitionAccess: true),
+ new NamedQueryBatchInput("customer_card", new Dictionary<string, object?> { ["id"] = 7 }),
+ },
+ ct);
 
 // SubscribeAsync: the flag is in the options
 await foreach (var evt in client.NamedQueries.SubscribeAsync(
-    "orders_by_status", args, new SubscribeOptions { CrossPartitionAccess = true }, ct))
+ "orders_by_status", args, new SubscribeOptions { CrossPartitionAccess = true }, ct))
 {
-    Console.WriteLine(evt.Type);
+ Console.WriteLine(evt.Type);
 }
 ```
 
@@ -898,19 +840,19 @@ another `AoudaClient`. A subscribe with an explicit `SubscribeOptions.ResumeFrom
 // event (its snapshot), so the counts are read only after all twenty have one.
 var firstEvents = 0;
 var allAttached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-var widgets = Enumerable.Range(0, 20).Select(_ => Task.Run(async () =>
+var widgets = Enumerable.Range(0, 20).Select(_ => Task.Run(async =>
 {
-    var first = true;
-    await foreach (var evt in client.NamedQueries.SubscribeAsync("quotes_by_ticker", args, null, ct))
-    {
-        if (first)
-        {
-            first = false;
-            if (Interlocked.Increment(ref firstEvents) == 20) allAttached.TrySetResult();
-        }
-        Render(evt);
-    }
-})).ToArray();
+ var first = true;
+ await foreach (var evt in client.NamedQueries.SubscribeAsync("quotes_by_ticker", args, null, ct))
+ {
+ if (first)
+ {
+ first = false;
+ if (Interlocked.Increment(ref firstEvents) == 20) allAttached.TrySetResult;
+ }
+ Render(evt);
+ }
+})).ToArray;
 
 await allAttached.Task;
 Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSubscriptions} server subscription(s)");
@@ -918,56 +860,56 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
 ```
 
 - **Each consumer has its own snapshot.** A subscriber that joins a subscription already open is handed the rows it holds as one
-  synthetic `Snapshot` event (current version and token), then the live events. One that joins while the first snapshot is still arriving
-  waits for it; one that joins while the connection is down waits until the resubscribe is sent. Events are shared **by reference**:
-  rows are not copied per consumer, so do not mutate them.
+ synthetic `Snapshot` event (current version and token), then the live events. One that joins while the first snapshot is still arriving
+ waits for it; one that joins while the connection is down waits until the resubscribe is sent. Events are shared **by reference**:
+ rows are not copied per consumer, so do not mutate them.
 - **One slow consumer does not slow the rest — and no consumer may stall without limit.** Each enumerator has a queue of 10 000
-  events by default; (**BL-1421, 0.12.0**) `AoudaClientOptions.SubscriptionConsumerQueueCapacity` (default `10_000`, validated `>= 1` when the
-  client is built) sets it for every subscription on the client, and `SubscribeOptions.ConsumerQueueCapacity` overrides it for one subscription
-  (also validated `>= 1`). The capacity is **not part of the sharing identity**: subscribes that differ only in it still share one server
-  subscription, each with its own queue. One that falls further behind (a long pause, a slow handler through a burst) ends with an `AoudaRequestException` whose
-  `ErrorCode` is `CLIENT_CONSUMER_OVERFLOW` and leaves; the others and the server subscription go on. **This holds for a subscription
-  nobody shares as well**: before this train the client buffered without limit, now a single consumer that cannot keep up is ended with
-  that error (no resume: subscribe again for a new snapshot), and the server subscription is closed when it was the last. Catch it
-  where you read the stream if a burst of more than the capacity between two reads is possible. (**BL-1421, 0.12.0**) The message says what happened
-  and the recovery: `The subscription consumer fell behind: <capacity> events were queued unread. It was removed from the shared subscription; the
-  other consumers are unaffected. There is no resume: subscribe again to get a fresh snapshot. To tolerate a longer stall, raise
-  AoudaClientOptions.SubscriptionConsumerQueueCapacity (client-wide) or SubscribeOptions.ConsumerQueueCapacity (this subscription); or read faster.`
+ events by default; (**BL-1421, 0.12.0**) `AoudaClientOptions.SubscriptionConsumerQueueCapacity` (default `10_000`, validated `>= 1` when the
+ client is built) sets it for every subscription on the client, and `SubscribeOptions.ConsumerQueueCapacity` overrides it for one subscription
+ (also validated `>= 1`). The capacity is **not part of the sharing identity**: subscribes that differ only in it still share one server
+ subscription, each with its own queue. One that falls further behind (a long pause, a slow handler through a burst) ends with an `AoudaRequestException` whose
+ `ErrorCode` is `CLIENT_CONSUMER_OVERFLOW` and leaves; the others and the server subscription go on. **This holds for a subscription
+ nobody shares as well**: before this train the client buffered without limit, now a single consumer that cannot keep up is ended with
+ that error (no resume: subscribe again for a new snapshot), and the server subscription is closed when it was the last. Catch it
+ where you read the stream if a burst of more than the capacity between two reads is possible. (**BL-1421, 0.12.0**) The message says what happened
+ and the recovery: `The subscription consumer fell behind: <capacity> events were queued unread. It was removed from the shared subscription; the
+ other consumers are unaffected. There is no resume: subscribe again to get a fresh snapshot. To tolerate a longer stall, raise
+ AoudaClientOptions.SubscriptionConsumerQueueCapacity (client-wide) or SubscribeOptions.ConsumerQueueCapacity (this subscription); or read faster.`
 - **A joiner may get a subscription of its own.** The shared subscription keeps at most 100 000 rows (a fixed SDK limit that equals the server's default `MaxSnapshotRows`; changing the server key does not change it) to
-  seed joiners. Beyond that, or when it cannot keep them exact (the SDK learns the key columns from the first `delete` it receives, so a
-  projection that leaves out the primary key, a table without one, rows equal in every column, an `upsert` before any delete (the
-  server sends no previous row with one), or a change it cannot match, cannot be kept), a later subscriber opens its own server
-  subscription instead; later subscribers may share that one in turn, so for such a table the sharing ratio stays near 1. Nothing is
-  lost: the subscribers already reading are unaffected.
+ seed joiners. Beyond that, or when it cannot keep them exact (the SDK learns the key columns from the first `delete` it receives, so a
+ projection that leaves out the primary key, a table without one, rows equal in every column, an `upsert` before any delete (the
+ server sends no previous row with one), or a change it cannot match, cannot be kept), a later subscriber opens its own server
+ subscription instead; later subscribers may share that one in turn, so for such a table the sharing ratio stays near 1. Nothing is
+ lost: the subscribers already reading are unaffected.
 - **Snapshot warnings are raised once per server snapshot** (to the client's `NamedArtifactWarning` sink), not once per consumer: a
-  subscriber that joins later is not told again.
+ subscriber that joins later is not told again.
 - **Resuming from a sequence you hold.** `SubscribeOptions.ResumeFrom` (the `Version` of the last event you saw) sends `resume_from`
-  on the first subscribe, so the stream continues from there (the server answers with a snapshot when it cannot resume; the first
-  event is then a snapshot, otherwise a change). A subscribe with a `ResumeFrom` never shares a server subscription: it continues its
-  own stream, and one reconnect before its first event resumes from the same point.
+ on the first subscribe, so the stream continues from there (the server answers with a snapshot when it cannot resume; the first
+ event is then a snapshot, otherwise a change). A subscribe with a `ResumeFrom` never shares a server subscription: it continues its
+ own stream, and one reconnect before its first event resumes from the same point.
 - **A reconnect resubscribes once per shared subscription** (with `resume_from`), however many consumers it has, over the WebSocket and
-  the long-poll transport alike. A server error, a refused subscribe included, reaches every consumer of that subscription.
+ the long-poll transport alike. A server error, a refused subscribe included, reaches every consumer of that subscription.
 - `AoudaClient.ActiveConsumers` and `AoudaClient.ActiveServerSubscriptions` give the sharing ratio.
 
 ### Limits, refusals and reconnects (**BL-1383, 0.11.0**)
 
 - **The identity's connection limit is terminal.** A streaming connection refused because the identity already holds
-  `Aouda:WebSocket:MaxConnectionsPerIdentity` connections (`IDENTITY_CONNECTION_LIMIT_EXCEEDED`: an `auth_error` on the WebSocket, HTTP 429
-  on long-poll `connect`) throws `AoudaConnectionLimitException`. The SDK does not retry in a loop and does not fall back to long-poll
-  (its sessions count too). If a connection that was up is refused on its reconnect, every consumer of every subscription on it ends
-  with that exception. Close a connection the identity no longer needs, or share one `AoudaClient`, then subscribe again. The global
-  pool's `CONNECTION_LIMIT_EXCEEDED` is not this: it is retried.
+ `Aouda:WebSocket:MaxConnectionsPerIdentity` connections (`IDENTITY_CONNECTION_LIMIT_EXCEEDED`: an `auth_error` on the WebSocket, HTTP 429
+ on long-poll `connect`) throws `AoudaConnectionLimitException`. The SDK does not retry in a loop and does not fall back to long-poll
+ (its sessions count too). If a connection that was up is refused on its reconnect, every consumer of every subscription on it ends
+ with that exception. Close a connection the identity no longer needs, or share one `AoudaClient`, then subscribe again. The global
+ pool's `CONNECTION_LIMIT_EXCEEDED` is not this: it is retried.
 - **Reconnects back off.** The delay between reconnects grows (from 1 second, doubling, capped at 30 seconds; not configurable through the public API) and starts
-  over only after a connection has stayed up for 10 seconds, so a server that authenticates and then closes is not hammered.
+ over only after a connection has stayed up for 10 seconds, so a server that authenticates and then closes is not hammered.
 - **A rate-limited subscribe is retried.** When the per-identity subscribe-rate bound refuses a subscribe (`SUBSCRIBE_RATE_EXCEEDED`),
-  the SDK waits the server's `retry_after_ms` and sends it again, at most three times, then ends every consumer of that subscription with
-  `AoudaSubscribeRateLimitException` (`RetryAfter` holds the last wait). A reconnect that resubscribes many shared subscriptions is
-  spaced (the first 100 at once, then 28 a second).
+ the SDK waits the server's `retry_after_ms` and sends it again, at most three times, then ends every consumer of that subscription with
+ `AoudaSubscribeRateLimitException` (`RetryAfter` holds the last wait). A reconnect that resubscribes many shared subscriptions is
+ spaced (the first 100 at once, then 28 a second).
 - **`client.ServerLimits`** holds what the server sent in `auth_ok`: `MaxSubscriptionsPerConnection`, `MaxSubscriptionsPerIdentity`,
-  `MaxConnectionsPerIdentity`, `SubscribeBurst`, `SubscribeRefillPerSecond`, `ProtocolVersion` and `Capabilities`. It is `null` before the
-  first WebSocket connection, over long-poll, and against a server that does not send them. `SUBSCRIPTION_LIMIT_EXCEEDED` reaches you
-  as an `AoudaSubscriptionLimitException` (an `AoudaRequestException`, not a connection error) with the server's message, which names the cap
-  and what raises it.
+ `MaxConnectionsPerIdentity`, `SubscribeBurst`, `SubscribeRefillPerSecond`, `ProtocolVersion` and `Capabilities`. It is `null` before the
+ first WebSocket connection, over long-poll, and against a server that does not send them. `SUBSCRIPTION_LIMIT_EXCEEDED` reaches you
+ as an `AoudaSubscriptionLimitException` (an `AoudaRequestException`, not a connection error) with the server's message, which names the cap
+ and what raises it.
 
 ---
 
@@ -979,7 +921,7 @@ with `AuthorizationCodeRequest.Databases`. The token's `aud` lists the limit and
 ```csharp
 // One sign-in for the two apps this front end serves
 await client.Auth.SignInAsync("alice@example.com", password, deviceInfo: "Alice's laptop",
-    databases: new[] { "orders", "reports" });
+ databases: new { "orders", "reports" });
 ```
 
 A token used at a database outside its allowance is `403 AUTH_POLICY_DENIED` with remedy `none` and `reason: credential-limit` (**BL-1464, 0.16.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` is not produced. A **refresh** refused for that limit ends
@@ -1000,60 +942,60 @@ the value type of an Expression column (`Formula`), `ExplainAsync` and typed err
 ```csharp
 using Aouda.Client;
 using Aouda.Client.Formulas;
-using Aouda.Protocol.Schema;   // CreateTableRequest
+using Aouda.Protocol.Schema; // CreateTableRequest
 using static Aouda.Client.Formulas.FormulaExpr;
 
 await client.Schema.CreateTableAsync(new CreateTableRequest
 {
-    Database = client.DatabaseName,
-    Name = "pnl",
-    Columns =
-    [
-        new() { Name = "Field", Type = "String", PrimaryKeyOrder = 1 },
-        new() { Name = "Period", Type = "Int64", PrimaryKeyOrder = 2 },
-        new() { Name = "value", Type = "Decimal", Precision = 18, Scale = 2, IsNullable = true },
-        new() { Name = "formula", Type = "Expression", Drives = "value" },
-    ],
+ Database = client.DatabaseName,
+ Name = "pnl",
+ Columns =
+ [
+ new { Name = "Field", Type = "String", PrimaryKeyOrder = 1 },
+ new { Name = "Period", Type = "Int64", PrimaryKeyOrder = 2 },
+ new { Name = "value", Type = "Decimal", Precision = 18, Scale = 2, IsNullable = true },
+ new { Name = "formula", Type = "Expression", Drives = "value" },
+ ],
 });
 
 var pnl = client.GetTable("pnl");
 await pnl.InsertAsync(new List<Dictionary<string, object?>>
 {
-    new() { ["Field"] = "Revenue", ["Period"] = 2026L, ["value"] = 1000m },   // input rows
-    new() { ["Field"] = "Cost", ["Period"] = 2026L, ["value"] = 600m },
-    new() { ["Field"] = "Profit", ["Period"] = 2026L,                          // formula rows
-            ["formula"] = Formula.From(Sub(CellHere("value", ("Field", "Revenue")), CellHere("value", ("Field", "Cost")))) },
-    new() { ["Field"] = "Margin", ["Period"] = 2026L,
-            ["formula"] = Formula.From(Round(Div(CellHere("value", ("Field", "Profit")), CellHere("value", ("Field", "Revenue"))), 2)) },
+ new { ["Field"] = "Revenue", ["Period"] = 2026L, ["value"] = 1000m }, // input rows
+ new { ["Field"] = "Cost", ["Period"] = 2026L, ["value"] = 600m },
+ new { ["Field"] = "Profit", ["Period"] = 2026L, // formula rows
+ ["formula"] = Formula.From(Sub(CellHere("value", ("Field", "Revenue")), CellHere("value", ("Field", "Cost")))) },
+ new { ["Field"] = "Margin", ["Period"] = 2026L,
+ ["formula"] = Formula.From(Round(Div(CellHere("value", ("Field", "Profit")), CellHere("value", ("Field", "Revenue"))), 2)) },
 });
 
-var rows = await pnl.Where("Period", "eq", 2026L).ToListAsync();   // Profit 400.00, Margin 0.40
-var profit = Formula.FromValue(rows.Single(r => (string)r["Field"]! == "Profit")["formula"]);   // null for an input row
+var rows = await pnl.Where("Period", "eq", 2026L).ToListAsync; // Profit 400.00, Margin 0.40
+var profit = Formula.FromValue(rows.Single(r => (string)r["Field"]! == "Profit")["formula"]); // null for an input row
 ```
 
 - **References.** `CellHere(column, key…)` reads a row of the formula's own table; `Cell(table, column, key…)` a row of another table;
-  `Col(column)` a column of the formula row itself. A key is the table's full primary key, but a key column you leave out is taken from the
-  formula row's own key — above, `Period` — so one formula serves every period. The functions are `Add Sub Mul Div`, `Min Max Abs`,
-  `Eq Ne Gt Gte Lt Lte`, `If And Or Not`, `Round Coalesce Concat Cast`, and `Lit` for a constant. A division of two `Decimal(18,2)` values
-  computes six places: `Round(…, 2)` it to put it in a `Decimal(18,2)` column, or the write is refused (`FormulaErrorKind.Invalid`).
+ `Col(column)` a column of the formula row itself. A key is the table's full primary key, but a key column you leave out is taken from the
+ formula row's own key — above, `Period` — so one formula serves every period. The functions are `Add Sub Mul Div`, `Min Max Abs`,
+ `Eq Ne Gt Gte Lt Lte`, `If And Or Not`, `Round Coalesce Concat Cast`, and `Lit` for a constant. A division of two `Decimal(18,2)` values
+ computes six places: `Round(…, 2)` it to put it in a `Decimal(18,2)` column, or the write is refused (`FormulaErrorKind.Invalid`).
 - **A formula in a row** is a `Formula` (`Formula.From(node)`, or the node itself, which converts): it is sent as its JSON object. Write
-  `null` to make the row an input again. Read one back with `Formula.FromValue(row["formula"])`, which takes the formula's text (what a
-  `ToListAsync` row carries: the read uses column-batch frames) or its JSON object (what a subscription row carries). Two formulas compare
-  equal when their JSON trees are, property order aside; numbers compare as written (`1` is not `1.0`).
+ `null` to make the row an input again. Read one back with `Formula.FromValue(row["formula"])`, which takes the formula's text (what a
+ `ToListAsync` row carries: the read uses column-batch frames) or its JSON object (what a subscription row carries). Two formulas compare
+ equal when their JSON trees are, property order aside; numbers compare as written (`1` is not `1.0`).
 - **Reads wait for the values.** The client presents its last write's consistency token, and a token read of a formula table waits for the
-  server's formula maintainer — up to the server's default 250 ms; past that the read is refused `409 TOKEN_UNSATISFIED` (an
-  `AoudaRequestException`, `ErrorCode == ErrorCodes.TokenUnsatisfied`, not retried): read again, in a short bounded loop. There is no
-  per-read wait option.
+ server's formula maintainer — up to the server's default 250 ms; past that the read is refused `409 TOKEN_UNSATISFIED` (an
+ `AoudaRequestException`, `ErrorCode == ErrorCodes.TokenUnsatisfied`, not retried): read again, in a short bounded loop. There is no
+ per-read wait option.
 - **A cell with no value is null** — a division by zero, an overflow, a value the column cannot hold, a refused value, a broken reference.
-  Map a formula table's value column to a **nullable** property (`decimal?`): the typed read gives a non-nullable property its type's
-  default for a null, so a failed cell would read as `0` (BL-1492). A typed (POCO) table maps the value column and marks the Expression
-  column `[AoudaIgnore]`.
+ Map a formula table's value column to a **nullable** property (`decimal?`): the typed read gives a non-nullable property its type's
+ default for a null, so a failed cell would read as `0` (BL-1492). A typed (POCO) table maps the value column and marks the Expression
+ column `[AoudaIgnore]`.
 - **Why a cell has the value it has:** `await pnl.ExplainAsync("value", ("Field", "Margin"), ("Period", 2026L))` (or with a key dictionary,
-  on a typed table too) re-evaluates the cell and returns a `FormulaExplainResponse`: its `Kind`, `Formula`, each of its `References` with
-  its resolved key and current value, the `Value` or the `Reason` it has none, the `StoredValue`, and the cells that read it (`ReadBy`) —
-  only what the caller may read.
+ on a typed table too) re-evaluates the cell and returns a `FormulaExplainResponse`: its `Kind`, `Formula`, each of its `References` with
+ its resolved key and current value, the `Value` or the `Reason` it has none, the `StoredValue`, and the cells that read it (`ReadBy`) —
+ only what the caller may read.
 - **Subscribing** is the ordinary `SubscribeAsync` on the table: after an input edit it yields the input's change and then each formula row
-  that changed, once. A subscription row's values are `JsonElement`s.
+ that changed, once. A subscription row's values are `JsonElement`s.
 
 **Typed errors** (namespace `Aouda.Client`). Each derives from the exception its status already mapped to, so an existing handler keeps
 catching it:
@@ -1064,7 +1006,7 @@ catching it:
 | `FORMULA_TOKEN_REQUIRES_PRIMARY` (421) | `AoudaFormulaTokenRequiresPrimaryException` (an `AoudaMisdirectedRequestException`): read from the primary |
 | `FORMULA_NOT_MAINTAINED` (503) | `AoudaFormulaNotMaintainedException` (an `AoudaServiceUnavailableException`): **not retried** and not counted against the circuit breaker; it is the node's state, not overload |
 
-## 8d) Backup and restore (**Durability-1 S14, next train**) {#backup}
+## 8d) Backup and restore {#backup}
 
 `client.Backup` (`BackupAdminApi`, namespace `Aouda.Client.Admin`) is the admin surface over `/admin/backup/*` and needs an
 administrator's key. A backup is a **set** — one id, every database, the auth database first; see [Backup and restore](../guides/backup.md).
@@ -1076,69 +1018,69 @@ using Aouda.Client.Admin;
 
 public static class BackupExamples
 {
-    public static async Task RunAsync(AoudaClient client, CancellationToken ct)
-    {
-        // Trigger a backup (a set for every database)
-        TriggerBackupResponse made = await client.Backup.TriggerAsync(new TriggerBackupRequest(Incremental: true), ct);
+ public static async Task RunAsync(AoudaClient client, CancellationToken ct)
+ {
+ // Trigger a backup (a set for every database)
+ TriggerBackupResponse made = await client.Backup.TriggerAsync(new TriggerBackupRequest(Incremental: true), ct);
 
-        // List: Complete is false for a set a member failed; Refused says why a record could not be read
-        ListBackupsResponse list = await client.Backup.ListAsync(ct);
-        IEnumerable<BackupSummary> restorable = list.Backups.Where(b => b.Complete && b.Refused is null);
+ // List: Complete is false for a set a member failed; Refused says why a record could not be read
+ ListBackupsResponse list = await client.Backup.ListAsync(ct);
+ IEnumerable<BackupSummary> restorable = list.Backups.Where(b => b.Complete && b.Refused is null);
 
-        // One set: per member database, the manifest's cut, redo-start position and branches
-        BackupSetDetail detail = await client.Backup.ShowAsync(made.BackupId, ct);
-        foreach (BackupSetMember m in detail.Members)
-            Console.WriteLine($"{m.Database} R={m.RedoStartPosition} P={m.WalPosition}");
+ // One set: per member database, the manifest's cut, redo-start position and branches
+ BackupSetDetail detail = await client.Backup.ShowAsync(made.BackupId, ct);
+ foreach (BackupSetMember m in detail.Members)
+ Console.WriteLine($"{m.Database} R={m.RedoStartPosition} P={m.WalPosition}");
 
-        // Exact restore
-        await client.Backup.RestoreAsync(made.BackupId, ct);
+ // Exact restore
+ await client.Backup.RestoreAsync(made.BackupId, ct);
 
-        // Point-in-time restore: the last transaction commit <= TargetTime; BackupId may be left out
-        RestoreBackupResponse restored = await client.Backup.RestoreAsync(
-            new RestoreBackupRequest(BackupId: made.BackupId, TargetTime: DateTimeOffset.Parse("2026-05-01T12:00:00Z")), ct);
-        Console.WriteLine(restored.Pitr?.Count);
+ // Point-in-time restore: the last transaction commit <= TargetTime; BackupId may be left out
+ RestoreBackupResponse restored = await client.Backup.RestoreAsync(
+ new RestoreBackupRequest(BackupId: made.BackupId, TargetTime: DateTimeOffset.Parse("2026-05-01T12:00:00Z")), ct);
+ Console.WriteLine(restored.Pitr?.Count);
 
-        // Retention: none by default (nothing is pruned). SetRetentionAsync replaces the whole policy
-        await client.Backup.SetRetentionAsync(new RetentionPolicy(KeepLast: 5, PitrWindow: TimeSpan.FromDays(7)), ct);
-        RetentionPolicy saved = await client.Backup.GetRetentionAsync(ct);
+ // Retention: none by default (nothing is pruned). SetRetentionAsync replaces the whole policy
+ await client.Backup.SetRetentionAsync(new RetentionPolicy(KeepLast: 5, PitrWindow: TimeSpan.FromDays(7)), ct);
+ RetentionPolicy saved = await client.Backup.GetRetentionAsync(ct);
 
-        // Prune: a dry run unless execute is true; the executed plan is computed again by the server
-        PruneBackupsResponse plan = await client.Backup.PruneAsync(execute: false, ct);
-        foreach (PruneSet set in plan.Sets)
-            Console.WriteLine($"{set.BackupId} {(set.Keep ? "kept" : "deleted")} {string.Join(",", set.Rules)}");
-        await client.Backup.PruneAsync(execute: true, ct);
+ // Prune: a dry run unless execute is true; the executed plan is computed again by the server
+ PruneBackupsResponse plan = await client.Backup.PruneAsync(execute: false, ct);
+ foreach (PruneSet set in plan.Sets)
+ Console.WriteLine($"{set.BackupId} {(set.Keep ? "kept" : "deleted")} {string.Join(",", set.Rules)}");
+ await client.Backup.PruneAsync(execute: true, ct);
 
-        // Schedule
-        BackupSchedule schedule = await client.Backup.GetScheduleAsync(ct);
-        await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *" }, ct);
+ // Schedule
+ BackupSchedule schedule = await client.Backup.GetScheduleAsync(ct);
+ await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *" }, ct);
 
-        // A backup error carries the server's code and RemedyText: what to do, as an instruction
-        try
-        {
-            await client.Backup.RestoreAsync("no-such-backup", ct);
-        }
-        catch (AoudaException ex)
-        {
-            Console.Error.WriteLine($"{ex.ErrorCode}: {ex.RemedyText}");
-        }
-    }
+ // A backup error carries the server's code and RemedyText: what to do, as an instruction
+ try
+ {
+ await client.Backup.RestoreAsync("no-such-backup", ct);
+ }
+ catch (AoudaException ex)
+ {
+ Console.Error.WriteLine($"{ex.ErrorCode}: {ex.RemedyText}");
+ }
+ }
 }
 ```
 
 - `ShowAsync`, `PruneAsync`, `GetRetentionAsync`, `SetRetentionAsync`, the `RestoreBackupRequest` form of `RestoreAsync` and
-  **`RemedyText`** on `AoudaException` are new. `RetentionPolicy.PitrWindow` is a `TimeSpan`.
+ **`RemedyText`** on `AoudaException` are new. `RetentionPolicy.PitrWindow` is a `TimeSpan`.
 - **A call that runs long is not cut off at the client's default timeout.** `TriggerAsync`, both `RestoreAsync` forms and an executed
-  `PruneAsync` wait up to `BackupAdminApi.BackupOperationTimeout` (one hour). A call that times out may still be running on the server;
-  a retry meets `409 BACKUP_IN_PROGRESS`. They are **not re-sent** after a lost answer (a repeat would take a second backup, or restore
-  again over what was written after the first restore) — §8.
+ `PruneAsync` wait up to `BackupAdminApi.BackupOperationTimeout` (one hour). A call that times out may still be running on the server;
+ a retry meets `409 BACKUP_IN_PROGRESS`. They are **not re-sent** after a lost answer (a repeat would take a second backup, or restore
+ again over what was written after the first restore) — §8.
 - **`RemedyText`** is set on the exception of every `/admin/backup/*` error: the server's `remedy` string. `Remedy` stays the structured auth remedy.
-  A backup call can also meet `507 DISK_FULL` (an `AoudaException`) and `503 WAL_FAILED` (an `AoudaServiceUnavailableException`): the
-  server applied nothing, but `TriggerAsync`, `RestoreAsync` and `PruneAsync` are re-sent only after a refusal that proves "not applied"
-  (`AoudaCapacityException` — memory, WAL capacity, `429 SERVER_AT_CAPACITY` — or `AoudaServerStartingException`) or a connection that
-  never opened, so these two reach your code: retry after `RetryAfter` yourself. `SetScheduleAsync` and `SetRetentionAsync` replace the
-  whole value and are re-sent after any transient failure, these two included.
+ A backup call can also meet `507 DISK_FULL` (an `AoudaException`) and `503 WAL_FAILED` (an `AoudaServiceUnavailableException`): the
+ server applied nothing, but `TriggerAsync`, `RestoreAsync` and `PruneAsync` are re-sent only after a refusal that proves "not applied"
+ (`AoudaCapacityException` — memory, WAL capacity, `429 SERVER_AT_CAPACITY` — or `AoudaServerStartingException`) or a connection that
+ never opened, so these two reach your code: retry after `RetryAfter` yourself. `SetScheduleAsync` and `SetRetentionAsync` replace the
+ whole value and are re-sent after any transient failure, these two included.
 - **After a restore, discard the consistency token this client holds.** A restore rewinds the node; a token from before it is ahead of
-  the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a new client.
+ the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a new client.
 
 ---
 
@@ -1150,15 +1092,15 @@ handles (namespace `Aouda.Client` unless noted):
 
 | Exception | When |
 |---|---|
-| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. (**BL-1033, next train**) `400 STATEMENT_TOO_LARGE` — a statement that alone exceeds the server's read-path memory ceiling — is this exception, never retried; `Details` says how to narrow it (it was a `503` the policy retried to its bound). |
+| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. `400 STATEMENT_TOO_LARGE` — a statement that alone exceeds the server's read-path memory ceiling — is this exception, never retried; `Details` says how to narrow it (it was a `503` the policy retried to its bound). |
 | `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, 0.11.0**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
 | `AoudaServerStartingException` (**0.15.0**) | `503 SERVER_STARTING` or `503 SETUP_REQUIRED`: the server is up and not ready. A subclass of `AoudaServiceUnavailableException`; `RetryAfter` is the server's wait (`null` for `SETUP_REQUIRED`). Retried first, waiting `Retry-After` (§3a), and never counted by the circuit breaker or `AuthFailurePolicy`. |
 | `AoudaNotReadyException` (**0.15.0**) | `WaitUntilReadyAsync` reached its deadline; `ErrorCode` `CLIENT_SERVER_NOT_READY`, with `Waited`, `Issues`, `LastFailure` (§3a). |
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |
-| `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY`, a `507 DISK_FULL` (the write was not applied; the client does not re-send it) (**BL-1658, next train**) — with `StatusCode` set. |
+| `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY`, a `507 DISK_FULL` (the write was not applied; the client does not re-send it) — with `StatusCode` set. |
 | `CircuitBreakerOpenException` | The circuit breaker is open; the call was not attempted. |
-| `ArgumentException` | A column batch failed `Validate()` (§6), or a factory refused its input (a decimal with too many places, a bitmap too short), or a row held a `byte[]` for a column that is neither `Byte[]` nor `String` (§6, **BL-1265, next train**). Nothing was sent for that batch or row. |
+| `ArgumentException` | A column batch failed `Validate` (§6), or a factory refused its input (a decimal with too many places, a bitmap too short), or a row held a `byte` for a column that is neither `Byte` nor `String` (§6,). Nothing was sent for that batch or row. |
 
 Bulk load adds its own (namespace `Aouda.Client.Exceptions`):
 
@@ -1180,6 +1122,6 @@ Bulk load adds its own (namespace `Aouda.Client.Exceptions`):
 - [Getting Started](../getting-started/index.md): server mode, embedded mode, schema, auth
 - [Bulk Load guide](../guides/bulk-load.md): sessions, sizing, materialized queries, recovery
 - [HTTP API reference](../reference/http-api.md): the wire contract, [column arrays](../reference/http-api.md#column-arrays-the-write-body)
-  and [the column-batch frame](../reference/http-api.md#the-column-batch-frame-acb2)
+ and [the column-batch frame](../reference/http-api.md#the-column-batch-frame-acb2)
 - [TypeScript Client](./typescript.md): the same server from TypeScript
 - [SDK Compatibility](./compatibility.md): which client goes with which server

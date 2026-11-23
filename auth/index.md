@@ -63,7 +63,7 @@ A credential is a bearer token: a key or a session. There is no second header.
 
 | Setting | Default |
 |---|---|
-| `signup` | `{ "enabled": false, "roles": [], "statements": [] }` — a signed-up principal can do nothing until the application says what |
+| `signup` | `{ "enabled": false, "roles":, "statements": }` — a signed-up principal can do nothing until the application says what |
 | `anonymous` | No statements. A browser can do nothing until you give it some. |
 | Setup mode | Only while no principal holds `manage` on `server`. A declaration or `--dev-admin` ends it. |
 

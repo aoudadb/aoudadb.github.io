@@ -15,24 +15,24 @@ One JSON shape, in the declaration, the API, `whoami` and a refusal's remedy:
 <!-- declaration-example -->
 ```json
 {
-  "version": 1,
-  "databases": {
-    "auth": {
-      "kind": "auth",
-      "roles": {
-        "rates-feeder": {
-          "description": "Writes the rows its source may publish.",
-          "statements": [
-            {
-              "actions": ["write"],
-              "resources": ["rates/table/DepositQuote"],
-              "where": { "column": "source", "op": "in", "value": ["tullett"] }
-            }
-          ]
-        }
-      }
-    }
-  }
+ "version": 1,
+ "databases": {
+ "auth": {
+ "kind": "auth",
+ "roles": {
+ "rates-feeder": {
+ "description": "Writes the rows its source may publish.",
+ "statements": [
+ {
+ "actions": ["write"],
+ "resources": ["rates/table/DepositQuote"],
+ "where": { "column": "source", "op": "in", "value": ["tullett"] }
+ }
+ ]
+ }
+ }
+ }
+ }
 }
 ```
 
@@ -79,11 +79,9 @@ A statement on a resource the principal's auth database does not govern is refus
 - a comparison: `{ "column", "op", "value" }` with `op` one of `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, `nin`
 - a hole: `{ "column", "op": "eq", "principal": "id" }` or `"principal": "name"`, or `{ "column", "op": "in", "principal": "attributes.<name>" }`
 - `ignoreCase` on a string comparison
-- a group: `{ "and": [ ... ] }`, `{ "or": [ ... ] }`
+- a group: `{ "and": [... ] }`, `{ "or": [... ] }`
 
-A missing attribute, a value that cannot be bound, or several values under a scalar operator match no row.
-
-(**BL-1580, BL-1562, BL-1301, next train**) A `write` statement's `where` is decided on the row **as stored** — after defaults are filled and a derived `Decimal` is rounded — and an upsert that replaces a row is decided on the row it commits, under the commit, so a concurrent writer cannot slip a replaced row past it. A **formula row** (an `Expression` column's row) is admitted only by a statement whose `where` does not name the column it computes from; every refusal is `403 AUTH_ROW_DENIED` with remedy `none`. A multi-row upsert refused under a concurrent writer may have written its other rows (BL-1716).
+A missing attribute, a value that cannot be bound, or several values under a scalar operator match no row. A `write` statement's `where` is decided on the row **as stored** — after defaults are filled and a derived `Decimal` is rounded — and an upsert that replaces a row is decided on the row it commits, under the commit, so a concurrent writer cannot slip a replaced row past it. A **formula row** (an `Expression` column's row) is admitted only by a statement whose `where` does not name the column it computes from; every refusal is `403 AUTH_ROW_DENIED` with remedy `none`. A multi-row upsert refused under a concurrent writer may have written its other rows (BL-1716).
 
 An update's scope is the `write` statement's `where` alone. `returning` shows only rows the caller's `read` admits: a row the write touched and the read does not admit is omitted from the response, not returned under another principal's eyes.
 
@@ -125,8 +123,8 @@ A statement with no `where` on a table that other statements restrict is uncondi
 
 ```text
 aouda policy explain --declaration aouda.json --as auth/rates-feeder ^
-  --action write --resource rates/table/DepositQuote ^
-  --row "{\"source\":\"other\"}"
+ --action write --resource rates/table/DepositQuote ^
+ --row "{\"source\":\"other\"}"
 ```
 
 Exit `2`. The answer's `remedy.kind` is `grant` and `row.admitted` is `false`.
@@ -136,24 +134,24 @@ Exit `2`. The answer's `remedy.kind` is `grant` and `row.admitted` is `false`.
 <!-- declaration-example -->
 ```json
 {
-  "version": 1,
-  "databases": {
-    "auth": {
-      "kind": "auth",
-      "principals": {
-        "shop-backend": {
-          "attributes": { "tenant": ["acme"] },
-          "statements": [
-            {
-              "actions": ["read", "write", "delete"],
-              "resources": ["shop/table/orders"],
-              "where": { "column": "tenant", "op": "in", "principal": "attributes.tenant" }
-            }
-          ]
-        }
-      }
-    }
-  }
+ "version": 1,
+ "databases": {
+ "auth": {
+ "kind": "auth",
+ "principals": {
+ "shop-backend": {
+ "attributes": { "tenant": ["acme"] },
+ "statements": [
+ {
+ "actions": ["read", "write", "delete"],
+ "resources": ["shop/table/orders"],
+ "where": { "column": "tenant", "op": "in", "principal": "attributes.tenant" }
+ }
+ ]
+ }
+ }
+ }
+ }
 }
 ```
 
@@ -162,19 +160,19 @@ Exit `2`. The answer's `remedy.kind` is `grant` and `row.admitted` is `false`.
 <!-- declaration-example -->
 ```json
 {
-  "version": 1,
-  "databases": {
-    "auth": {
-      "kind": "auth",
-      "principals": {
-        "anonymous": {
-          "statements": [
-            { "actions": ["execute"], "resources": ["shop/query/public-catalog"] }
-          ]
-        }
-      }
-    }
-  }
+ "version": 1,
+ "databases": {
+ "auth": {
+ "kind": "auth",
+ "principals": {
+ "anonymous": {
+ "statements": [
+ { "actions": ["execute"], "resources": ["shop/query/public-catalog"] }
+ ]
+ }
+ }
+ }
+ }
 }
 ```
 
@@ -183,22 +181,22 @@ Exit `2`. The answer's `remedy.kind` is `grant` and `row.admitted` is `false`.
 <!-- declaration-example -->
 ```json
 {
-  "version": 1,
-  "databases": {
-    "auth": {
-      "kind": "auth",
-      "roles": {
-        "delayed-reader": {
-          "statements": [
-            {
-              "actions": ["read"],
-              "resources": ["rates/table/DepositQuote"],
-              "embargoSeconds": 900
-            }
-          ]
-        }
-      }
-    }
-  }
+ "version": 1,
+ "databases": {
+ "auth": {
+ "kind": "auth",
+ "roles": {
+ "delayed-reader": {
+ "statements": [
+ {
+ "actions": ["read"],
+ "resources": ["rates/table/DepositQuote"],
+ "embargoSeconds": 900
+ }
+ ]
+ }
+ }
+ }
+ }
 }
 ```

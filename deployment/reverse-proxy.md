@@ -24,14 +24,14 @@ Enable the feature **and** name the proxies that terminate TLS in front of Aouda
 
 ```json
 {
-  "Aouda": {
-    "ForwardedHeaders": {
-      "Enabled": true,
-      "KnownProxies": "10.0.0.4",
-      "KnownNetworks": "10.0.0.0/8",
-      "ForwardLimit": 1
-    }
-  }
+ "Aouda": {
+ "ForwardedHeaders": {
+ "Enabled": true,
+ "KnownProxies": "10.0.0.4",
+ "KnownNetworks": "10.0.0.0/8",
+ "ForwardLimit": 1
+ }
+ }
 }
 ```
 
@@ -54,22 +54,22 @@ Aouda listens on loopback. nginx terminates TLS and forwards to it.
 
 ```nginx
 upstream aouda_data {
-    server 127.0.0.1:5434;
+ server 127.0.0.1:5434;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name data.example.com;
+ listen 443 ssl http2;
+ server_name data.example.com;
 
-    location / {
-        proxy_pass http://aouda_data;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-    }
+ location / {
+ proxy_pass http://aouda_data;
+ proxy_http_version 1.1;
+ proxy_set_header Host $host;
+ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+ proxy_set_header X-Forwarded-Proto $scheme;
+ proxy_set_header Upgrade $http_upgrade;
+ proxy_set_header Connection $connection_upgrade;
+ }
 }
 ```
 

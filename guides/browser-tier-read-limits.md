@@ -6,7 +6,7 @@ parent: "Guides"
 
 # What a browser-tier read cannot do
 
-Document status: Complete (P40 S09)  
+Document status: Complete (P40 S09)
 Last updated: 2026-08-21
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -131,7 +131,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess: true` on the **admin** listener. That is not a browser-tier recipe.
+Admin analytics still use `.WithCrossPartitionAccess` / `crossPartitionAccess: true` on the **admin** listener. That is not a browser-tier recipe.
 
 ---
 
@@ -167,14 +167,14 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ```json
 "where": {
-  "and": [
-    { "column": "currency", "op": "in",  "param": "currency", "whenParamPresent": true },
-    { "column": "sector",   "op": "eq",  "param": "sector",   "whenParamPresent": true }
-  ]
+ "and": [
+ { "column": "currency", "op": "in", "param": "currency", "whenParamPresent": true },
+ { "column": "sector", "op": "eq", "param": "sector", "whenParamPresent": true }
+ ]
 },
 "params": {
-  "currency": { "required": false },
-  "sector":   { "required": false, "maxLength": 64 }
+ "currency": { "required": false },
+ "sector": { "required": false, "maxLength": 64 }
 }
 ```
 

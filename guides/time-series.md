@@ -46,17 +46,17 @@ is not that case: the same page chooses between a tick tape, a daily series, and
 cluster list is different in each.
 
 - User problem solved:
-  - Keep range query pruning effective on very large time-oriented tables.
-  - Accept out-of-order arrivals with no configuration: a late row is flushed like any other and is visible at once.
-  - Partition directly from timestamp semantics without redundant bucket columns.
+ - Keep range query pruning effective on very large time-oriented tables.
+ - Accept out-of-order arrivals with no configuration: a late row is flushed like any other and is visible at once.
+ - Partition directly from timestamp semantics without redundant bucket columns.
 - Operational outcomes:
-  - Better segment and page pruning from cluster-aware metadata.
-  - Better write/read balance via bounded sort-on-seal; late rows are flushed inline, with no delta merge path (**ColumnarRead, 0.3.0**).
-  - Scalable startup through per-segment manifest metadata.
+ - Better segment and page pruning from cluster-aware metadata.
+ - Better write/read balance via bounded sort-on-seal; late rows are flushed inline, with no delta merge path (**ColumnarRead, 0.3.0**).
+ - Scalable startup through per-segment manifest metadata.
 - Scope boundaries:
-  - This document focuses on cluster declaration, partition functions, manifests, segment pruning, sort-on-seal, out-of-order data, and metadata caching tiers.
-  - It does not cover replication cluster topology (that is a separate domain).
-  - It does not claim all ADR examples are public API today.
+ - This document focuses on cluster declaration, partition functions, manifests, segment pruning, sort-on-seal, out-of-order data, and metadata caching tiers.
+ - It does not cover replication cluster topology (that is a separate domain).
+ - It does not claim all ADR examples are public API today.
 
 ## 2.2 Discovery and navigation map
 
@@ -70,7 +70,7 @@ cluster list is different in each.
 | End-to-end completeness by capability | `2.6 Capability coverage matrix` |
 | Key architecture/runtime paths | `2.8 How Aouda implements it` |
 | Full settings and defaults surface | `2.10 Configuration and settings reference` |
-| .NET, TypeScript, and HTTP coverage gaps | `2.11 API and CLI coverage reference` |
+|.NET, TypeScript, and HTTP coverage gaps | `2.11 API and CLI coverage reference` |
 | Operational tuning and diagnostics | `2.13 Operations and observability` |
 | Current limitations and deferred work | `2.18 Known gaps and undone work` |
 
@@ -86,47 +86,47 @@ cluster list is different in each.
 ### Source map
 
 - Task/report evidence:
-  - `docs/tasks/P4/P4-EpicG-TimeSeriesClustering-Tasks.md`
-  - `docs/tasks/P4/P4-EpicG-Task1-ClusterColumnDeclaration-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task2-PartitionFunctions-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task3-NestedDirectoryStorage-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task4a-SegmentManifestInfrastructure-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task4b-SegmentLevelClusterStatistics-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task5-SortOnSeal-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL004-MetadataCachingTiers-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL005b-EagerBlockingMigration-Report.md`
-  - `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`
+ - `docs/tasks/P4/P4-EpicG-TimeSeriesClustering-Tasks.md`
+ - `docs/tasks/P4/P4-EpicG-Task1-ClusterColumnDeclaration-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task2-PartitionFunctions-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task3-NestedDirectoryStorage-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task4a-SegmentManifestInfrastructure-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task4b-SegmentLevelClusterStatistics-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task5-SortOnSeal-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL004-MetadataCachingTiers-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL005b-EagerBlockingMigration-Report.md`
+ - `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`
 - Design references:
-  - `docs/decisions/0014-time-series-clustering-optimization.md`
-  - `docs/decisions/0009-partitioning-multitenancy.md`
-  - `docs/decisions/0019-declarative-schema-management.md`
+ - `docs/decisions/0014-time-series-clustering-optimization.md`
+ - `docs/decisions/0009-partitioning-multitenancy.md`
+ - `docs/decisions/0019-declarative-schema-management.md`
 - Core code:
-  - `src/Aouda.Engine.Catalog/Policies.cs`
-  - `src/Aouda.Engine.Catalog/CatalogApi.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionKeyExtractor.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
-  - `src/Aouda.Engine.Storage/Sorting/ClusterSorter.cs`
-  - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
-  - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
-  - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
-  - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
-  - `src/Aouda.Server/Controllers/TablesController.cs`
+ - `src/Aouda.Engine.Catalog/Policies.cs`
+ - `src/Aouda.Engine.Catalog/CatalogApi.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionKeyExtractor.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
+ - `src/Aouda.Engine.Storage/Sorting/ClusterSorter.cs`
+ - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
+ - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
+ - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
+ - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
+ - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
+ - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Server/Controllers/TablesController.cs`
 - TypeScript client code:
-  - `../aouda-client-ts/src/types.ts`
-  - `../aouda-client-ts/src/tables.ts`
+ - `../aouda-client-ts/src/types.ts`
+ - `../aouda-client-ts/src/tables.ts`
 - Test evidence:
-  - `tests/Aouda.Server.Tests/ClusterColumnIntegrationTests.cs`
-  - `tests/Aouda.Server.Tests/PartitionFunctionIntegrationTests.cs`
-  - `tests/Aouda.Engine.Catalog.Tests/PartitionFunctionTests.cs`
-  - `tests/Aouda.Engine.Catalog.Tests/ClusterColumnTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/Sorting/ClusterSorterTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/Sorting/SortOnSealIntegrationTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/Manifest/ManifestSerializerTests.cs`
-  - `tests/Aouda.Engine.Schema.Tests/Apply/SchemaApplyEngineTests.cs`
+ - `tests/Aouda.Server.Tests/ClusterColumnIntegrationTests.cs`
+ - `tests/Aouda.Server.Tests/PartitionFunctionIntegrationTests.cs`
+ - `tests/Aouda.Engine.Catalog.Tests/PartitionFunctionTests.cs`
+ - `tests/Aouda.Engine.Catalog.Tests/ClusterColumnTests.cs`
+ - `tests/Aouda.Engine.Storage.Tests/Sorting/ClusterSorterTests.cs`
+ - `tests/Aouda.Engine.Storage.Tests/Sorting/SortOnSealIntegrationTests.cs`
+ - `tests/Aouda.Engine.Storage.Tests/Manifest/ManifestSerializerTests.cs`
+ - `tests/Aouda.Engine.Schema.Tests/Apply/SchemaApplyEngineTests.cs`
 
 ## 2.3 Defaults and zero-config behavior
 
@@ -136,8 +136,8 @@ If you create a partitioned time-series table and do not set advanced controls:
 - Sort-on-seal is enabled by default in runtime table options (`SortOnSeal = true`), but only applies when cluster columns exist.
 - Partition function default is `None` (raw partition value unless function declared).
 - `PartitionOptions` defaults apply:
-  - `StorageMode = Auto`
-  - `RequirePartitionFilter = true`
+ - `StorageMode = Auto`
+ - `RequirePartitionFilter = true`
 - Late (out-of-order) rows need no configuration: they are buffered and flushed like any other row and are visible to queries as soon as they are inserted. Heavily out-of-order data only widens segment statistics (min/max), which costs pruning, never correctness. (`LateArrivalPolicy` / `LateArrivalThreshold` are deleted (**BL-762, 0.3.0**); they never changed behaviour.)
 - Metadata caching policy defaults to `Auto` at table policy level. `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted (**ColumnarRead, 0.3.0**).
 
@@ -156,7 +156,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 
 - Cluster declaration via `clusterOrder` on create-table columns.
 - Partition functions for key derivation:
-  - `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`.
+ - `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`.
 - Nested partition paths under `partitions/` with shared bucket support.
 - Segment manifest persistence with cluster stats and per-page metadata.
 - Statistics-based skipping on every read: the one scan (`TableScan`) skips 8,192-row row groups whose min/max statistics in the segment footer rule the predicate out (`RowGroupClassifier`), and a filter that pins every series column reads only that series' rows, from the segment's run directory (**ColumnarRead, 0.3.0**); `SegmentPruner` is deleted.
@@ -206,17 +206,17 @@ If you create a partitioned time-series table and do not set advanced controls:
 ## 2.7 Core concepts and mental model
 
 - Cluster columns:
-  - Ordered storage hint (`clusterOrder`) for intra-segment/page ordering and pruning behavior.
+ - Ordered storage hint (`clusterOrder`) for intra-segment/page ordering and pruning behavior.
 - Partition function:
-  - Transformation from source column value to partition key component.
+ - Transformation from source column value to partition key component.
 - Segment manifest:
-  - Per-segment persisted metadata: row bounds, per-column/page summaries, optional cluster stats.
+ - Per-segment persisted metadata: row bounds, per-column/page summaries, optional cluster stats.
 - Segment pruning hierarchy:
-  - Partition prune -> segment prune (`ClusterStats`) -> page prune -> row evaluation.
+ - Partition prune -> segment prune (`ClusterStats`) -> page prune -> row evaluation.
 - Sort-on-seal:
-  - Bounded sorting at seal/flush stages, not full historical re-sorting.
+ - Bounded sorting at seal/flush stages, not full historical re-sorting.
 - Out-of-order (late) rows:
-  - Not a separate path. A late row sits in the write buffer, then in a segment, like any other row, and queries see it as soon as it is inserted. The catalog is the only visibility authority. Out-of-order data can widen a segment's min/max statistics, which only costs pruning. There is no delta path and no delta merge (**ColumnarRead, 0.3.0**).
+ - Not a separate path. A late row sits in the write buffer, then in a segment, like any other row, and queries see it as soon as it is inserted. The catalog is the only visibility authority. Out-of-order data can widen a segment's min/max statistics, which only costs pruning. There is no delta path and no delta merge (**ColumnarRead, 0.3.0**).
 - Metadata caching tiers: removed (**ColumnarRead, 0.3.0**). `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted.
 
 ### A materialized query's result table clusters too, and you do not declare it {#mq-result-clustering}
@@ -258,24 +258,24 @@ High-level runtime flow:
 Key implementation anchors:
 
 - Policy and defaults:
-  - `src/Aouda.Engine.Catalog/Policies.cs`
-  - `src/Aouda.Engine.Catalog/CatalogApi.cs`
+ - `src/Aouda.Engine.Catalog/Policies.cs`
+ - `src/Aouda.Engine.Catalog/CatalogApi.cs`
 - API validation and mapping:
-  - `src/Aouda.Server/Controllers/TablesController.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Server/Controllers/TablesController.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
 - Routing and extraction:
-  - `src/Aouda.Engine.Storage/Partition/PartitionKeyExtractor.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionKeyExtractor.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
 - Pruning and discovery:
-  - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**); `SegmentPruner.cs` is deleted
-  - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
+ - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
+ - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**); `SegmentPruner.cs` is deleted
+ - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
 - Manifest and caching:
-  - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
-  - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
-  - (`SegmentSummaryCache.cs` and `PageSummaryCache.cs` are deleted (**ColumnarRead, 0.3.0**))
+ - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
+ - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
+ - (`SegmentSummaryCache.cs` and `PageSummaryCache.cs` are deleted (**ColumnarRead, 0.3.0**))
 - Merge and compaction:
-  - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
+ - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
@@ -283,9 +283,9 @@ Key implementation anchors:
 
 1. `POST /api/databases/{db}/tables` enters `TablesController.CreateTable(...)`.
 2. Controller validates:
-   - `clusterOrder` sequence continuity.
-   - `partitionKeyOrder` continuity.
-   - `partitionFunction` enum + type compatibility (`PartitionKeyExtractor.IsCompatible`).
+ - `clusterOrder` sequence continuity.
+ - `partitionKeyOrder` continuity.
+ - `partitionFunction` enum + type compatibility (`PartitionKeyExtractor.IsCompatible`).
 3. Controller creates `PartitionOptions` from `partitionStorage` or defaults.
 4. Table entry is persisted with cluster/partition metadata.
 
@@ -314,7 +314,7 @@ Primary tests:
 1. The read takes the table's segments from the catalog (`SegmentDiscoveryService.FromCatalog(...)`); no directory is listed, so a segment the catalog does not name is never read, and `_delta` segments no longer exist (**ColumnarRead, 0.3.0**).
 2. Every read runs on one scan (`TableScan`) with one predicate evaluator.
 3. `RowGroupClassifier` decides each segment / row group from its min/max statistics: none can match (skipped), all match, or some (decoded and evaluated). Missing statistics mean "some", so skipping is always conservative. A segment whose every row group is ruled out reads no page. For a filter that pins every series column, only that series' run is read, from the segment's run directory (**ColumnarRead, 0.3.0**; `SegmentPruner.PruneByClusterStats` is deleted).
-   A "some" row group of a segment in `(series, time)` order is narrowed further when the predicate bounds the time column: each series' run keeps only the 64-row granules whose recorded times can meet the bound, and only those are decoded and evaluated (**ADR 0061, 0.3.0**).
+ A "some" row group of a segment in `(series, time)` order is narrowed further when the predicate bounds the time column: each series' run keeps only the 64-row granules whose recorded times can meet the bound, and only those are decoded and evaluated (**ADR 0061, 0.3.0**).
 4. Rows still in the write buffer are read in the same pass, so a just-inserted row (late or not) is visible at once.
 
 Primary tests:
@@ -326,7 +326,7 @@ Primary tests:
 
 1. A late row is flushed like any other row, into the table's normal segments (**ColumnarRead, 0.3.0**).
 2. The delta path, its routing and `DeltaMerger` are removed (**ColumnarRead, 0.3.0**), and the options that configured
-   them, `LateArrivalPolicy` / `LateArrivalThreshold`, are deleted (**BL-762, 0.3.0**).
+ them, `LateArrivalPolicy` / `LateArrivalThreshold`, are deleted (**BL-762, 0.3.0**).
 
 ## 2.9 Why Aouda is different (differentiators)
 
@@ -345,45 +345,45 @@ Primary tests:
 | `CreateColumnRequest.clusterOrder` | int? | `null` | `1..N` consecutive | HTTP create-table body | Cluster declaration only |
 | `CreateColumnRequest.partitionFunction` | string? | `null` | `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear` | HTTP create-table body | Must be on partition key columns |
 | `CreateTableRequest.partitionStorage` | string? | `Auto` (if partition key present) | `Auto`, `Dedicated`, `Shared` | HTTP create-table body | Maps to `PartitionOptions.StorageMode` |
-| `PartitionOptions.RequirePartitionFilter` | bool | `true` | `true/false` | .NET engine/catalog | No direct HTTP/TS field today |
-| `PartitionOptions.PromotionRowThreshold` | long | `10000000` | `>=0` | .NET engine/catalog | Auto-promotion tuning |
-| `PartitionOptions.PromotionByteThreshold` | long | `1000000000` | `>=0` | .NET engine/catalog | Auto-promotion tuning |
-| `PartitionOptions.InitialBucketCount` | int | `16` | `>=1` | .NET engine/catalog | Shared bucket count |
+| `PartitionOptions.RequirePartitionFilter` | bool | `true` | `true/false` |.NET engine/catalog | No direct HTTP/TS field today |
+| `PartitionOptions.PromotionRowThreshold` | long | `10000000` | `>=0` |.NET engine/catalog | Auto-promotion tuning |
+| `PartitionOptions.PromotionByteThreshold` | long | `1000000000` | `>=0` |.NET engine/catalog | Auto-promotion tuning |
+| `PartitionOptions.InitialBucketCount` | int | `16` | `>=1` |.NET engine/catalog | Shared bucket count |
 | ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
 | ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, 0.3.0**) with `MigrationOptions` and its strategies: the workers were never started. An old catalog's property is ignored on load |
 | `TableOptions.SortOnSeal` | bool | `true` | `true/false` | Core runtime option | No HTTP/TS toggle today |
-| `TablePolicy.MetadataCaching` | enum | `Auto` | `Auto`, `InMemory`, `OnDemand` | .NET/catalog policy | No effect since the summary caches were deleted (**ColumnarRead, 0.3.0**); no HTTP/TS create-table field |
+| `TablePolicy.MetadataCaching` | enum | `Auto` | `Auto`, `InMemory`, `OnDemand` |.NET/catalog policy | No effect since the summary caches were deleted (**ColumnarRead, 0.3.0**); no HTTP/TS create-table field |
 
 Configuration precedence and operational notes:
 
 - Precedence:
-  - Request-level table creation fields map first into catalog metadata.
-  - Internal defaults apply for omitted partition and runtime options.
+ - Request-level table creation fields map first into catalog metadata.
+ - Internal defaults apply for omitted partition and runtime options.
 - Dynamic vs restart-required:
-  - Table create metadata is dynamic at runtime.
-  - Manifest/cache behavior is runtime and adapts during normal execution.
+ - Table create metadata is dynamic at runtime.
+ - Manifest/cache behavior is runtime and adapts during normal execution.
 - Safety-gated:
-  - Invalid cluster/partition order and incompatible partition functions are rejected at API boundary.
+ - Invalid cluster/partition order and incompatible partition functions are rejected at API boundary.
 - Removed:
-  - `PartitionOptions.Migration` and its phase-2 strategies (**WorkloadCore S17, 0.3.0**).
+ - `PartitionOptions.Migration` and its phase-2 strategies (**WorkloadCore S17, 0.3.0**).
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-### .NET example (engine create with partition function + clustering)
+###.NET example (engine create with partition function + clustering)
 
 ```csharp
 var tableId = await engine.CreateTableAsync(
-    "metrics",
-    new[]
-    {
-        ("sensor_id", DataType.String, EncoderPreference.Auto, false, (int?)null, 1, (int?)null, (PartitionFunction?)null),
-        ("ts", DataType.Timestamp, EncoderPreference.Auto, false, (int?)null, 2, 1, PartitionFunction.TruncateToDay),
-        ("value", DataType.Double, EncoderPreference.Auto, false, (int?)null, (int?)null, (int?)null, (PartitionFunction?)null)
-    },
-    partitionOptions: new PartitionOptions
-    {
-        StorageMode = PartitionStorage.Auto
-    });
+ "metrics",
+ new
+ {
+ ("sensor_id", DataType.String, EncoderPreference.Auto, false, (int?)null, 1, (int?)null, (PartitionFunction?)null),
+ ("ts", DataType.Timestamp, EncoderPreference.Auto, false, (int?)null, 2, 1, PartitionFunction.TruncateToDay),
+ ("value", DataType.Double, EncoderPreference.Auto, false, (int?)null, (int?)null, (int?)null, (PartitionFunction?)null)
+ },
+ partitionOptions: new PartitionOptions
+ {
+ StorageMode = PartitionStorage.Auto
+ });
 ```
 
 Expected result: table metadata includes cluster order and partition function; inserts route by derived day partition. Late rows need no option.
@@ -394,14 +394,14 @@ Common mistake: assuming these advanced partition options are available through 
 
 ```typescript
 await client.tables.createTable({
-  database: "appdb",
-  name: "metrics",
-  columns: [
-    { name: "sensor_id", type: "String", partitionKeyOrder: 1 },
-    { name: "ts", type: "Timestamp", partitionKeyOrder: 2, partitionFunction: "TruncateToDay", clusterOrder: 1 },
-    { name: "value", type: "Double" }
-  ],
-  policy: { storageTemperature: "Auto" }
+ database: "appdb",
+ name: "metrics",
+ columns: [
+ { name: "sensor_id", type: "String", partitionKeyOrder: 1 },
+ { name: "ts", type: "Timestamp", partitionKeyOrder: 2, partitionFunction: "TruncateToDay", clusterOrder: 1 },
+ { name: "value", type: "Double" }
+ ],
+ policy: { storageTemperature: "Auto" }
 });
 ```
 
@@ -416,14 +416,14 @@ POST /api/databases/appdb/tables
 Content-Type: application/json
 
 {
-  "database": "appdb",
-  "name": "metrics",
-  "partitionStorage": "Auto",
-  "columns": [
-    { "name": "sensor_id", "type": "String", "partitionKeyOrder": 1 },
-    { "name": "ts", "type": "Timestamp", "partitionKeyOrder": 2, "partitionFunction": "TruncateToDay", "clusterOrder": 1 },
-    { "name": "value", "type": "Double" }
-  ]
+ "database": "appdb",
+ "name": "metrics",
+ "partitionStorage": "Auto",
+ "columns": [
+ { "name": "sensor_id", "type": "String", "partitionKeyOrder": 1 },
+ { "name": "ts", "type": "Timestamp", "partitionKeyOrder": 2, "partitionFunction": "TruncateToDay", "clusterOrder": 1 },
+ { "name": "value", "type": "Double" }
+ ]
 }
 ```
 
@@ -433,7 +433,7 @@ Common mistake: sending unsupported fields like `sortOnSeal` and expecting serve
 
 ### A) API coverage matrix
 
-| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Declare `clusterOrder` | Engine create table tuple | `CreateColumnRequest.clusterOrder` | `POST /api/databases/{db}/tables` columns | Implemented | End-to-end |
 | Declare `partitionFunction` | Engine create table tuple (`PartitionFunction`) | `CreateColumnRequest.partitionFunction` | Same create-table endpoint | Implemented | End-to-end |
@@ -447,9 +447,9 @@ Common mistake: sending unsupported fields like `sortOnSeal` and expecting serve
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| Set `partitionStorage` from TS typed `createTable` | Missing property in TS `CreateTableRequest` type | Use untyped extension cast or .NET/HTTP | Follow-up TS client parity work | Medium |
+| Set `partitionStorage` from TS typed `createTable` | Missing property in TS `CreateTableRequest` type | Use untyped extension cast or.NET/HTTP | Follow-up TS client parity work | Medium |
 | Configure `SortOnSeal` over HTTP/TS | No DTO fields | Runtime default currently on | Future protocol/SDK expansion | Medium |
-| Configure metadata cache policy over HTTP/TS | No public API field | Internal policy defaults / .NET policy path | Follow-up API surfacing | Medium |
+| Configure metadata cache policy over HTTP/TS | No public API field | Internal policy defaults /.NET policy path | Follow-up API surfacing | Medium |
 
 ## 2.12 Scenario playbooks (minimum three)
 
@@ -505,11 +505,11 @@ Expected result checks:
 Monitor first:
 
 - Pruning effectiveness:
-  - `SegmentsPrunedFully` (segments the scan skipped entirely from their statistics), and `DecodedValues` against the rows returned
+ - `SegmentsPrunedFully` (segments the scan skipped entirely from their statistics), and `DecodedValues` against the rows returned
 - Sort-on-seal:
-  - `PagesSortedOnSeal`
+ - `PagesSortedOnSeal`
 - Manifests:
-  - `manifestsRead` — the only field left in the metrics endpoint's `timeSeries` object (`deltaSegmentsCreated` and `lateArrivalsRouted` were removed with the features they counted).
+ - `manifestsRead` — the only field left in the metrics endpoint's `timeSeries` object (`deltaSegmentsCreated` and `lateArrivalsRouted` were removed with the features they counted).
 - Metadata cache health: no longer applies; the summary caches are deleted (**ColumnarRead, 0.3.0**).
 
 Recovery/restart expectations:
@@ -521,7 +521,7 @@ Recovery/restart expectations:
 Suggested tuning sequence:
 1. Start with cluster + partition function declarations only.
 2. Observe pruning counters.
-3. Tune partition storage mode in .NET paths if needed.
+3. Tune partition storage mode in.NET paths if needed.
 4. Adjust caching policy only after baseline behavior is stable.
 
 | Question | Practical answer |
@@ -539,7 +539,7 @@ Suggested tuning sequence:
 | Code setting `LateArrivalPolicy` / `LateArrivalThreshold` no longer compiles | Both options are deleted (**BL-762, 0.3.0**); they never changed behaviour | Remove them: late rows need no configuration and are flushed like any other row |
 | Range query scans too much | Missing/weak clustering metadata, broad predicate, or heavily out-of-order data widening segment min/max | Validate cluster declaration and predicate shape; inspect prune counters |
 | Rows under a table's `data/_delta/` are missing after upgrading | An older build left them there; delta segments are removed and that directory is no longer read (**ColumnarRead, 0.3.0**) | Before upgrading, check each table for a non-empty `data/_delta/`: this build does not read it |
-| TS createTable cannot set partition storage | Type surface gap | Use HTTP or .NET path for now; track parity follow-up |
+| TS createTable cannot set partition storage | Type surface gap | Use HTTP or.NET path for now; track parity follow-up |
 
 ## 2.15 Verification ledger
 
@@ -576,57 +576,57 @@ Last verification date (UTC): `2026-03-31`.
 ## 2.18 Known gaps and undone work
 
 - Public surface gaps:
-  - HTTP/TypeScript create-table does not expose sort-on-seal, metadata cache policy, or migration options.
-  - User impact: advanced behavior remains mostly .NET/internal configuration.
+ - HTTP/TypeScript create-table does not expose sort-on-seal, metadata cache policy, or migration options.
+ - User impact: advanced behavior remains mostly.NET/internal configuration.
 - TypeScript parity gap:
-  - TS `CreateTableRequest` type does not include `partitionStorage` even though server endpoint supports it.
-  - User impact: typed client cannot express storage mode directly without workaround.
+ - TS `CreateTableRequest` type does not include `partitionStorage` even though server endpoint supports it.
+ - User impact: typed client cannot express storage mode directly without workaround.
 - Partition function scope gap:
-  - ADR examples mention `DivideBy*` variants; current runtime enum does not include these values.
-  - User impact: integer bucketing options are narrower than ADR narrative examples.
+ - ADR examples mention `DivideBy*` variants; current runtime enum does not include these values.
+ - User impact: integer bucketing options are narrower than ADR narrative examples.
 - Migration strategies removed (**WorkloadCore S17, 0.3.0**):
-  - `MigrationOptions` (`Background`/`Eager`/`Blocking`) configured workers no production path started; they are gone, and an old catalog's setting is ignored.
+ - `MigrationOptions` (`Background`/`Eager`/`Blocking`) configured workers no production path started; they are gone, and an old catalog's setting is ignored.
 
 ## 2.19 References
 
 - ADRs:
-  - `docs/decisions/0014-time-series-clustering-optimization.md`
-  - `docs/decisions/0009-partitioning-multitenancy.md`
-  - `docs/decisions/0019-declarative-schema-management.md`
+ - `docs/decisions/0014-time-series-clustering-optimization.md`
+ - `docs/decisions/0009-partitioning-multitenancy.md`
+ - `docs/decisions/0019-declarative-schema-management.md`
 - Tasks/reports:
-  - `docs/tasks/P4/P4-EpicG-TimeSeriesClustering-Tasks.md`
-  - `docs/tasks/P4/P4-EpicG-Task1-ClusterColumnDeclaration-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task2-PartitionFunctions-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task3-NestedDirectoryStorage-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task4a-SegmentManifestInfrastructure-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task4b-SegmentLevelClusterStatistics-Report.md`
-  - `docs/tasks/P4/P4-EpicG-Task5-SortOnSeal-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL004-MetadataCachingTiers-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
-  - `docs/tasks/P4/P4-EpicG-BL005b-EagerBlockingMigration-Report.md`
-  - `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`
+ - `docs/tasks/P4/P4-EpicG-TimeSeriesClustering-Tasks.md`
+ - `docs/tasks/P4/P4-EpicG-Task1-ClusterColumnDeclaration-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task2-PartitionFunctions-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task3-NestedDirectoryStorage-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task4a-SegmentManifestInfrastructure-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task4b-SegmentLevelClusterStatistics-Report.md`
+ - `docs/tasks/P4/P4-EpicG-Task5-SortOnSeal-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL004-MetadataCachingTiers-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL005-RetrospectivePartitioning-Report.md`
+ - `docs/tasks/P4/P4-EpicG-BL005b-EagerBlockingMigration-Report.md`
+ - `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`
 - Backlog:
-  - `docs/BACKLOG.md` (BL-004, BL-005 status context)
+ - `docs/BACKLOG.md` (BL-004, BL-005 status context)
 - Key code paths:
-  - `src/Aouda.Engine.Catalog/Policies.cs`
-  - `src/Aouda.Engine.Catalog/CatalogApi.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionKeyExtractor.cs`
-  - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
-  - `src/Aouda.Engine.Storage/Sorting/ClusterSorter.cs`
-  - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
-  - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
-  - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
-  - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
-  - `src/Aouda.Protocol/Schema/TableMessages.cs`
-  - `src/Aouda.Server/Controllers/TablesController.cs`
-  - `../aouda-client-ts/src/types.ts`
-  - `../aouda-client-ts/src/tables.ts`
+ - `src/Aouda.Engine.Catalog/Policies.cs`
+ - `src/Aouda.Engine.Catalog/CatalogApi.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionKeyExtractor.cs`
+ - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
+ - `src/Aouda.Engine.Storage/Sorting/ClusterSorter.cs`
+ - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
+ - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
+ - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
+ - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
+ - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
+ - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
+ - `src/Aouda.Protocol/Schema/TableMessages.cs`
+ - `src/Aouda.Server/Controllers/TablesController.cs`
+ - `../aouda-client-ts/src/types.ts`
+ - `../aouda-client-ts/src/tables.ts`
 - Related functionality docs:
-  - `docs/dev/Functionality-Partitioning-And-Multitenancy.md`
-  - `docs/dev/Functionality-Query-Execution.md`
-  - `docs/dev/Functionality-Schema-Lifecycle.md`
+ - `docs/dev/Functionality-Partitioning-And-Multitenancy.md`
+ - `docs/dev/Functionality-Query-Execution.md`
+ - `docs/dev/Functionality-Schema-Lifecycle.md`
 
 ## 2.20 What is missing from this document? (meta completeness)
 

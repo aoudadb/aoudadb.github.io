@@ -14,15 +14,15 @@ Install the server on a Linux VM or bare-metal host, register it with systemd, a
 
 | Requirement | Why |
 |---|---|
-| **The .NET 10 ASP.NET Core runtime** (**BL-739, 0.2.0**; .NET 8 for 0.1.40 and earlier) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 10 is missing](#if-net-10-is-missing) |
+| **The.NET 10 ASP.NET Core runtime** (**BL-739, 0.2.0**;.NET 8 for 0.1.40 and earlier) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the.NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If.NET 10 is missing](#if-net-10-is-missing) |
 | **Root** | Writing `/etc/systemd/system` and creating a service account |
 | **Access to the private artefact feed** | ⚠️ Aouda's artefacts are **private**. There is no public download, no `curl \| sh`, and no anonymous `docker pull`. See [Getting the artefact](#getting-the-artefact) |
 
 Install the runtime with your distribution's package:
 
 ```bash
-sudo apt-get install -y aspnetcore-runtime-10.0     # Debian / Ubuntu
-sudo dnf install -y aspnetcore-runtime-10.0         # RHEL / Fedora
+sudo apt-get install -y aspnetcore-runtime-10.0 # Debian / Ubuntu
+sudo dnf install -y aspnetcore-runtime-10.0 # RHEL / Fedora
 ```
 
 Verify:
@@ -50,7 +50,7 @@ tar -xzf aouda-server-*-linux-x64.tar.gz
 ```
 
 The server in each archive is precompiled (ReadyToRun) for its platform (**Lead S06, 0.6.0**): it starts and answers its first
-queries sooner, and an archive unpacks to ~40 MB instead of ~17. It is still framework-dependent — the .NET 10 runtime must be
+queries sooner, and an archive unpacks to ~40 MB instead of ~17. It is still framework-dependent — the.NET 10 runtime must be
 installed first ([Before you start](#before-you-start)).
 
 **Verify the download before installing it.** Every archive ships a `SHA256SUMS` covering the files beside it:
@@ -65,15 +65,15 @@ sha256sum -c SHA256SUMS
 ## Install
 
 ```bash
-sudo ./install-aouda.sh --artifact-dir ./linux-x64
+sudo./install-aouda.sh --artifact-dir./linux-x64
 ```
 
-The script does three things and then gets out of the way: it checks for the .NET 10 runtime, verifies the checksums, copies the binaries to `/opt/aouda`, and hands over to `aouda service install`. Everything else — the unit file, the service account, the directories — is done by the server binary itself, where it is one tested code path rather than a shell script per platform.
+The script does three things and then gets out of the way: it checks for the.NET 10 runtime, verifies the checksums, copies the binaries to `/opt/aouda`, and hands over to `aouda service install`. Everything else — the unit file, the service account, the directories — is done by the server binary itself, where it is one tested code path rather than a shell script per platform.
 
 Any option the script does not recognise is passed through, so these are equivalent:
 
 ```bash
-sudo ./install-aouda.sh --artifact-dir ./linux-x64 --port 5433 --memory-max 70%
+sudo./install-aouda.sh --artifact-dir./linux-x64 --port 5433 --memory-max 70%
 sudo /opt/aouda/Aouda.Server service install --port 5433 --memory-max 70%
 ```
 
@@ -230,7 +230,7 @@ There is deliberately **no `CPUQuota`** by default: on a machine dedicated to Ao
 ⚠️ **If the host is shared, set one.** Aouda sizes every scan's parallelism from the cores it believes it has, so on a 64-core node a co-tenanted server with no quota will scan 64 ways. A CPU *share* or *weight* is not a limit — it carries no core count, so the kernel exposes no quota and the process still sees the whole node.
 
 ```bash
-sudo /opt/aouda/Aouda.Server service install --cpu-cores 4     # renders CPUQuota=400%
+sudo /opt/aouda/Aouda.Server service install --cpu-cores 4 # renders CPUQuota=400%
 ```
 
 Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
@@ -249,7 +249,7 @@ declares a key-only operator in the declaration file's `server.principals` needs
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 same lock and refuse. The kernel releases it when the process exits, `kill -9` included, so there is never a stale lock to delete.
 It protects a directory on a **local filesystem, between processes on one host**. On a mount without `flock` (some NFS, CIFS and
-FUSE mounts answer `ENOLCK` or `EOPNOTSUPP`) .NET treats the failure as success and the lock is silently not held; on NFS mounted
+FUSE mounts answer `ENOLCK` or `EOPNOTSUPP`).NET treats the failure as success and the lock is silently not held; on NFS mounted
 `nolock`, or a CIFS share used from two hosts, it covers one host only; and `DOTNET_SYSTEM_IO_DISABLEFILELOCKING=1` turns it off.
 Only a held lock is reported as "in use by another Aouda process"; any other error taking it (a read-only mount, a full disk) is
 reported as itself.
@@ -261,12 +261,12 @@ Three supported ways, in order of preference:
 sudo install -m 600 /dev/null /etc/aouda/admin-password
 sudo sh -c 'printf "%s" "$PASSWORD" > /etc/aouda/admin-password'
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-  --email admin@example.com --password-file /etc/aouda/admin-password \
-  --data /var/lib/aouda
+ --email admin@example.com --password-file /etc/aouda/admin-password \
+ --data /var/lib/aouda
 
 # 2. Standard input — touches no filesystem
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-  --email admin@example.com --password-stdin --data /var/lib/aouda
+ --email admin@example.com --password-stdin --data /var/lib/aouda
 ```
 
 ⚠️ A file readable by group or other is **refused**, with the mode it found. `chmod 600` it.
@@ -277,15 +277,15 @@ password seed read from the file (a relative path is read from the declaration f
 
 ```json
 { "version": 1, "server": { "principals": { "admin@example.com": { "roles": ["admin"],
-    "credentials": { "password": { "file": "/etc/aouda/admin-password" } } } } } }
+ "credentials": { "password": { "file": "/etc/aouda/admin-password" } } } } } }
 ```
 
 Write it to `/etc/aouda/aouda.json` and name it in the unit: `Environment=Aouda__Declaration=/etc/aouda/aouda.json` (`systemctl
 edit aouda`), see [Declare the databases](#declare-the-databases-aoudajson-bl-1463-0160). The service account must be able to
 read both files (way 1's password file is root's: `sudo chown aouda: /etc/aouda/admin-password`). The seed is applied only when the principal is created, with a forced password change at the first sign-in, and
 never again, so once the admin exists the password file is inert — delete it whenever you like. A seed may also be
-`{ "env": "<NAME>" }` or `{ "hash": ... }`. With no human admin at all, declare a key-only operator instead: an entry such as `ops`
-holding the role `admin` with `"credentials": { "derivedKey": { "version": 1 } }` and the file's `"keyRoot": { "file": ... }`
+`{ "env": "<NAME>" }` or `{ "hash":... }`. With no human admin at all, declare a key-only operator instead: an entry such as `ops`
+holding the role `admin` with `"credentials": { "derivedKey": { "version": 1 } }` and the file's `"keyRoot": { "file":... }`
 ([Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md)).
 
 The old way is **refused** (**BL-1464, 0.16.0**): `aouda service install --admin-password-credential` / `--admin-email` is a
@@ -326,11 +326,11 @@ That prints a warning naming what it just made reachable. Aouda does not termina
 ## Day-to-day
 
 ```bash
-aouda service status      # or: systemctl status aouda
+aouda service status # or: systemctl status aouda
 aouda service start
 aouda service stop
-aouda status              # running? ready? where? what budget?
-aouda doctor              # what is misconfigured on this machine
+aouda status # running? ready? where? what budget?
+aouda doctor # what is misconfigured on this machine
 ```
 
 `aouda status` finds the server without being told where it is: it reads the installed service's port from the unit, probes `/ready` with a bounded timeout, and reports what it saw. The memory budget needs an admin token on a server with auth enabled (`--token`, or `AOUDA_TOKEN`); without one it says so rather than guessing.
@@ -381,9 +381,9 @@ one [`aouda plan`](../guides/plan.md) prints, headed `aouda start`, and the last
 aouda start: declaration /etc/aouda/aouda.json, 1 database, 0 schema files
 
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
-         fix:  Remove the setting and use the one the message names instead.
+ fix: Remove the setting and use the one the message names instead.
 
-stages   read ok, settings 1 error, principals ok, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
+stages read ok, settings 1 error, principals ok, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
 1 error, 0 warnings: the start was refused for its configuration (exit status 78). Restarting with the same configuration fails the same way: fix what is named above, then start again.
 ```
 
@@ -434,12 +434,12 @@ Stops the service, disables it, removes the unit and reloads systemd. **The data
 
 ---
 
-## If .NET 10 is missing
+## If.NET 10 is missing
 
-The install script checks first and tells you what to run. If you skipped it and started the binary directly, the failure comes from the .NET host loader rather than from Aouda, and looks like:
+The install script checks first and tells you what to run. If you skipped it and started the binary directly, the failure comes from the.NET host loader rather than from Aouda, and looks like:
 
 ```
-You must install .NET to run this application.
+You must install.NET to run this application.
 App: /opt/aouda/Aouda.Server
 Architecture: x64
 Framework: 'Microsoft.AspNetCore.App', version '10.0.0' (x64)
@@ -447,4 +447,4 @@ Framework: 'Microsoft.AspNetCore.App', version '10.0.0' (x64)
 
 ⚠️ **There is no Aouda error message for this, and there cannot be.** The binary is framework-dependent, so the loader fails before a single line of Aouda code runs — which is also why the preflight lives in the install script rather than in `aouda doctor`. By the time `doctor` can run, the runtime is present by definition, and what it reports is the version.
 
-⚠️ **Upgrading from 0.1.40 or earlier is the case that meets this** (**BL-739, 0.2.0**). Those servers ran on .NET 8, so a machine that has run Aouda for months does not necessarily have .NET 10. Install `aspnetcore-runtime-10.0` *before* replacing the binaries; the two runtimes install side by side, so the running server is not disturbed.
+⚠️ **Upgrading from 0.1.40 or earlier is the case that meets this** (**BL-739, 0.2.0**). Those servers ran on.NET 8, so a machine that has run Aouda for months does not necessarily have.NET 10. Install `aspnetcore-runtime-10.0` *before* replacing the binaries; the two runtimes install side by side, so the running server is not disturbed.

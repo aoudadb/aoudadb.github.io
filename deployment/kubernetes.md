@@ -6,7 +6,7 @@ parent: "Deployment"
 
 # Kubernetes Helm Deployment Guide
 
-{: .warning }
+{:.warning }
 **Replication is not supported in any release of Aouda yet.** A replica cannot catch up after a disconnect, keeps streamed rows only in memory, and a primary's election and failover are not proven; run one node per database and protect data with [backups](../guides/backup.md). This page describes the code as it stands.
 
 This guide describes how to deploy Aouda to Kubernetes using the official chart at `charts/aouda-cluster/`.
@@ -22,7 +22,7 @@ This guide describes how to deploy Aouda to Kubernetes using the official chart 
 Install Aouda cluster with default values:
 
 ```bash
-helm install aouda ./charts/aouda-cluster --namespace aouda --create-namespace
+helm install aouda./charts/aouda-cluster --namespace aouda --create-namespace
 ```
 
 Check resource status:
@@ -52,22 +52,22 @@ from values or a ConfigMap. Create the Secret, the root on standard input rather
 
 ```bash
 openssl rand -hex 32 | tr -d '\n' |
-  kubectl create secret generic aouda-key-root -n aouda --from-file=key-root=/dev/stdin
+ kubectl create secret generic aouda-key-root -n aouda --from-file=key-root=/dev/stdin
 ```
 
 then pass it through `extraEnv` and declare the operator in `declaration.file`:
 
 ```yaml
 extraEnv:
-  - name: AOUDA_KEY_ROOT
-    valueFrom: { secretKeyRef: { name: aouda-key-root, key: key-root } }
+ - name: AOUDA_KEY_ROOT
+ valueFrom: { secretKeyRef: { name: aouda-key-root, key: key-root } }
 declaration:
-  file:
-    version: 1
-    keyRoot: { env: AOUDA_KEY_ROOT }
-    server:
-      principals:
-        ops: { roles: [admin], credentials: { derivedKey: { version: 1 } } }
+ file:
+ version: 1
+ keyRoot: { env: AOUDA_KEY_ROOT }
+ server:
+ principals:
+ ops: { roles: [admin], credentials: { derivedKey: { version: 1 } } }
 ```
 
 The same root derives `ops`'s key for its client: [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md). The chart's
@@ -82,7 +82,7 @@ Create the first admin over a port-forward, which reaches the pod as loopback:
 ```bash
 kubectl port-forward -n aouda pod/aouda-0 5000:5000 &
 printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
-  curl -s -X POST http://localhost:5000/api/auth/setup -H 'Content-Type: application/json' --data-binary @-
+ curl -s -X POST http://localhost:5000/api/auth/setup -H 'Content-Type: application/json' --data-binary @-
 ```
 
 The password goes on standard input, never on curl's command line.
@@ -96,7 +96,7 @@ The chart value is `declaration.file`: `aouda.json` with no `Aouda` wrapper, mou
 ## Upgrade
 
 ```bash
-helm upgrade aouda ./charts/aouda-cluster --namespace aouda
+helm upgrade aouda./charts/aouda-cluster --namespace aouda
 ```
 
 ## Uninstall
@@ -112,11 +112,11 @@ helm uninstall aouda --namespace aouda
 Keep `replicaCount=1`: more than one replica is not supported, and is not a way to get high availability. The example below shows the chart value for reference only.
 
 ```bash
-helm upgrade --install aouda ./charts/aouda-cluster \
-  --namespace aouda --create-namespace \
-  --set replicaCount=3 \
-  --set persistence.size=50Gi \
-  --set persistence.storageClass=fast-ssd
+helm upgrade --install aouda./charts/aouda-cluster \
+ --namespace aouda --create-namespace \
+ --set replicaCount=3 \
+ --set persistence.size=50Gi \
+ --set persistence.storageClass=fast-ssd
 ```
 
 ### Enable Witness (Arbiter)
@@ -124,9 +124,9 @@ helm upgrade --install aouda ./charts/aouda-cluster \
 Chart reference only: a witness only matters with more than one replica, which is not supported.
 
 ```bash
-helm upgrade --install aouda ./charts/aouda-cluster \
-  --namespace aouda --create-namespace \
-  --set witness.enabled=true
+helm upgrade --install aouda./charts/aouda-cluster \
+ --namespace aouda --create-namespace \
+ --set witness.enabled=true
 ```
 
 When enabled, the chart renders:
@@ -137,9 +137,9 @@ When enabled, the chart renders:
 ### Enable Studio
 
 ```bash
-helm upgrade --install aouda ./charts/aouda-cluster \
-  --namespace aouda --create-namespace \
-  --set studio.enabled=true
+helm upgrade --install aouda./charts/aouda-cluster \
+ --namespace aouda --create-namespace \
+ --set studio.enabled=true
 ```
 
 Optional Studio overrides:
@@ -163,24 +163,24 @@ the file's own grammar with no `Aouda` wrapper, `version` included:
 
 ```yaml
 declaration:
-  file:
-    version: 1
-    databases:
-      derive_auth: { kind: auth }
-      orders:
-        kind: data
-        authDatabase: derive_auth
-        schema: /etc/aouda-files/orders.schema.json
+ file:
+ version: 1
+ databases:
+ derive_auth: { kind: auth }
+ orders:
+ kind: data
+ authDatabase: derive_auth
+ schema: /etc/aouda-files/orders.schema.json
 ```
 
 renders (`helm template`)
 
 ```yaml
-  aouda.json: |
-    {
-      "databases": { "derive_auth": { "kind": "auth" }, "orders": { "authDatabase": "derive_auth", "kind": "data", "schema": "/etc/aouda-files/orders.schema.json" } },
-      "version": 1
-    }
+ aouda.json: |
+ {
+ "databases": { "derive_auth": { "kind": "auth" }, "orders": { "authDatabase": "derive_auth", "kind": "data", "schema": "/etc/aouda-files/orders.schema.json" } },
+ "version": 1
+ }
 ```
 
 (the chart's output is indented and its members sorted). Mount the schema files it names with `extraVolumes` and

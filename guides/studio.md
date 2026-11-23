@@ -19,7 +19,7 @@ Aouda Studio is the web management console for Aouda. It provides:
 
 - **Data Explorer** — browse, query, filter, edit, and navigate data (admin listener)
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- **Named Artifacts** — catalog from `schema.export()`, test/subscribe by name, structured authoring via schema apply
+- **Named Artifacts** — catalog from `schema.export`, test/subscribe by name, structured authoring via schema apply
 - **Cluster Management** — node operations, topology, backup, configuration
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - **Hub Integration** — team server management, authentication, multi-server switching
@@ -80,7 +80,7 @@ Filters sync bidirectionally between the visual builder and the query bar text r
 - Click column header to sort (ascending → descending → none)
 - `ORDER BY` in query bar
 - `LIMIT` / `OFFSET` with page navigation
-- Server-side count via `POST .../query/count` (safe for large tables)
+- Server-side count via `POST.../query/count` (safe for large tables)
 
 ### Bulk Mutation Panel
 
@@ -120,8 +120,8 @@ Per-record detail page with:
 
 (**BL-035, 0.9.0**) Studio shows an [array column](array-columns.md) in the grid, the query worksheet, the query centre, the named-artifact
 test panel and the record view as **its first five elements, and the count when there are more** (`[0.5, 0.52, 0.53, 0.55, 0.56, …] · 400 values`);
-a null stays `NULL` and an empty array is `[]`. An **expand** opens a dialog that lists every element (paged, with the index) and
-copies the whole value as JSON. Copy, CSV and JSON export write the wire's JSON form (`-0` kept, a `Byte[]` as base64, `Int64`
+a null stays `NULL` and an empty array is ``. An **expand** opens a dialog that lists every element (paged, with the index) and
+copies the whole value as JSON. Copy, CSV and JSON export write the wire's JSON form (`-0` kept, a `Byte` as base64, `Int64`
 digits). An array column is **read-only** in Studio: no edit, no field in the add-row form (a row added from Studio holds null
 there, so on a NOT NULL array column the add is refused), and it cannot be a filter, sort, group-by, aggregate, join key or the target of a bulk SET. The schema editor offers the
 six types when you create a table or add a column, and the alter-column dialog does not change an array column's type. This is
@@ -240,8 +240,8 @@ When you click **Toggle AutoId**, a confirmation dialog opens showing:
 
 - The target column and table names.
 - The direction of the change:
-  - **Manual → Auto** — the server will manage future inserts for this column.
-  - **Auto → Manual** — you must supply explicit values for this column going forward.
+ - **Manual → Auto** — the server will manage future inserts for this column.
+ - **Auto → Manual** — you must supply explicit values for this column going forward.
 - A yellow warning note when enabling auto-increment: _"The counter will recover from the MAX existing value in this column on first insert."_ This means the counter does not start at 1 — it starts at `MAX(existing values) + 1`, so manually-inserted IDs are never overwritten.
 
 Click **Apply** to confirm, or **Cancel** to close without any change.
@@ -328,7 +328,7 @@ Details: [Direct client access](direct-client-access.md).
 
 ### Insert-time compute — unique, derived, checks, `call`, route / tee
 
-Persisted through schema **export → patch → apply** (same pipeline as other schema edits). HTTP GET table does not always echo these fields; Studio reads them from `schema.export()`. Contract: [Insert-time transforms](insert-transforms.md).
+Persisted through schema **export → patch → apply** (same pipeline as other schema edits). HTTP GET table does not always echo these fields; Studio reads them from `schema.export`. Contract: [Insert-time transforms](insert-transforms.md).
 
 | Control | Where | Notes |
 |---------|--------|------|
@@ -342,11 +342,11 @@ Persisted through schema **export → patch → apply** (same pipeline as other 
 
 Sidebar: **SCHEMA → Named Artifacts**. Hidden with SCHEMA for Data Owner (correct).
 
-Named queries and named mutations live in `aouda.schema.json`. Identity is the **unique name**. Inventory is `schema.export()` only. There is **no** runtime `POST …/register`. Omitting a name deletes the definition (one Delete).
+Named queries and named mutations live in `aouda.schema.json`. Identity is the **unique name**. Inventory is `schema.export` only. There is **no** runtime `POST …/register`. Omitting a name deletes the definition (one Delete).
 
 | Action | What Studio does |
 |--------|------------------|
-| Catalog | `schema.export()` — name, deprecated, table, projection, cost `1+joinCount` |
+| Catalog | `schema.export` — name, deprecated, table, projection, cost `1+joinCount` |
 | Test | Name-only `namedQueries.execute` / `batch` (cap 32) / `namedMutations.execute`. Deprecation is a warning, not a failure. Mutations always run as **invoker** (no definer / `runAs`). |
 | Author | Structured wizard (table, projection, AND where, joins ≤ 3, required limit cap). Identifier positions are dropdowns — parameters cannot name tables, columns, or operators. Persist via export → patch map → diff → apply. |
 | Edit | Starts from the stored definition and writes back every member you do not change exactly as stored; saving without edits sends the stored definition unchanged. A member the wizard has no field for (`count`, `aggregates`, `groupBy`, `perKey`, `orderByChoices`, `freshness`, `batchParam`), or cannot show exactly (a where with `or` / `groups` / `ignoreCase` / `whenParamPresent`, a join's `where` or multi-column keys, a nested expression, more than one sort column, a parameter's `serverTime`), is listed under **Kept exactly as stored** with its JSON and is read-only there: change it in the schema file and apply it. (**BL-1470, 0.16.0**) |
@@ -389,7 +389,7 @@ Per-node detail page (clickable from topology):
 
 ## 7) Backup Management
 
-The **Backups** page (`/admin/backups`), as the next Studio has it — **every row below is next train** (**BL-332, next train**).
+The **Backups** page (`/admin/backups`) below is the planned Studio surface (**BL-332, next train**).
 Released Studio (0.16.0) lists backups, triggers one, and restores an **exact** backup on one click, with no confirmation, from the
 list or from its recovery timeline of backup points; it saves the schedule through `PATCH /admin/config` and has no point-in-time
 restore, retention or prune. The server's own point-in-time restore is available over HTTP, both SDKs and `aouda backup restore`
@@ -397,21 +397,20 @@ restore, retention or prune. The server's own point-in-time restore is available
 
 | Feature | UI |
 |---------|-----|
-| Trigger backup | Button; the answer names the backup and how long it took. A call that times out is shown as "may still be running", never as failed (**BL-332, next train**) |
-| Available backups | Table of backup **sets** (one set covers every database, the auth database first): id, state badge — `complete`, `incomplete` (a member failed; **not restorable**: "take a new backup") or `refused` (the reason, with any database name masked if it is key-shaped) — a `PITR base` / `no PITR` badge, the databases it holds, a **Restore** button (exact restore; disabled for an incomplete or refused set) and a **Detail** row (**BL-332, next train**) |
-| Set detail | Per database: the cut time (UTC), the redo-start position `R` and the WAL position `P`, the manifest and whether the database is a point-in-time base; members with no manifest and manifests the set record does not name are listed (**BL-332, next train**) |
-| Restore | Select backup → confirmation → progress indicator. The confirmation says: every database is replaced and restarted; anything committed after the backup is discarded; **users, roles and keys return to that time too — a key created after it stops working**; the page reloads its data. Nothing is sent until the box is ticked and **Restore** pressed (**BL-332, next train**) |
-| Point-in-time restore | A **base backup** (the default: the newest backup at or before the target, chosen by the server, or a specific one) and a **target time**, with its UTC equivalent shown; the page states the window — from the oldest backup that can be a base to now — and the server refuses a time its WAL archive cannot reach. A target before the chosen backup is refused before anything is sent. The same confirmation, saying "after the target". A restore lands on a commit boundary ([what a point-in-time restore returns](backup.md#4-what-a-point-in-time-restore-returns)) (**BL-332, next train**) |
-| Schedule | Cron expression, destination and incremental flag, saved with `PUT /admin/backup/schedule` — it keeps the retention policy (**BL-332, next train**) |
-| Retention | Keep last N backups, keep N days, PITR window (whole days). **Save replaces the whole policy**; with none, "every backup is kept" — nothing is pruned by default. The newest restorable backup is always kept, and so is any backup the point-in-time window still needs (**BL-332, next train**) |
-| Prune | **Preview** first (nothing deleted): each backup's outcome and the rule that decided it, and per database the backups and blobs deleted and bytes reclaimed; then a confirmed **Prune**, which shows what the server *actually* deleted (it computes the plan again when it executes) (**BL-332, next train**) |
-| Restore onto a new server | Static help, no control: the server does not restore into another directory over HTTP. Start a fresh server with the same archive destination and restore the set from this page, or restore offline with `aouda backup restore <set id> --from <destination> --to <empty data dir>`. S3 credentials are the server's configuration and are never shown (**BL-332, next train**); see [Restore to a new host](restore-to-a-new-host.md) |
-| Errors | Every backup error is shown with its code, its message and the server's `remedy` text; a **Retry** button for `409 BACKUP_IN_PROGRESS` and for a timed-out call that is safe to repeat (**BL-332, next train**) |
+| Trigger backup | Button; the answer names the backup and how long it took. A call that times out is shown as "may still be running", never as failed |
+| Available backups | Table of backup **sets** (one set covers every database, the auth database first): id, state badge — `complete`, `incomplete` (a member failed; **not restorable**: "take a new backup") or `refused` (the reason, with any database name masked if it is key-shaped) — a `PITR base` / `no PITR` badge, the databases it holds, a **Restore** button (exact restore; disabled for an incomplete or refused set) and a **Detail** row |
+| Set detail | Per database: the cut time (UTC), the redo-start position `R` and the WAL position `P`, the manifest and whether the database is a point-in-time base; members with no manifest and manifests the set record does not name are listed |
+| Restore | Select backup → confirmation → progress indicator. The confirmation says: every database is replaced and restarted; anything committed after the backup is discarded; **users, roles and keys return to that time too — a key created after it stops working**; the page reloads its data. Nothing is sent until the box is ticked and **Restore** pressed |
+| Point-in-time restore | A **base backup** (the default: the newest backup at or before the target, chosen by the server, or a specific one) and a **target time**, with its UTC equivalent shown; the page states the window — from the oldest backup that can be a base to now — and the server refuses a time its WAL archive cannot reach. A target before the chosen backup is refused before anything is sent. The same confirmation, saying "after the target". A restore lands on a commit boundary ([what a point-in-time restore returns](backup.md#4-what-a-point-in-time-restore-returns)) |
+| Schedule | Cron expression, destination and incremental flag, saved with `PUT /admin/backup/schedule` — it keeps the retention policy |
+| Retention | Keep last N backups, keep N days, PITR window (whole days). **Save replaces the whole policy**; with none, "every backup is kept" — nothing is pruned by default. The newest restorable backup is always kept, and so is any backup the point-in-time window still needs |
+| Prune | **Preview** first (nothing deleted): each backup's outcome and the rule that decided it, and per database the backups and blobs deleted and bytes reclaimed; then a confirmed **Prune**, which shows what the server *actually* deleted (it computes the plan again when it executes) |
+| Restore onto a new server | Static help, no control: the server does not restore into another directory over HTTP. Start a fresh server with the same archive destination and restore the set from this page, or restore offline with `aouda backup restore <set id> --from <destination> --to <empty data dir>`. S3 credentials are the server's configuration and are never shown; see [Restore to a new host](restore-to-a-new-host.md) |
+| Errors | Every backup error is shown with its code, its message and the server's `remedy` text; a **Retry** button for `409 BACKUP_IN_PROGRESS` and for a timed-out call that is safe to repeat |
 
 Studio's AI tools and the MCP `aouda_backup_restore` tool restore an **exact** backup only; point-in-time restore, retention and prune are
 operator acts and are not offered to an agent. After a restore Studio discards its data clients' consistency tokens: a token from before
-the restore is ahead of the rewound node, and every read carrying it would answer `409 TOKEN_UNSATISFIED` until it is discarded
-(**BL-332, next train**).
+the restore is ahead of the rewound node, and every read carrying it would answer `409 TOKEN_UNSATISFIED` until it is discarded.
 
 ---
 
@@ -620,8 +619,8 @@ This is used by the future embedded Studio (P35+) to configure itself when serve
 
 ```bash
 docker run -p 3000:3000 \
-  -e AOUDA_STUDIO_DEFAULT_SERVER=http://aouda:5000 \
-  aouda/studio
+ -e AOUDA_STUDIO_DEFAULT_SERVER=http://aouda:5000 \
+ aouda/studio
 ```
 
 Fully self-contained: no external CDN, font, or icon dependencies. Works air-gapped.
@@ -656,9 +655,9 @@ Manual ops required once per deployment: create the Vercel project, attach the `
 `aouda-studio.config.json` provides server connections when Hub is unavailable:
 ```json
 {
-  "servers": [
-    { "name": "Local", "url": "http://localhost:5000" }
-  ]
+ "servers": [
+ { "name": "Local", "url": "http://localhost:5000" }
+ ]
 }
 ```
 
@@ -666,12 +665,12 @@ Manual ops required once per deployment: create the Vercel project, attach the `
 
 ## 12) Aouda.Setup Installer
 
-`Aouda.Setup` is a .NET 10 console app, published as a single file, that offers an interactive
+`Aouda.Setup` is a.NET 10 console app, published as a single file, that offers an interactive
 alternative to the install scripts.
 
 > ⚠️ **It is not self-contained and it is not zero-dependency.** Like every Aouda artefact it is
-> **framework-dependent**: the **.NET 10 ASP.NET Core runtime must already be installed** (**BL-739, 0.2.0**; .NET 8 for 0.1.40 and earlier) on the
-> machine. Without it the process fails in the .NET host loader before any Aouda code runs, so
+> **framework-dependent**: the **.NET 10 ASP.NET Core runtime must already be installed** (**BL-739, 0.2.0**;.NET 8 for 0.1.40 and earlier) on the
+> machine. Without it the process fails in the.NET host loader before any Aouda code runs, so
 > there is no Aouda error message to read. Install it first:
 > `apt-get install aspnetcore-runtime-10.0`, `winget install Microsoft.DotNet.AspNetCore.10`, or
 > <https://dotnet.microsoft.com/download/dotnet/10.0>.
@@ -692,14 +691,14 @@ alternative to the install scripts.
 
 ### Interactive Prompt Sequence
 
-Double-click `Aouda.Setup.exe` (Windows) or run `sudo ./Aouda.Setup` (Linux — the binary keeps its name on both platforms). The app walks you through five prompts with sensible defaults:
+Double-click `Aouda.Setup.exe` (Windows) or run `sudo./Aouda.Setup` (Linux — the binary keeps its name on both platforms). The app walks you through five prompts with sensible defaults:
 
 ```
 Welcome to Aouda Setup
 ======================
 Install mode:
-  [1] Windows Service / systemd (recommended — starts automatically with OS)
-  [2] Manual / on-demand (run with: Aouda.Server start)
+ [1] Windows Service / systemd (recommended — starts automatically with OS)
+ [2] Manual / on-demand (run with: Aouda.Server start)
 > 1
 
 Port [5433]:
@@ -734,8 +733,8 @@ No `appsettings.json` is created. End users do not need to know about ASP.NET co
 Aouda is running!
 
 Server URL : http://localhost:5433
-Studio     : http://localhost:5433  (future embedded mode)
-Cloud      : https://studio.aouda.com → connect to http://localhost:5433
+Studio : http://localhost:5433 (future embedded mode)
+Cloud : https://studio.aouda.com → connect to http://localhost:5433
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
 
 Recommended browser for localhost: Chrome or Edge
@@ -780,11 +779,11 @@ If you select mode `[2]` (manual), `Aouda.Setup` skips service registration and 
 Aouda installed (manual / on-demand mode).
 
 To start the server:
-  Windows: "C:\Program Files\Aouda\Aouda.Server.exe" --data-path "C:\ProgramData\Aouda\data" --port 5433
-  Linux:   /opt/aouda/Aouda.Server --data-path /var/lib/aouda --port 5433
+ Windows: "C:\Program Files\Aouda\Aouda.Server.exe" --data-path "C:\ProgramData\Aouda\data" --port 5433
+ Linux: /opt/aouda/Aouda.Server --data-path /var/lib/aouda --port 5433
 
-Server URL : http://localhost:5433  (once running)
-Cloud      : https://studio.aouda.com → connect to http://localhost:5433
+Server URL : http://localhost:5433 (once running)
+Cloud : https://studio.aouda.com → connect to http://localhost:5433
 ```
 
 ### Admin Bootstrap Logic

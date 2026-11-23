@@ -38,16 +38,16 @@ If your question is "What is implemented vs missing?", jump to:
 Aouda treats developer testing flow as product surface, not only internal engineering process.
 
 - User problem solved:
-  - Run realistic integration tests with Aouda Auth in `dotnet test` without managing a separate `aouda start` process.
-  - Keep local developer setup low-friction (embedded mode, `aouda start`, schema tooling, TypeScript/.NET SDK test flows).
-  - Provide repeatable stress and benchmark infrastructure for server-level confidence.
+ - Run realistic integration tests with Aouda Auth in `dotnet test` without managing a separate `aouda start` process.
+ - Keep local developer setup low-friction (embedded mode, `aouda start`, schema tooling, TypeScript/.NET SDK test flows).
+ - Provide repeatable stress and benchmark infrastructure for server-level confidence.
 - Operational outcomes:
-  - Cleaner consumer-app CI pipelines.
-  - Better parity between local test behavior and real Aouda server behavior.
-  - Stronger regression signal through dedicated harness scenarios and benchmark baselines.
+ - Cleaner consumer-app CI pipelines.
+ - Better parity between local test behavior and real Aouda server behavior.
+ - Stronger regression signal through dedicated harness scenarios and benchmark baselines.
 - Scope boundaries:
-  - This domain covers testing package (`Aouda.Testing`), test harness (`aouda-test`), developer entry flows (`aouda start`, SDK/client test ergonomics), and known testing gaps.
-  - It does not claim that all durability/replication scenario dependencies are fully available in server API surfaces today.
+ - This domain covers testing package (`Aouda.Testing`), test harness (`aouda-test`), developer entry flows (`aouda start`, SDK/client test ergonomics), and known testing gaps.
+ - It does not claim that all durability/replication scenario dependencies are fully available in server API surfaces today.
 
 ## 2.2 Discovery and navigation map
 
@@ -79,29 +79,29 @@ Aouda treats developer testing flow as product surface, not only internal engine
 ### Source map
 
 - Task/report evidence:
-  - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
-  - `docs/tasks/P13/P13-Task-A1-Testing-Package.md`
-  - `docs/tasks/P7/P7-StressTest-Integration-Testing-Overview.md`
-  - `docs/tasks/P11/P11-Failing-Tests-Overview.md`
-  - `docs/tasks/P12/P12-PreExisting-Integration-Test-Failures-Fix.md`
+ - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
+ - `docs/tasks/P13/P13-Task-A1-Testing-Package.md`
+ - `docs/tasks/P7/P7-StressTest-Integration-Testing-Overview.md`
+ - `docs/tasks/P11/P11-Failing-Tests-Overview.md`
+ - `docs/tasks/P12/P12-PreExisting-Integration-Test-Failures-Fix.md`
 - Core code:
-  - `src/Aouda.Testing/AoudaTestServer.cs`
-  - `src/Aouda.Testing/AoudaTestServerOptions.cs`
-  - `src/Aouda.Server/DevServer/DevServerHost.cs`
-  - `src/Aouda.Server/Bootstrap/DisabledSetupModeState.cs`
-  - `src/Aouda.Cli/Program.cs`
-  - `src/Aouda.TestHarness/Program.cs`
-  - `src/Aouda.TestHarness/Configuration/TestRunConfig.cs`
+ - `src/Aouda.Testing/AoudaTestServer.cs`
+ - `src/Aouda.Testing/AoudaTestServerOptions.cs`
+ - `src/Aouda.Server/DevServer/DevServerHost.cs`
+ - `src/Aouda.Server/Bootstrap/DisabledSetupModeState.cs`
+ - `src/Aouda.Cli/Program.cs`
+ - `src/Aouda.TestHarness/Program.cs`
+ - `src/Aouda.TestHarness/Configuration/TestRunConfig.cs`
 - Test evidence:
-  - `tests/Aouda.Testing.Tests/*`
-  - `tests/Aouda.TestHarness.Tests/*`
-  - `../aouda-client-ts/tests/*.test.ts`
+ - `tests/Aouda.Testing.Tests/*`
+ - `tests/Aouda.TestHarness.Tests/*`
+ - `../aouda-client-ts/tests/*.test.ts`
 
 ## 2.3 Defaults and zero-config behavior
 
 If you do nothing beyond basic package install and default options:
 
-- `AoudaTestServer.StartAsync()` creates one database named `default`, no auth, ephemeral temp data path.
+- `AoudaTestServer.StartAsync` creates one database named `default`, no auth, ephemeral temp data path.
 - `AoudaTestServerOptions.Port` defaults to `5433`, but this is informational under `TestServer` (no real socket binding).
 - `AoudaTestServer` auto-applies disabled setup-mode state so integration tests can hit normal API routes.
 - `aouda-test` defaults to running all scenario categories with `300s` duration and `10` concurrency.
@@ -127,17 +127,17 @@ If you do nothing beyond basic package install and default options:
 ### Available now
 
 - Consumer testing package:
-  - `Aouda.Testing` NuGet project exists and ships in-repo API (`AoudaTestServer`, options, adapters).
-  - Auth test helpers (`CreateUserAsync`, `SignInAsync`, `CreateUserHttpClientAsync`) are implemented engine-direct.
+ - `Aouda.Testing` NuGet project exists and ships in-repo API (`AoudaTestServer`, options, adapters).
+ - Auth test helpers (`CreateUserAsync`, `SignInAsync`, `CreateUserHttpClientAsync`) are implemented engine-direct.
 - In-process HTTP testing behavior:
-  - `DevServerHost.Build(..., UseTestServer())` path is reusable and active.
-  - Setup mode is bypassable for integration testing through shared `AddDisabledSetupModeForIntegrationTests()`.
+ - `DevServerHost.Build(..., UseTestServer)` path is reusable and active.
+ - Setup mode is bypassable for integration testing through shared `AddDisabledSetupModeForIntegrationTests`.
 - Framework adapters:
-  - xUnit base fixture, NUnit fixture, MSTest helper fixture are implemented.
+ - xUnit base fixture, NUnit fixture, MSTest helper fixture are implemented.
 - End-to-end test harness:
-  - `aouda-test` project exists with correctness, benchmark, stress, durability, replication, multi-db, and soak categories.
+ - `aouda-test` project exists with correctness, benchmark, stress, durability, replication, multi-db, and soak categories.
 - Developer getting-started coverage:
-  - `Getting-Started-Testing.md` and cross-links from `Getting-Started.md` are present.
+ - `Getting-Started-Testing.md` and cross-links from `Getting-Started.md` are present.
 
 ### Planned / proposed
 
@@ -148,7 +148,7 @@ If you do nothing beyond basic package install and default options:
 ### Reserved / not yet wired
 
 - No TypeScript equivalent package to `Aouda.Testing` for one-command in-process server lifecycle in JS/TS tests.
-- No dedicated public HTTP endpoint to "spawn disposable test server instances"; current model is in-process .NET host composition.
+- No dedicated public HTTP endpoint to "spawn disposable test server instances"; current model is in-process.NET host composition.
 - `Aouda.TestHarness` has known scenario limitations where server features are absent (tracked in backlog).
 
 ## 2.5 Phase coverage matrix
@@ -172,21 +172,21 @@ If you do nothing beyond basic package install and default options:
 | Standalone stress/benchmark harness (`aouda-test`) | Yes | No | No | `src/Aouda.TestHarness/*`, P7 docs | Broad scenario catalog implemented |
 | Built-in benchmark baseline compare/save workflow | Yes | No | No | `Program.cs`, benchmark classes | Exit code integration for CI |
 | TypeScript in-process test server package parity | No | No | Yes | No equivalent project in `aouda-client-ts` | Current TS tests use mocked transport/unit style |
-| Public promote/test-server orchestration HTTP API | No | Yes | No | No server endpoint; .NET in-process path exists | Current workaround: embed in .NET test host |
+| Public promote/test-server orchestration HTTP API | No | Yes | No | No server endpoint;.NET in-process path exists | Current workaround: embed in.NET test host |
 | Fully stable all-green harness test suite in current branch snapshot | No | Yes | No | Recent run shows setup-required failures in harness tests | Implementation exists; branch state can still regress |
 
 ## 2.7 Core concepts and mental model
 
 - `Aouda.Testing`:
-  - Consumer-facing .NET test utility package for in-process server lifecycle.
+ - Consumer-facing.NET test utility package for in-process server lifecycle.
 - `AoudaTestServer`:
-  - Primary abstraction wrapping startup, auth bootstrap, clients, helpers, and teardown.
+ - Primary abstraction wrapping startup, auth bootstrap, clients, helpers, and teardown.
 - `TestServer`:
-  - ASP.NET in-memory hosting path (`UseTestServer`), no network socket requirement.
+ - ASP.NET in-memory hosting path (`UseTestServer`), no network socket requirement.
 - Setup mode bypass:
-  - Integration test-only DI override to avoid first-run setup middleware blocking non-setup routes.
+ - Integration test-only DI override to avoid first-run setup middleware blocking non-setup routes.
 - `Aouda.TestHarness` (`aouda-test`):
-  - Externalized black-box scenario runner for stress/perf/durability categories.
+ - Externalized black-box scenario runner for stress/perf/durability categories.
 
 Invariants:
 
@@ -226,68 +226,68 @@ Key implementation anchors:
 
 1. Entry point: `AoudaTestServer.StartAsync(options, ct)`.
 2. Validation:
-   - Throws if `Databases` is empty.
-   - Resolves ephemeral vs persistent data path.
+ - Throws if `Databases` is empty.
+ - Resolves ephemeral vs persistent data path.
 3. Builder composition:
-   - Calls `DevServerHost.Build(...)`.
-   - Injects `UseTestServer()`.
-   - Injects `AddDisabledSetupModeForIntegrationTests()`.
-   - Applies optional caller `ConfigureServices`.
+ - Calls `DevServerHost.Build(...)`.
+ - Injects `UseTestServer`.
+ - Injects `AddDisabledSetupModeForIntegrationTests`.
+ - Applies optional caller `ConfigureServices`.
 4. State mutations:
-   - Starts app host.
-   - Creates test `HttpClient`.
-   - For each auth-enabled DB, links auth DB and generates/retrieves keys.
+ - Starts app host.
+ - Creates test `HttpClient`.
+ - For each auth-enabled DB, links auth DB and generates/retrieves keys.
 5. Observability:
-   - Directly visible through returned API (key accessors, URL, `DataPath`), not via perf counters.
+ - Directly visible through returned API (key accessors, URL, `DataPath`), not via perf counters.
 6. Proving tests:
-   - `AoudaTestServer_BasicLifecycle.cs`
-   - `AoudaTestServer_AuthEnabled.cs`
-   - `AoudaTestServer_MultiDatabase.cs`
+ - `AoudaTestServer_BasicLifecycle.cs`
+ - `AoudaTestServer_AuthEnabled.cs`
+ - `AoudaTestServer_MultiDatabase.cs`
 
 ### Walk-through B: Auth helper token path (`CreateUserAsync` + `SignInAsync`)
 
 1. Entry points:
-   - `CreateUserAsync(databaseName, email, password)`
-   - `SignInAsync(databaseName, email, password)`
+ - `CreateUserAsync(databaseName, email, password)`
+ - `SignInAsync(databaseName, email, password)`
 2. Validation:
-   - Resolves auth DB mapping for app DB.
-   - Throws clear exception when auth is not enabled.
+ - Resolves auth DB mapping for app DB.
+ - Throws clear exception when auth is not enabled.
 3. State mutations:
-   - `CreateUserAsync` persists user via `UserService`.
-   - `SignInAsync` verifies credentials, mints JWT with issuer from `OidcAuthority(...)`.
+ - `CreateUserAsync` persists user via `UserService`.
+ - `SignInAsync` verifies credentials, mints JWT with issuer from `OidcAuthority(...)`.
 4. Observability:
-   - Consumer sees explicit exceptions on invalid credentials or missing auth.
-   - JWT shape/endpoint acceptance proven by tests.
+ - Consumer sees explicit exceptions on invalid credentials or missing auth.
+ - JWT shape/endpoint acceptance proven by tests.
 5. Proving tests:
-   - `AoudaTestServer_AuthHelpers.cs`
-   - `CreateUserHttpClientAsync_TokenAcceptedByAuthProtectedEndpoint`
+ - `AoudaTestServer_AuthHelpers.cs`
+ - `CreateUserHttpClientAsync_TokenAcceptedByAuthProtectedEndpoint`
 
 ### Walk-through C: `aouda-test` CLI run to report artifacts
 
 1. Entry point: `Program.Main(args)` in `src/Aouda.TestHarness/Program.cs`.
 2. Validation/branching:
-   - Parses scenario, duration, concurrency, baseline flags, report directory.
-   - Registers scenario categories.
+ - Parses scenario, duration, concurrency, baseline flags, report directory.
+ - Registers scenario categories.
 3. Runtime mutations:
-   - Runs scenarios through `ScenarioRunner`.
-   - Optionally saves baseline.
-   - Optionally compares baseline; can fail with exit code `1`.
-   - Writes report artifacts (`report.json`, `report.md`, `metrics.jsonl`, baseline comparison summary).
+ - Runs scenarios through `ScenarioRunner`.
+ - Optionally saves baseline.
+ - Optionally compares baseline; can fail with exit code `1`.
+ - Writes report artifacts (`report.json`, `report.md`, `metrics.jsonl`, baseline comparison summary).
 4. Observability:
-   - Console summary and exit codes (`0`, `1`, `2`).
+ - Console summary and exit codes (`0`, `1`, `2`).
 5. Proving tests:
-   - `tests/Aouda.TestHarness.Tests` CLI and runner tests (current branch currently showing setup-mode-related failures in verification run).
+ - `tests/Aouda.TestHarness.Tests` CLI and runner tests (current branch currently showing setup-mode-related failures in verification run).
 
 ### Walk-through D: Integration test setup-mode bypass
 
 1. Entry point:
-   - Test host builder calls `AddDisabledSetupModeForIntegrationTests()`.
+ - Test host builder calls `AddDisabledSetupModeForIntegrationTests`.
 2. Behavior:
-   - Registers `ISetupModeState` singleton that always returns not-in-setup mode.
+ - Registers `ISetupModeState` singleton that always returns not-in-setup mode.
 3. Result:
-   - Middleware path that would enforce setup bootstrapping is bypassed for integration suites not testing setup flow.
+ - Middleware path that would enforce setup bootstrapping is bypassed for integration suites not testing setup flow.
 4. Proving evidence:
-   - P12 pre-existing integration failure fix task documentation and integration test infrastructure usage.
+ - P12 pre-existing integration failure fix task documentation and integration test infrastructure usage.
 
 ## 2.9 Why Aouda is different (differentiators)
 
@@ -303,13 +303,13 @@ Key implementation anchors:
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `AoudaTestServerOptions.Databases` | `IReadOnlyList<TestDatabase>` | `[default]` | non-empty list | .NET test code | Empty list throws |
-| `TestDatabase.Name` | `string` | required | non-empty expected | .NET test code | Used as app DB name |
-| `TestDatabase.EnableAuth` | `bool` | `false` | `true/false` | .NET test code | Enables key generation + auth DB linkage |
-| `AoudaTestServerOptions.DataPath` | `string?` | `null` | null or valid path | .NET test code | Null => ephemeral with auto-delete |
-| `AoudaTestServerOptions.Port` | `int` | `5433` | int | .NET test code | Informational in TestServer mode |
-| `AoudaTestServerOptions.ConfigureServices` | `Action<IServiceCollection>?` | `null` | callback or null | .NET test code | Allows service overrides in tests |
-| `AoudaTestServerOptions.CorsAllowedOrigins` | `IReadOnlyList<string>?` | `null` | list of origin strings or null | .NET test code | Null disables CORS policy injection; set to allow cross-origin requests in test scenarios (e.g. `["http://localhost:3000"]`) |
+| `AoudaTestServerOptions.Databases` | `IReadOnlyList<TestDatabase>` | `[default]` | non-empty list |.NET test code | Empty list throws |
+| `TestDatabase.Name` | `string` | required | non-empty expected |.NET test code | Used as app DB name |
+| `TestDatabase.EnableAuth` | `bool` | `false` | `true/false` |.NET test code | Enables key generation + auth DB linkage |
+| `AoudaTestServerOptions.DataPath` | `string?` | `null` | null or valid path |.NET test code | Null => ephemeral with auto-delete |
+| `AoudaTestServerOptions.Port` | `int` | `5433` | int |.NET test code | Informational in TestServer mode |
+| `AoudaTestServerOptions.ConfigureServices` | `Action<IServiceCollection>?` | `null` | callback or null |.NET test code | Allows service overrides in tests |
+| `AoudaTestServerOptions.CorsAllowedOrigins` | `IReadOnlyList<string>?` | `null` | list of origin strings or null |.NET test code | Null disables CORS policy injection; set to allow cross-origin requests in test scenarios (e.g. `["http://localhost:3000"]`) |
 | `aouda start --port` | int | `5433` | positive int | CLI | Kestrel/TestServer parity option |
 | `aouda start --data` | string? | `null` | path or null | CLI | Null => ephemeral dev mode |
 | `aouda start --database` | string | `default` | string | CLI | Initial dev DB |
@@ -332,39 +332,39 @@ Key implementation anchors:
 Configuration precedence and operational notes:
 
 - For test package:
-  - Explicit `AoudaTestServerOptions` values override all defaults.
-  - `ConfigureServices` callback runs after base service configuration and can override options/services.
+ - Explicit `AoudaTestServerOptions` values override all defaults.
+ - `ConfigureServices` callback runs after base service configuration and can override options/services.
 - For CLI flows:
-  - Command-line flags are explicit runtime truth.
-  - `aouda` schema subcommands also support environment-influenced context (`--server`, `--database`, `--env`) but this is schema tooling, not test lifecycle itself.
+ - Command-line flags are explicit runtime truth.
+ - `aouda` schema subcommands also support environment-influenced context (`--server`, `--database`, `--env`) but this is schema tooling, not test lifecycle itself.
 - Dynamic vs restart-required:
-  - `AoudaTestServerOptions` are applied at startup for each instance; new instance required for changes.
-  - `aouda-test` flags apply per run.
+ - `AoudaTestServerOptions` are applied at startup for each instance; new instance required for changes.
+ - `aouda-test` flags apply per run.
 - Safety-gated:
-  - Setup mode exists as security default in normal server startup; test bypass requires explicit integration-testing override.
+ - Setup mode exists as security default in normal server startup; test bypass requires explicit integration-testing override.
 - Deprecated/reserved:
-  - No deprecated test-package options currently identified.
+ - No deprecated test-package options currently identified.
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-### .NET example (`Aouda.Testing`)
+###.NET example (`Aouda.Testing`)
 
 ```csharp
 await using var server = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
 {
-    Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
 });
 
 await server.CreateUserAsync("myapp", "alice@test.com", "Pass123!");
 var token = await server.SignInAsync("myapp", "alice@test.com", "Pass123!");
 var userClient = await server.CreateUserHttpClientAsync("myapp", "alice@test.com", "Pass123!");
 var response = await userClient.GetAsync("/api/databases/myapp/auth/me");
-response.EnsureSuccessStatusCode();
+response.EnsureSuccessStatusCode;
 ```
 
 Expected result: user is created, valid JWT is minted, and auth-protected endpoint accepts token.
 
-Common mistake: calling `ServiceKey()`/`CreateClient()` on a database that was not created with `EnableAuth: true`.
+Common mistake: calling `ServiceKey`/`CreateClient` on a database that was not created with `EnableAuth: true`.
 
 ### TypeScript example (`@aouda/client` test-style usage)
 
@@ -372,19 +372,19 @@ Common mistake: calling `ServiceKey()`/`CreateClient()` on a database that was n
 import { AoudaClient } from "@aouda/client";
 
 const client = new AoudaClient({
-  serverUrl: "http://localhost:5433",
-  database: "myapp",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+ serverUrl: "http://localhost:5433",
+ database: "myapp",
+// client.whoami — apiKey is an aouda_ key, or session, never both.
 });
 
-const mem = await client.admin.server.memory();
-const tables = await client.tables.list();
+const mem = await client.admin.server.memory;
+const tables = await client.tables.list;
 await client.tables.updatePolicy("orders", { storageTemperature: "HotOnly" });
 ```
 
 Expected result: server/admin and table APIs are callable from TypeScript client against running server.
 
-Common mistake: expecting a TypeScript equivalent of `AoudaTestServer.StartAsync()`; current TS flow assumes an already-running server endpoint.
+Common mistake: expecting a TypeScript equivalent of `AoudaTestServer.StartAsync`; current TS flow assumes an already-running server endpoint.
 
 ### HTTP example
 
@@ -393,8 +393,8 @@ POST /api/auth/setup
 Content-Type: application/json
 
 {
-  "email": "admin@example.com",
-  "password": "ChangeMeNow!"
+ "email": "admin@example.com",
+ "password": "ChangeMeNow!"
 }
 ```
 
@@ -404,8 +404,8 @@ Authorization: Bearer <admin-token>
 Content-Type: application/json
 
 {
-  "name": "myapp",
-  "auth": { "enabled": true }
+ "name": "myapp",
+ "auth": { "enabled": true }
 }
 ```
 
@@ -415,7 +415,7 @@ Common mistake: not accounting for setup mode; non-setup routes can return `SETU
 
 ### A) API coverage matrix
 
-| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Start in-process Aouda server for tests | `AoudaTestServer.StartAsync` | Missing | N/A | Implemented (.NET only) | `Aouda.Testing` package |
 | Get service/anon keys for auth-enabled test DB | `ServiceKey`, `AnonKey` | Missing | N/A | Implemented (.NET only) | Works after `EnableAuth: true` |
@@ -423,29 +423,29 @@ Common mistake: not accounting for setup mode; non-setup routes can return `SETU
 | xUnit/NUnit/MSTest fixture helpers | `AoudaTestFixture`, `AoudaNUnitFixture`, `AoudaMSTestFixture` | Missing | N/A | Implemented (.NET only) | TS has normal Vitest patterns, no Aouda-specific fixture package |
 | Local server dev workflow | `aouda start` CLI (.NET tool) | Consumes resulting server | Server endpoints exposed | Implemented | Supports `--auth` shortcut |
 | Stress/benchmark scenario orchestration | `aouda-test` CLI | No direct TS equivalent harness | Uses Aouda HTTP APIs | Implemented (.NET harness) | TS parity not shipped |
-| Client-side admin/schema testing APIs | `Aouda.Client` + .NET tests | `@aouda/client` APIs + Vitest tests | Underlying server endpoints | Implemented | Good transport/unit test coverage in TS repo |
+| Client-side admin/schema testing APIs | `Aouda.Client` +.NET tests | `@aouda/client` APIs + Vitest tests | Underlying server endpoints | Implemented | Good transport/unit test coverage in TS repo |
 
 ### B) Missing API matrix
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| TypeScript in-process integration server lifecycle | No TS package equivalent to `Aouda.Testing` | Run `aouda start` externally in test scripts or call .NET helper harness | Not yet tracked as dedicated task ID | High |
+| TypeScript in-process integration server lifecycle | No TS package equivalent to `Aouda.Testing` | Run `aouda start` externally in test scripts or call.NET helper harness | Not yet tracked as dedicated task ID | High |
 | Unified cross-language fixture abstraction | No language-neutral fixture contract package | Per-language custom setup | Future DX tasks (not yet formalized) | Medium |
-| Public disposable test-server orchestration endpoint | No HTTP API for creating isolated test hosts | In-process .NET composition only | Not currently planned in ADR 0024 | Low/Medium |
+| Public disposable test-server orchestration endpoint | No HTTP API for creating isolated test hosts | In-process.NET composition only | Not currently planned in ADR 0024 | Low/Medium |
 | Some harness scenario dependencies (backup/replication workflows) | Server endpoints/features absent for complete scenario assertions | Skip/conditional handling in scenarios | `docs/BACKLOG.md` BL-023, BL-024 | Medium |
 
 ## 2.12 Scenario playbooks (minimum three)
 
-### Scenario 1: Fast auth integration tests in .NET (`dotnet test` only)
+### Scenario 1: Fast auth integration tests in.NET (`dotnet test` only)
 
 When to use:
 - You need application-auth integration tests (OIDC/JWT/user endpoints) without external server process management.
 
 Steps:
 1. Add package reference to test project:
-   - `<PackageReference Include="Aouda.Testing" Version="0.1.0" />`
+ - `<PackageReference Include="Aouda.Testing" Version="0.1.0" />`
 2. Start server in fixture:
-   - `AoudaTestServer.StartAsync(new() { Databases = [new("myapp", EnableAuth: true)] })`
+ - `AoudaTestServer.StartAsync(new { Databases = [new("myapp", EnableAuth: true)] })`
 3. Create user and acquire user-authenticated client with helper.
 4. Run endpoint assertions against your app or Aouda routes.
 5. Dispose server at fixture teardown.
@@ -462,10 +462,10 @@ When to use:
 
 Steps:
 1. Start local dev server:
-   - `aouda start --port 5433 --database myapp --data <persistent-path>`
+ - `aouda start --port 5433 --database myapp --data <persistent-path>`
 2. Optionally enable auth in dev:
-   - add `--auth` and capture printed keys.
-3. Run .NET or TypeScript app with configured URL and credentials.
+ - add `--auth` and capture printed keys.
+3. Run.NET or TypeScript app with configured URL and credentials.
 4. Validate via admin endpoints (`/health`, `/ready`, `/api/server/memory`).
 
 Expected result checks:
@@ -480,11 +480,11 @@ When to use:
 
 Steps:
 1. Baseline establishment:
-   - `aouda-test --scenario benchmark --save-baseline --baseline-file baseline.json`
+ - `aouda-test --scenario benchmark --save-baseline --baseline-file baseline.json`
 2. Compare run:
-   - `aouda-test --scenario benchmark --compare-baseline --baseline-file baseline.json`
+ - `aouda-test --scenario benchmark --compare-baseline --baseline-file baseline.json`
 3. Broader functional check:
-   - `aouda-test --scenario correctness,stress --duration 300 --concurrency 10`
+ - `aouda-test --scenario correctness,stress --duration 300 --concurrency 10`
 4. Collect artifacts from report directory.
 
 Expected result checks:
@@ -497,12 +497,12 @@ Expected result checks:
 What to monitor first:
 
 - For `Aouda.Testing` suites:
-  - Startup success/failure exceptions (`SETUP_REQUIRED`, auth not enabled, invalid credentials).
-  - Ephemeral directory creation/cleanup behavior.
+ - Startup success/failure exceptions (`SETUP_REQUIRED`, auth not enabled, invalid credentials).
+ - Ephemeral directory creation/cleanup behavior.
 - For `aouda-test`:
-  - Exit code (`0`/`1`/`2`) for CI gating.
-  - Scenario pass/fail counts and failure reasons.
-  - Generated report artifacts for run diagnostics.
+ - Exit code (`0`/`1`/`2`) for CI gating.
+ - Scenario pass/fail counts and failure reasons.
+ - Generated report artifacts for run diagnostics.
 
 Recovery/restart expectations:
 
@@ -526,12 +526,12 @@ Suggested tuning sequence:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `SETUP_REQUIRED` in integration tests | Setup mode active, override not applied | Apply `AddDisabledSetupModeForIntegrationTests()` in test host composition |
-| `ServiceKey()` throws for DB | DB was started without `EnableAuth: true` | Use auth-enabled `TestDatabase` entry |
+| `SETUP_REQUIRED` in integration tests | Setup mode active, override not applied | Apply `AddDisabledSetupModeForIntegrationTests` in test host composition |
+| `ServiceKey` throws for DB | DB was started without `EnableAuth: true` | Use auth-enabled `TestDatabase` entry |
 | OIDC discovery check fails | Wrong authority path assumption | Use `{OidcAuthority}/auth/.well-known/openid-configuration` |
 | `aouda-test` exits `2` | Infrastructure/startup error | Validate server path/port/data dir, then rerun with `--verbose` |
 | Benchmark compare fails unexpectedly | Baseline stale or different machine profile | Rebaseline intentionally and keep environment consistent |
-| TS tests cannot spin in-process Aouda server | No TS equivalent of `Aouda.Testing` | Use external `aouda start` in test lifecycle or .NET bridge harness |
+| TS tests cannot spin in-process Aouda server | No TS equivalent of `Aouda.Testing` | Use external `aouda start` in test lifecycle or.NET bridge harness |
 
 ## 2.15 Verification ledger
 
@@ -562,62 +562,62 @@ Last verification date (UTC): `2026-04-01` (package tests); supplementary source
 |---|---|---|---|
 | No TypeScript equivalent integration helper for in-process Aouda server | Limits parity for TS-first apps; extra CI friction | Create TS test utility package or documented harness script wrapper around `aouda start` with auto lifecycle | High |
 | Harness suite currently sensitive to setup-mode state in branch validation runs | Can hide true regressions behind infra/auth gating noise | Add explicit setup-mode fixture bootstrap in harness tests and dedicated guard test asserting non-setup mode before scenario run | High |
-| No explicit cross-SDK end-to-end test using same live server fixture (.NET + TS) | Protocol parity drift can go unnoticed | Add CI scenario: start server once, run targeted .NET and TS API smoke tests against same DB | Medium |
+| No explicit cross-SDK end-to-end test using same live server fixture (.NET + TS) | Protocol parity drift can go unnoticed | Add CI scenario: start server once, run targeted.NET and TS API smoke tests against same DB | Medium |
 | Fixture adapter surface lacks direct compile-time xUnit interface implementation in base package | New users can misread pattern and misconfigure fixtures | Add analyzer/doc test that enforces "derived fixture must implement `IAsyncLifetime`" with sample package template | Medium |
 | Verification ledger partly manual and branch-dependent | Risk of stale docs and false confidence | Add scripted doc-verification command set and CI artifact publication | Medium |
 
 ## 2.18 Known gaps and undone work
 
 - TypeScript parity gap:
-  - No TS package equivalent to `Aouda.Testing` in-process lifecycle helpers.
-  - User impact: TS integration tests usually require external server process orchestration.
+ - No TS package equivalent to `Aouda.Testing` in-process lifecycle helpers.
+ - User impact: TS integration tests usually require external server process orchestration.
 - Harness dependency gaps from backlog:
-  - BL-023 (`BackupRestoreScenario` full API-driven path pending server backup endpoints).
-  - BL-024 (replication scenario full enablement tied to server replication support parity).
-  - BL-028 (graceful shutdown reliability affects some durability scenario confidence).
+ - BL-023 (`BackupRestoreScenario` full API-driven path pending server backup endpoints).
+ - BL-024 (replication scenario full enablement tied to server replication support parity).
+ - BL-028 (graceful shutdown reliability affects some durability scenario confidence).
 - Branch-state test instability:
-  - Current verification run showed `SETUP_REQUIRED` failures in harness tests; indicates integration assumptions can regress and require ongoing hardening.
+ - Current verification run showed `SETUP_REQUIRED` failures in harness tests; indicates integration assumptions can regress and require ongoing hardening.
 - ADR status mismatch:
-  - ADR 0024 remains `Proposed` while significant implementation is shipped; status alignment/document governance still pending.
+ - ADR 0024 remains `Proposed` while significant implementation is shipped; status alignment/document governance still pending.
 
 ## 2.19 References
 
 - ADRs:
-  - `docs/decisions/0024-testing-package.md`
-  - `docs/decisions/0023-authentication-and-authorization.md`
-  - `docs/decisions/0022-licensing-and-distribution-strategy.md`
-  - `docs/decisions/INDEX.md`
+ - `docs/decisions/0024-testing-package.md`
+ - `docs/decisions/0023-authentication-and-authorization.md`
+ - `docs/decisions/0022-licensing-and-distribution-strategy.md`
+ - `docs/decisions/INDEX.md`
 - Task docs and reports:
-  - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
-  - `docs/tasks/P13/P13-Task-A1-Testing-Package.md`
-  - `docs/tasks/P7/P7-StressTest-Integration-Testing-Overview.md`
-  - `docs/tasks/P7/P7-Scenario-Catalog.md`
-  - `docs/tasks/P11/P11-Failing-Tests-Overview.md`
-  - `docs/tasks/P12/P12-PreExisting-Integration-Test-Failures-Fix.md`
+ - `docs/tasks/P13/P13-Testing-Package-Tasks.md`
+ - `docs/tasks/P13/P13-Task-A1-Testing-Package.md`
+ - `docs/tasks/P7/P7-StressTest-Integration-Testing-Overview.md`
+ - `docs/tasks/P7/P7-Scenario-Catalog.md`
+ - `docs/tasks/P11/P11-Failing-Tests-Overview.md`
+ - `docs/tasks/P12/P12-PreExisting-Integration-Test-Failures-Fix.md`
 - Core code:
-  - `src/Aouda.Testing/AoudaTestServer.cs`
-  - `src/Aouda.Testing/AoudaTestServerOptions.cs`
-  - `src/Aouda.Testing/TestDatabase.cs`
-  - `src/Aouda.Testing/Adapters/xUnit/AoudaTestFixture.cs`
-  - `src/Aouda.Testing/Adapters/NUnit/AoudaNUnitFixture.cs`
-  - `src/Aouda.Testing/Adapters/MSTest/AoudaMSTestFixture.cs`
-  - `src/Aouda.Server/DevServer/DevServerHost.cs`
-  - `src/Aouda.Server/DevServer/DevServerOptions.cs`
-  - `src/Aouda.Server/Bootstrap/DisabledSetupModeState.cs`
-  - `src/Aouda.Cli/Program.cs`
-  - `src/Aouda.TestHarness/Program.cs`
-  - `src/Aouda.TestHarness/Configuration/TestRunConfig.cs`
-  - `src/Aouda.TestHarness/README.md`
+ - `src/Aouda.Testing/AoudaTestServer.cs`
+ - `src/Aouda.Testing/AoudaTestServerOptions.cs`
+ - `src/Aouda.Testing/TestDatabase.cs`
+ - `src/Aouda.Testing/Adapters/xUnit/AoudaTestFixture.cs`
+ - `src/Aouda.Testing/Adapters/NUnit/AoudaNUnitFixture.cs`
+ - `src/Aouda.Testing/Adapters/MSTest/AoudaMSTestFixture.cs`
+ - `src/Aouda.Server/DevServer/DevServerHost.cs`
+ - `src/Aouda.Server/DevServer/DevServerOptions.cs`
+ - `src/Aouda.Server/Bootstrap/DisabledSetupModeState.cs`
+ - `src/Aouda.Cli/Program.cs`
+ - `src/Aouda.TestHarness/Program.cs`
+ - `src/Aouda.TestHarness/Configuration/TestRunConfig.cs`
+ - `src/Aouda.TestHarness/README.md`
 - Test code:
-  - `tests/Aouda.Testing.Tests/*.cs`
-  - `tests/Aouda.TestHarness.Tests/*.cs`
-  - `../aouda-client-ts/tests/*.test.ts`
+ - `tests/Aouda.Testing.Tests/*.cs`
+ - `tests/Aouda.TestHarness.Tests/*.cs`
+ - `../aouda-client-ts/tests/*.test.ts`
 - Related docs:
-  - `docs/dev/Getting-Started.md`
-  - `docs/dev/Getting-Started-Testing.md`
-  - `docs/dev/Getting-Started-Auth.md`
-  - `docs/dev/Functionality-Overview.md`
-  - `docs/BACKLOG.md`
+ - `docs/dev/Getting-Started.md`
+ - `docs/dev/Getting-Started-Testing.md`
+ - `docs/dev/Getting-Started-Auth.md`
+ - `docs/dev/Functionality-Overview.md`
+ - `docs/BACKLOG.md`
 
 ## 2.20 What is missing from this document? (meta completeness)
 

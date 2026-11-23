@@ -1,18 +1,18 @@
 ---
 title: "Home"
 nav_order: 0
-description: "Aouda — columnar database engine for .NET with TypeScript client SDK"
+description: "Aouda — columnar database engine for.NET with TypeScript client SDK"
 ---
 
 # Aouda Documentation
 
-Aouda is a **columnar database engine** for .NET with a TypeScript client SDK. It runs embedded in your process (like SQLite) or as a standalone server (like PostgreSQL). You control what stays in memory — declare a per-table residency target in bytes, rows or a predicate, and the engine converges on it inside a hard process-wide ceiling it will not exceed. From fully in-memory sub-millisecond access to terabytes on disk with only active partitions loaded. And you can see what it did: reserved bytes by activity and by table, split by where they live.
+Aouda is a **columnar database engine** for.NET with a TypeScript client SDK. It runs embedded in your process (like SQLite) or as a standalone server (like PostgreSQL). You control what stays in memory — declare a per-table residency target in bytes, rows or a predicate, and the engine converges on it inside a hard process-wide ceiling it will not exceed. From fully in-memory sub-millisecond access to terabytes on disk with only active partitions loaded. And you can see what it did: reserved bytes by activity and by table, split by where they live.
 
 ---
 
 ## Install and run in 60 seconds
 
-**Option A — CLI + .NET client:**
+**Option A — CLI +.NET client:**
 
 ```bash
 # Install the CLI and client
@@ -33,12 +33,12 @@ var client = new AoudaClient("http://localhost:5433", "myapp");
 
 await client.GetTable("events").InsertAsync(new Dictionary<string, object?>
 {
-    ["id"] = 1, ["name"] = "page_view", ["duration_ms"] = 123
+ ["id"] = 1, ["name"] = "page_view", ["duration_ms"] = 123
 });
 
 var rows = await client.GetTable("events")
-    .Where("duration_ms", "gte", 100)
-    .ToListAsync();
+.Where("duration_ms", "gte", 100)
+.ToListAsync;
 // rows[0]["name"] == "page_view"
 ```
 
@@ -52,16 +52,16 @@ dotnet add package Aouda.Embedded
 using Aouda.Abstractions;
 using Aouda.Embedded;
 
-await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync();
+await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync;
 
 await db.GetTable("events").InsertAsync(new Dictionary<string, object?>
 {
-    ["id"] = 1, ["name"] = "page_view", ["duration_ms"] = 123
+ ["id"] = 1, ["name"] = "page_view", ["duration_ms"] = 123
 });
 
 var rows = await db.GetTable("events")
-    .Where("duration_ms", "gte", 100)
-    .ToListAsync();
+.Where("duration_ms", "gte", 100)
+.ToListAsync;
 // rows[0]["name"] == "page_view"
 // Database is automatically cleaned up when disposed
 ```
@@ -76,16 +76,16 @@ npm install @aouda/client
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5433",
-  database: "myapp",
+ serverUrl: "http://localhost:5433",
+ database: "myapp",
 });
-await client.connect();
+await client.connect;
 
 await client.table("events").insert({ id: 1, name: "page_view", duration_ms: 123 });
 
 const results = await client.table("events")
-  .where("duration_ms", ">=", 100)
-  .execute();
+.where("duration_ms", ">=", 100)
+.execute;
 console.log(results.rows[0].name); // "page_view"
 ```
 
@@ -93,7 +93,7 @@ console.log(results.rows[0].name); // "page_view"
 
 ```bash
 docker compose up
-# Aouda at http://localhost:5000  •  Studio at http://localhost:3000
+# Aouda at http://localhost:5000 • Studio at http://localhost:3000
 ```
 
 The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, 0.16.0**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](deployment/docker.md#compose).
@@ -124,7 +124,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 **Just want the engine running and a first row inserted?**
 → [Getting Started](getting-started/index.md) — embedded mode, server mode, data operations, schema, and auth
 
-**Using the .NET client?**
+**Using the.NET client?**
 → [.NET Client](clients/dotnet.md) — connecting, queries, inserts, bulk load, column batches (**Lead S13, 0.6.0**), retries
 
 **Using the TypeScript client?**
@@ -146,7 +146,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 → [Deployment](deployment/index.md) — Kubernetes, Helm, Docker, Windows Service, systemd
 
 **Building with AI agents?**
-→ [AI Agent Quick Start](ai/quick-start.md) — minimal bootstrap for agent-driven workflows  
+→ [AI Agent Quick Start](ai/quick-start.md) — minimal bootstrap for agent-driven workflows
 → [Local CLI testing (agents)](ai/local-cli-testing.md) — throwaway server recipe and CLI traps (`start -h`, data-plane allowlist, CorsOrigins)
 
 ---
@@ -156,7 +156,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 Aouda has **two deployment modes** — the database engine is the same in both:
 
 - **Embedded** — engine runs inside your process, direct API calls, no network, ideal for tests, tools, and single-process apps
-- **Server** — standalone HTTP server, multiple clients, .NET + TypeScript + HTTP, Studio management console
+- **Server** — standalone HTTP server, multiple clients,.NET + TypeScript + HTTP, Studio management console
 
 Aouda has **two independent auth systems**:
 

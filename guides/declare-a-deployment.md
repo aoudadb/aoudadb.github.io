@@ -14,13 +14,13 @@ The rules live on the pages this one stitches: [Declare a server in one file](de
 
 ```text
 compose.yaml
-declaration/                 mounted read-only at /etc/aouda
-  aouda.json                 version, databases, roles, principals
-  deposit.schema.json
-  ledger.schema.json
-secrets/                     never committed
-  key-root.txt               the key root (aouda keys new-root)
-  ops.key  deposit-service.key  ledger-service.key  tullett-feeder.key
+declaration/ mounted read-only at /etc/aouda
+ aouda.json version, databases, roles, principals
+ deposit.schema.json
+ ledger.schema.json
+secrets/ never committed
+ key-root.txt the key root (aouda keys new-root)
+ ops.key deposit-service.key ledger-service.key tullett-feeder.key
 ```
 
 | Piece | What it is |
@@ -38,55 +38,55 @@ Named by `Aouda:Declaration`. There is no default path. The shape is the file's 
 
 ```json
 {
-  "version": 1,
-  "keyRoot": { "file": "/run/secrets/aouda_key_root" },
-  "server": {
-    "principals": {
-      "ops": {
-        "roles": ["admin"],
-        "credentials": { "derivedKey": { "version": 1 } }
-      }
-    }
-  },
-  "databases": {
-    "derive_auth": {
-      "kind": "auth",
-      "roles": {
-        "quote_writer": {
-          "description": "Runs insert_quote and reads the quotes it wrote",
-          "statements": [
-            { "actions": ["execute"], "resources": ["deposit/mutation/insert_quote"] },
-            { "actions": ["read"], "resources": ["deposit/table/quotes"] }
-          ]
-        }
-      },
-      "principals": {
-        "deposit-service": {
-          "statements": [
-            { "actions": ["read", "write", "execute"], "resources": ["deposit/table/*", "deposit/mutation/*", "deposit/query/*"] }
-          ],
-          "credentials": { "derivedKey": { "version": 1 } }
-        },
-        "ledger-service": {
-          "statements": [
-            { "actions": ["read", "write"], "resources": ["ledger/table/*"] }
-          ],
-          "credentials": { "derivedKey": { "version": 1 } }
-        },
-        "tullett-feeder": {
-          "roles": ["quote_writer"],
-          "credentials": { "derivedKey": { "version": 1 } }
-        },
-        "anonymous": {
-          "statements": [
-            { "actions": ["execute"], "resources": ["deposit/query/quotes.latest"] }
-          ]
-        }
-      }
-    },
-    "deposit": { "kind": "data", "authDatabase": "derive_auth", "schema": "deposit.schema.json" },
-    "ledger": { "kind": "data", "authDatabase": "derive_auth", "schema": "ledger.schema.json" }
-  }
+ "version": 1,
+ "keyRoot": { "file": "/run/secrets/aouda_key_root" },
+ "server": {
+ "principals": {
+ "ops": {
+ "roles": ["admin"],
+ "credentials": { "derivedKey": { "version": 1 } }
+ }
+ }
+ },
+ "databases": {
+ "derive_auth": {
+ "kind": "auth",
+ "roles": {
+ "quote_writer": {
+ "description": "Runs insert_quote and reads the quotes it wrote",
+ "statements": [
+ { "actions": ["execute"], "resources": ["deposit/mutation/insert_quote"] },
+ { "actions": ["read"], "resources": ["deposit/table/quotes"] }
+ ]
+ }
+ },
+ "principals": {
+ "deposit-service": {
+ "statements": [
+ { "actions": ["read", "write", "execute"], "resources": ["deposit/table/*", "deposit/mutation/*", "deposit/query/*"] }
+ ],
+ "credentials": { "derivedKey": { "version": 1 } }
+ },
+ "ledger-service": {
+ "statements": [
+ { "actions": ["read", "write"], "resources": ["ledger/table/*"] }
+ ],
+ "credentials": { "derivedKey": { "version": 1 } }
+ },
+ "tullett-feeder": {
+ "roles": ["quote_writer"],
+ "credentials": { "derivedKey": { "version": 1 } }
+ },
+ "anonymous": {
+ "statements": [
+ { "actions": ["execute"], "resources": ["deposit/query/quotes.latest"] }
+ ]
+ }
+ }
+ },
+ "deposit": { "kind": "data", "authDatabase": "derive_auth", "schema": "deposit.schema.json" },
+ "ledger": { "kind": "data", "authDatabase": "derive_auth", "schema": "ledger.schema.json" }
+ }
 }
 ```
 
@@ -100,27 +100,27 @@ A derived key is computed from `keyRoot`, the auth database, the principal's nam
 
 ```yaml
 services:
-  aouda:
-    image: ghcr.io/aoudadb/aouda-server:<version>
-    stop_grace_period: 130s
-    mem_limit: 2g
-    cpus: 4
-    ports:
-      - "127.0.0.1:5000:5000"
-    environment:
-      Aouda__Declaration: /etc/aouda/aouda.json
-    volumes:
-      - aouda-data:/data
-      - ./declaration:/etc/aouda:ro
-    secrets:
-      - aouda_key_root
+ aouda:
+ image: ghcr.io/aoudadb/aouda-server:<version>
+ stop_grace_period: 130s
+ mem_limit: 2g
+ cpus: 4
+ ports:
+ - "127.0.0.1:5000:5000"
+ environment:
+ Aouda__Declaration: /etc/aouda/aouda.json
+ volumes:
+ - aouda-data:/data
+ -./declaration:/etc/aouda:ro
+ secrets:
+ - aouda_key_root
 
 secrets:
-  aouda_key_root:
-    file: ./secrets/key-root.txt
+ aouda_key_root:
+ file:./secrets/key-root.txt
 
 volumes:
-  aouda-data:
+ aouda-data:
 ```
 
 The image is private: log in first ([Docker](../deployment/docker.md)).
@@ -161,7 +161,7 @@ Against a running server, the key is that server's operator key, passed by varia
 
 ```bash
 aouda plan --declaration declaration/aouda.json --skip-secrets \
-  --server https://aouda.internal:5000 --key-env AOUDA_PLAN_KEY
+ --server https://aouda.internal:5000 --key-env AOUDA_PLAN_KEY
 ```
 
 Exit `0` is nothing to change, `2` is changes, `77` is the key refused, `69` is the server unreachable. The fuller job is [A CI job](plan.md#a-ci-job-aouda-plan-on-every-pull-request).
@@ -190,9 +190,9 @@ AOUDA_TOKEN=$(cat secrets/ops.key) aouda whoami --server http://127.0.0.1:5000 -
 
 ```bash
 curl -s -X POST http://127.0.0.1:5000/api/databases/deposit/named-mutations/insert_quote/execute \
-  -H "Authorization: Bearer $(cat secrets/tullett-feeder.key)" \
-  -H "Content-Type: application/json" \
-  -d '{"args":{"ticker":"EQNR","px":301.5}}'
+ -H "Authorization: Bearer $(cat secrets/tullett-feeder.key)" \
+ -H "Content-Type: application/json" \
+ -d '{"args":{"ticker":"EQNR","px":301.5}}'
 ```
 
 A call the statements do not allow is `403 AUTH_POLICY_DENIED` with a `remedy` of `grant` on the admin listener. On the data plane, a named mutation the caller may not execute is `404 NAMED_MUTATION_NOT_FOUND`. `aouda policy explain --declaration declaration/aouda.json --as derive_auth/tullett-feeder --action execute --resource deposit/mutation/insert_quote` answers the same question offline.

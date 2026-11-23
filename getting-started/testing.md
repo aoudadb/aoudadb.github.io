@@ -58,7 +58,7 @@ This is **friction**. It breaks `dotnet test` self-sufficiency, complicates CI p
 ```csharp
 await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
 {
-    Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
 });
 
 // aouda is a fully functional Aouda server with auth enabled.
@@ -85,7 +85,7 @@ Add the `Aouda.Testing` package to your test project:
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Aouda.Testing" Version="0.1.0" />
+ <PackageReference Include="Aouda.Testing" Version="0.1.0" />
 </ItemGroup>
 ```
 
@@ -105,20 +105,20 @@ Add the `Aouda.Testing` package to your test project:
 The simplest case: a server with one database and no authentication.
 
 ```csharp
-await using var aouda = await AoudaTestServer.StartAsync();
+await using var aouda = await AoudaTestServer.StartAsync;
 
 // Verify the server is up
 var health = await aouda.HttpClient.GetAsync("/health");
-health.EnsureSuccessStatusCode();
+health.EnsureSuccessStatusCode;
 
 // Insert and query data via HTTP
 using var insertResponse = await aouda.HttpClient.PostAsJsonAsync(
-    "/api/databases/default/tables/orders/rows",
-    new { rows = new[] { new { id = 1, total = 99.99 } } });
+ "/api/databases/default/tables/orders/rows",
+ new { rows = new { new { id = 1, total = 99.99 } } });
 Assert.True(insertResponse.IsSuccessStatusCode);
 ```
 
-By default, `StartAsync()` creates one database named `"default"` with no authentication. Data is **ephemeral** — deleted when `DisposeAsync` is called.
+By default, `StartAsync` creates one database named `"default"` with no authentication. Data is **ephemeral** — deleted when `DisposeAsync` is called.
 
 - **`HttpClient`** — Pre-configured for the in-process server; use it for raw HTTP assertions.
 - **`ServerUrl`** — Base URL string (always `"http://localhost"` with TestHost).
@@ -131,12 +131,12 @@ By default, `StartAsync()` creates one database named `"default"` with no authen
 ```csharp
 await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
 {
-    Databases = [new TestDatabase("myapp")]
+ Databases = [new TestDatabase("myapp")]
 });
 
 // Use HttpClient directly for a no-auth database
 using var response = await aouda.HttpClient.GetAsync(
-    "/api/databases/myapp/tables/orders/query");
+ "/api/databases/myapp/tables/orders/query");
 ```
 
 ---
@@ -148,7 +148,7 @@ using var response = await aouda.HttpClient.GetAsync(
 ```csharp
 await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
 {
-    Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
 });
 ```
 
@@ -157,7 +157,7 @@ When `EnableAuth: true`, the database is linked to a Aouda auth database (`_auth
 ### Accessing the Keys
 
 ```csharp
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
 ```
 
 ### OIDC Authority for JWT Validation
@@ -176,7 +176,7 @@ string oidcAuthority = aouda.OidcAuthority("myapp");
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```csharp
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
 await adminClient.GetTable("products").InsertAsync(new { id = 1, name = "Widget", tenant_id = "acme" });
 ```
 
@@ -188,7 +188,7 @@ The anon client presents the `anonymous` role — same as an unauthenticated fro
 var anonClient = aouda.CreateAnonClient("myapp"); // anon key
 
 // Can access auth endpoints (signup, signin)
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
 ```
 
 ---
@@ -217,7 +217,7 @@ The most common test pattern: create a user, sign in, and get an `HttpClient` th
 
 ```csharp
 HttpClient aliceClient = await aouda.CreateUserHttpClientAsync(
-    "myapp", "alice@test.com", "Pass123!");
+ "myapp", "alice@test.com", "Pass123!");
 
 // All requests from aliceClient carry Alice's JWT
 var response = await aliceClient.GetAsync("/api/databases/myapp/tables/orders/query");
@@ -239,67 +239,67 @@ The only operations that go through the HTTP layer are the ones you are actually
 
 The most powerful pattern: test your entire application stack with Aouda as the real auth backend.
 
-Here is the standard setup for a .NET API gateway (`WebApplicationFactory`) that authenticates via Aouda Auth:
+Here is the standard setup for a.NET API gateway (`WebApplicationFactory`) that authenticates via Aouda Auth:
 
 ```csharp
 public class AuthControllerTests : IClassFixture<AoudaTestFixture>, IAsyncLifetime
 {
-    private readonly AoudaTestFixture _aouda;
-    private WebApplicationFactory<Program> _factory = null!;
-    private HttpClient _api = null!;
+ private readonly AoudaTestFixture _aouda;
+ private WebApplicationFactory<Program> _factory = null!;
+ private HttpClient _api = null!;
 
-    public AuthControllerTests(AoudaTestFixture aouda) => _aouda = aouda;
+ public AuthControllerTests(AoudaTestFixture aouda) => _aouda = aouda;
 
-    public async Task InitializeAsync()
-    {
-        _factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(b => b.ConfigureServices(services =>
-            {
-                // Override your application's Aouda connection settings
-                // to point at the in-process test server:
-                services.Configure<AoudaAuthConfig>(o =>
-                {
-                    o.ServerUrl    = _aouda.Server.ServerUrl;
-                    o.DatabaseName = "derive";
-                    o.ServiceKey   = _aouda.Server.ServiceKey("derive");
-                    o.Authority    = _aouda.Server.OidcAuthority("derive");
-                    o.Audience     = "_auth";
-                });
-            }));
+ public async Task InitializeAsync
+ {
+ _factory = new WebApplicationFactory<Program>
+.WithWebHostBuilder(b => b.ConfigureServices(services =>
+ {
+ // Override your application's Aouda connection settings
+ // to point at the in-process test server:
+ services.Configure<AoudaAuthConfig>(o =>
+ {
+ o.ServerUrl = _aouda.Server.ServerUrl;
+ o.DatabaseName = "derive";
+ o.ServiceKey = _aouda.Server.ServiceKey("derive");
+ o.Authority = _aouda.Server.OidcAuthority("derive");
+ o.Audience = "_auth";
+ });
+ }));
 
-        _api = _factory.CreateClient();
-    }
+ _api = _factory.CreateClient;
+ }
 
-    public async Task DisposeAsync()
-    {
-        _api.Dispose();
-        await _factory.DisposeAsync();
-    }
+ public async Task DisposeAsync
+ {
+ _api.Dispose;
+ await _factory.DisposeAsync;
+ }
 
-    [Fact]
-    public async Task Login_ValidCredentials_ReturnsTokens()
-    {
-        // Arrange: create a user in the in-process Aouda server
-        await _aouda.Server.CreateUserAsync("derive", "alice@test.com", "Pass123!");
+ [Fact]
+ public async Task Login_ValidCredentials_ReturnsTokens
+ {
+ // Arrange: create a user in the in-process Aouda server
+ await _aouda.Server.CreateUserAsync("derive", "alice@test.com", "Pass123!");
 
-        // Act: call your application's login endpoint (not Aouda's directly)
-        var loginResponse = await _api.PostAsJsonAsync("/auth/login", new
-        {
-            email = "alice@test.com",
-            password = "Pass123!"
-        });
+ // Act: call your application's login endpoint (not Aouda's directly)
+ var loginResponse = await _api.PostAsJsonAsync("/auth/login", new
+ {
+ email = "alice@test.com",
+ password = "Pass123!"
+ });
 
-        // Assert: your API returns tokens
-        loginResponse.EnsureSuccessStatusCode();
-        var body = await loginResponse.Content.ReadFromJsonAsync<LoginResult>();
-        Assert.NotNull(body?.AccessToken);
-    }
+ // Assert: your API returns tokens
+ loginResponse.EnsureSuccessStatusCode;
+ var body = await loginResponse.Content.ReadFromJsonAsync<LoginResult>;
+ Assert.NotNull(body?.AccessToken);
+ }
 }
 ```
 
 **Derive / gateway pattern:** If your app talks to Aouda via a base URL, inject the test server's base address (from `AoudaTestServer.ServerUrl` and your factory's `HttpClient.BaseAddress`) through configuration or `WebHostBuilder` overrides so the same code paths run in tests as in production.
 
-Exact JWT and OIDC wiring for .NET and TypeScript clients is covered in [Getting-Started-Auth.md](auth.md); this guide only ensures the **Aouda side** of the contract is available inside `dotnet test`.
+Exact JWT and OIDC wiring for.NET and TypeScript clients is covered in [Getting-Started-Auth.md](auth.md); this guide only ensures the **Aouda side** of the contract is available inside `dotnet test`.
 
 ---
 
@@ -316,24 +316,24 @@ using Xunit;
 
 public sealed class MyAoudaFixture : AoudaTestFixture, IAsyncLifetime
 {
-    protected override AoudaTestServerOptions Options => new()
-    {
-        Databases = [new TestDatabase("myapp", EnableAuth: true)]
-    };
+ protected override AoudaTestServerOptions Options => new
+ {
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ };
 }
 
 public class ApiTests : IClassFixture<MyAoudaFixture>
 {
-    private readonly MyAoudaFixture _fixture;
+ private readonly MyAoudaFixture _fixture;
 
-    public ApiTests(MyAoudaFixture fixture) => _fixture = fixture;
+ public ApiTests(MyAoudaFixture fixture) => _fixture = fixture;
 
-    [Fact]
-    public async Task Health_ok()
-    {
-        var response = await _fixture.Server.HttpClient.GetAsync("/health");
-        response.EnsureSuccessStatusCode();
-    }
+ [Fact]
+ public async Task Health_ok
+ {
+ var response = await _fixture.Server.HttpClient.GetAsync("/health");
+ response.EnsureSuccessStatusCode;
+ }
 }
 ```
 
@@ -348,17 +348,17 @@ public class AoudaCollection : ICollectionFixture<MyAoudaFixture> { }
 [Collection("Aouda")]
 public class OrderTests
 {
-    private readonly MyAoudaFixture _fixture;
-    public OrderTests(MyAoudaFixture fixture) => _fixture = fixture;
-    // ...
+ private readonly MyAoudaFixture _fixture;
+ public OrderTests(MyAoudaFixture fixture) => _fixture = fixture;
+ //...
 }
 
 [Collection("Aouda")]
 public class ProductTests
 {
-    private readonly MyAoudaFixture _fixture;
-    public ProductTests(MyAoudaFixture fixture) => _fixture = fixture;
-    // ...
+ private readonly MyAoudaFixture _fixture;
+ public ProductTests(MyAoudaFixture fixture) => _fixture = fixture;
+ //...
 }
 ```
 
@@ -369,24 +369,24 @@ public class ProductTests
 ```csharp
 public class AuthFixture : AoudaTestFixture, IAsyncLifetime
 {
-    protected override AoudaTestServerOptions Options => new()
-    {
-        Databases = [new TestDatabase("myapp", EnableAuth: true)]
-    };
+ protected override AoudaTestServerOptions Options => new
+ {
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ };
 }
 
 public class AuthTests : IClassFixture<AuthFixture>
 {
-    private readonly AuthFixture _fixture;
-    public AuthTests(AuthFixture fixture) => _fixture = fixture;
+ private readonly AuthFixture _fixture;
+ public AuthTests(AuthFixture fixture) => _fixture = fixture;
 
-    [Fact]
-    public async Task Signin_ValidUser_ReturnsJwt()
-    {
-        await _fixture.Server.CreateUserAsync("myapp", "test@example.com", "Pass123!");
-        string token = await _fixture.Server.SignInAsync("myapp", "test@example.com", "Pass123!");
-        Assert.False(string.IsNullOrEmpty(token));
-    }
+ [Fact]
+ public async Task Signin_ValidUser_ReturnsJwt
+ {
+ await _fixture.Server.CreateUserAsync("myapp", "test@example.com", "Pass123!");
+ string token = await _fixture.Server.SignInAsync("myapp", "test@example.com", "Pass123!");
+ Assert.False(string.IsNullOrEmpty(token));
+ }
 }
 ```
 
@@ -410,19 +410,19 @@ using NUnit.Framework;
 [TestFixture]
 public class OrderTests : AoudaNUnitFixture
 {
-    protected override AoudaTestServerOptions Options => new()
-    {
-        Databases = [new TestDatabase("myapp", EnableAuth: true)]
-    };
+ protected override AoudaTestServerOptions Options => new
+ {
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ };
 
-    [Test]
-    public async Task Insert_Order_IsQueryable()
-    {
-        var adminClient = Server.CreateClient("myapp");
-        await adminClient.GetTable("orders").InsertAsync(new { id = 1, amount = 100.0m });
-        var rows = await adminClient.GetTable("orders").ToListAsync();
-        Assert.That(rows, Has.Count.GreaterThanOrEqualTo(1));
-    }
+ [Test]
+ public async Task Insert_Order_IsQueryable
+ {
+ var adminClient = Server.CreateClient("myapp");
+ await adminClient.GetTable("orders").InsertAsync(new { id = 1, amount = 100.0m });
+ var rows = await adminClient.GetTable("orders").ToListAsync;
+ Assert.That(rows, Has.Count.GreaterThanOrEqualTo(1));
+ }
 }
 ```
 
@@ -436,19 +436,19 @@ For assembly-wide or namespace-wide shared setup, wrap `AoudaNUnitFixture` in a 
 [SetUpFixture]
 public class AoudaSetup : AoudaNUnitFixture
 {
-    protected override AoudaTestServerOptions Options => new()
-    {
-        Databases = [new TestDatabase("myapp", EnableAuth: true)]
-    };
+ protected override AoudaTestServerOptions Options => new
+ {
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ };
 
-    public static AoudaTestServer SharedServer { get; private set; } = null!;
+ public static AoudaTestServer SharedServer { get; private set; } = null!;
 
-    [OneTimeSetUp]
-    public new async Task SetUpAsync()
-    {
-        await base.SetUpAsync();
-        SharedServer = Server;
-    }
+ [OneTimeSetUp]
+ public new async Task SetUpAsync
+ {
+ await base.SetUpAsync;
+ SharedServer = Server;
+ }
 }
 ```
 
@@ -468,27 +468,27 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 [TestClass]
 public sealed class AoudaMstestTests : AoudaMSTestFixture
 {
-    [ClassInitialize]
-    public static async Task ClassInit(TestContext _)
-    {
-        await StartServerAsync(new AoudaTestServerOptions
-        {
-            Databases = [new TestDatabase("myapp", EnableAuth: true)]
-        });
-    }
+ [ClassInitialize]
+ public static async Task ClassInit(TestContext _)
+ {
+ await StartServerAsync(new AoudaTestServerOptions
+ {
+ Databases = [new TestDatabase("myapp", EnableAuth: true)]
+ });
+ }
 
-    [ClassCleanup]
-    public static async Task ClassCleanup()
-    {
-        await StopServerAsync();
-    }
+ [ClassCleanup]
+ public static async Task ClassCleanup
+ {
+ await StopServerAsync;
+ }
 
-    [TestMethod]
-    public async Task Health_ok()
-    {
-        var response = await Server.HttpClient.GetAsync("/health");
-        Assert.AreEqual(System.Net.HttpStatusCode.OK, response.StatusCode);
-    }
+ [TestMethod]
+ public async Task Health_ok
+ {
+ var response = await Server.HttpClient.GetAsync("/health");
+ Assert.AreEqual(System.Net.HttpStatusCode.OK, response.StatusCode);
+ }
 }
 ```
 
@@ -501,16 +501,16 @@ public sealed class AoudaMstestTests : AoudaMSTestFixture
 ```csharp
 await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
 {
-    Databases =
-    [
-        new TestDatabase("orders",   EnableAuth: true),
-        new TestDatabase("products", EnableAuth: true),
-        new TestDatabase("analytics")              // no auth needed
-    ]
+ Databases =
+ [
+ new TestDatabase("orders", EnableAuth: true),
+ new TestDatabase("products", EnableAuth: true),
+ new TestDatabase("analytics") // no auth needed
+ ]
 });
 
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
-string ordersKey   = aouda.ServiceKey("orders");
+// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
+string ordersKey = aouda.ServiceKey("orders");
 string productsKey = aouda.ServiceKey("products");
 
 // Analytics is open — use HttpClient directly (no auth key)
@@ -524,13 +524,13 @@ When your application uses Pattern C (Standalone Auth Service) or has multiple d
 ```csharp
 await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
 {
-    Databases =
-    [
-        // First database with auth creates _auth automatically
-        new TestDatabase("orders_db",   EnableAuth: true),
-        // Second database with auth links to the same _auth
-        new TestDatabase("products_db", EnableAuth: true),
-    ]
+ Databases =
+ [
+ // First database with auth creates _auth automatically
+ new TestDatabase("orders_db", EnableAuth: true),
+ // Second database with auth links to the same _auth
+ new TestDatabase("products_db", EnableAuth: true),
+ ]
 });
 
 // Same users, same sessions across both databases (single _auth database)
@@ -561,36 +561,36 @@ If you use `ICollectionFixture` (shared server across classes), xUnit serializes
 Rare scenario: your test must restart the server and verify that data survived. Use `DataPath`:
 
 ```csharp
-var dataPath = Path.Combine(Path.GetTempPath(), $"aouda_test_{Guid.NewGuid():N}");
+var dataPath = Path.Combine(Path.GetTempPath, $"aouda_test_{Guid.NewGuid:N}");
 try
 {
-    // First session — write data
-    await using (var aouda = await AoudaTestServer.StartAsync(new()
-    {
-        DataPath = dataPath,
-        Databases = [new TestDatabase("myapp")]
-    }))
-    {
-        await aouda.HttpClient.PostAsJsonAsync(
-            "/api/databases/myapp/tables/settings/rows",
-            new { rows = new[] { new { key = "version", value = "1" } } });
-    }
+ // First session — write data
+ await using (var aouda = await AoudaTestServer.StartAsync(new
+ {
+ DataPath = dataPath,
+ Databases = [new TestDatabase("myapp")]
+ }))
+ {
+ await aouda.HttpClient.PostAsJsonAsync(
+ "/api/databases/myapp/tables/settings/rows",
+ new { rows = new { new { key = "version", value = "1" } } });
+ }
 
-    // Second session — verify data survived
-    await using (var aouda = await AoudaTestServer.StartAsync(new()
-    {
-        DataPath = dataPath,
-        Databases = [new TestDatabase("myapp")]
-    }))
-    {
-        var response = await aouda.HttpClient.GetAsync(
-            "/api/databases/myapp/tables/settings/query");
-        Assert.True(response.IsSuccessStatusCode);
-    }
+ // Second session — verify data survived
+ await using (var aouda = await AoudaTestServer.StartAsync(new
+ {
+ DataPath = dataPath,
+ Databases = [new TestDatabase("myapp")]
+ }))
+ {
+ var response = await aouda.HttpClient.GetAsync(
+ "/api/databases/myapp/tables/settings/query");
+ Assert.True(response.IsSuccessStatusCode);
+ }
 }
 finally
 {
-    Directory.Delete(dataPath, recursive: true);
+ Directory.Delete(dataPath, recursive: true);
 }
 ```
 
@@ -613,10 +613,10 @@ There is no requirement for:
 ```yaml
 # GitHub Actions — works as-is
 - name: Run tests
-  run: dotnet test --no-build --verbosity minimal
+ run: dotnet test --no-build --verbosity minimal
 ```
 
-Keys generated by `AoudaTestServer` are never printed to stdout or logs. They are only accessible via `ServiceKey()` and `AnonKey()` within the test code.
+Keys generated by `AoudaTestServer` are never printed to stdout or logs. They are only accessible via `ServiceKey` and `AnonKey` within the test code.
 
 ---
 
@@ -628,16 +628,16 @@ Keys generated by `AoudaTestServer` are never printed to stdout or logs. They ar
 Do your tests exercise Aouda Auth flows?
 │
 ├── No (data operations only, no auth)
-│   ├── Operations are purely in-memory, process-local?
-│   │   └── YES → Aouda.Embedded (no HTTP needed)
-│   └── Operations go through HTTP / test gateway integration?
-│       └── YES → Aouda.Testing (AoudaTestServer without auth)
+│ ├── Operations are purely in-memory, process-local?
+│ │ └── YES → Aouda.Embedded (no HTTP needed)
+│ └── Operations go through HTTP / test gateway integration?
+│ └── YES → Aouda.Testing (AoudaTestServer without auth)
 │
 └── Yes (auth flows involved)
-    ├── Testing your own business logic that CALLS auth methods?
-    │   └── Mock IAoudaAuthServiceClient or similar → unit test, no Aouda needed
-    └── Testing how your application INTEGRATES with Aouda Auth?
-        └── Aouda.Testing (AoudaTestServer with EnableAuth: true)
+ ├── Testing your own business logic that CALLS auth methods?
+ │ └── Mock IAoudaAuthServiceClient or similar → unit test, no Aouda needed
+ └── Testing how your application INTEGRATES with Aouda Auth?
+ └── Aouda.Testing (AoudaTestServer with EnableAuth: true)
 ```
 
 ### Comparison Table
@@ -661,12 +661,12 @@ A well-structured test suite for a Aouda application typically has two layers:
 ```
 MyApp.Tests/
 ├── Unit/
-│   ├── OrderServiceTests.cs        ← mock Aouda client, test business logic
-│   └── AuthMiddlewareTests.cs      ← mock JWT validation, test middleware logic
+│ ├── OrderServiceTests.cs ← mock Aouda client, test business logic
+│ └── AuthMiddlewareTests.cs ← mock JWT validation, test middleware logic
 └── Integration/
-    ├── AoudaFixture.cs             ← custom AoudaTestFixture for the app
-    ├── AuthControllerTests.cs      ← Aouda.Testing + WebApplicationFactory
-    └── DataApiTests.cs             ← Aouda.Testing for real data with auth
+ ├── AoudaFixture.cs ← custom AoudaTestFixture for the app
+ ├── AuthControllerTests.cs ← Aouda.Testing + WebApplicationFactory
+ └── DataApiTests.cs ← Aouda.Testing for real data with auth
 ```
 
 Unit tests mock Aouda entirely — they are fast and test your application logic in isolation. Integration tests use `Aouda.Testing` to test that your application actually works with a real Aouda server and real auth. Both layers complement each other.

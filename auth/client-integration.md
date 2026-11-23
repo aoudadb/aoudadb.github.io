@@ -10,9 +10,9 @@ Both SDKs take **one credential**: a key, or a session. There is no second optio
 
 ## One option
 
-**.NET.** `Credential = AoudaCredential.Key(key)` or `AoudaCredential.Session(...)`. `WhoAmIAsync()` calls `GET /api/auth/whoami` for the client's database. `WhoAmIAsync(null)` asks for the whole policy.
+**.NET.** `Credential = AoudaCredential.Key(key)` or `AoudaCredential.Session(...)`. `WhoAmIAsync` calls `GET /api/auth/whoami` for the client's database. `WhoAmIAsync(null)` asks for the whole policy.
 
-**TypeScript.** `apiKey` **or** `session`, never both. `apiKey` is checked at construction (shape, checksum, retired format) before any request, and the error names the reason, never the value. `client.whoami()` is the same call.
+**TypeScript.** `apiKey` **or** `session`, never both. `apiKey` is checked at construction (shape, checksum, retired format) before any request, and the error names the reason, never the value. `client.whoami` is the same call.
 
 A key is not refreshed. A session is. Four factories cover how you obtained the credential: a key string, a key file, a password sign-in, an OIDC exchange. Pick the one that matches what you hold.
 
@@ -32,7 +32,7 @@ There is no per-call credential on a shared client, and no second header. A shar
 
 ## The access and declaration clients
 
-`client.access` (TypeScript) and the .NET access client call the principals, roles, signup and credential routes. A write to an object the declaration file owns throws `AoudaDeclaredInConfigurationException` / the conflict error with `DECLARED_IN_CONFIGURATION`.
+`client.access` (TypeScript) and the.NET access client call the principals, roles, signup and credential routes. A write to an object the declaration file owns throws `AoudaDeclaredInConfigurationException` / the conflict error with `DECLARED_IN_CONFIGURATION`.
 
 `client.declaration` reads `GET /api/admin/declaration` and the export. Both need `manage` on `server`.
 

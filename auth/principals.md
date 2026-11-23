@@ -50,7 +50,7 @@ An unlinked database's anonymous visitor is `_serverauth/anonymous`, whose polic
 Self-signup creates a principal in the governing auth database (`source: signup`, named by the email, credential: the password). What it may do is that auth database's `signup` setting:
 
 ```json
-{ "enabled": false, "roles": [], "statements": [] }
+{ "enabled": false, "roles":, "statements": }
 ```
 
 That is the default. **A signed-up principal can do nothing until the application says what.** Closing signup stops new signups. It does not revoke principals that already signed up; disable those principals, or take the statements away.

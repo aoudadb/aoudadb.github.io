@@ -65,23 +65,23 @@ uses the platform's `WebSocket` and no longer ships the `ws` package; on an olde
 (`TextDecoder`, `crypto.subtle`, `AbortSignal.timeout`). Install it as on the web; Metro bundles it as it is. One thing the app
 supplies:
 
-- **`crypto.getRandomValues`, for `createPkcePair()`** (native sign-in): install
-  [`react-native-get-random-values`](https://github.com/LinusU/react-native-get-random-values) (or use `expo-crypto`) and import it
-  once, before `@aouda/client`. Without it the pair is refused with an error that says so — the verifier is never made from
-  `Math.random`. The S256 hash needs nothing: where `crypto.subtle` is missing, the client hashes in JavaScript.
+- **`crypto.getRandomValues`, for `createPkcePair`** (native sign-in): install
+ [`react-native-get-random-values`](https://github.com/LinusU/react-native-get-random-values) (or use `expo-crypto`) and import it
+ once, before `@aouda/client`. Without it the pair is refused with an error that says so — the verifier is never made from
+ `Math.random`. The S256 hash needs nothing: where `crypto.subtle` is missing, the client hashes in JavaScript.
 
 ```typescript
 import "react-native-get-random-values";
 import { AoudaClient } from "@aouda/client";
 
 const client = new AoudaClient({
-  serverUrl: "https://db.example.com",
-  database: "myapp",
-  // Optional on React Native, which has both globally — pass your own to pin certificates or to test:
-  fetch: pinnedFetch,
-  streaming: { wsFactory: (url) => new WebSocket(url) },
+ serverUrl: "https://db.example.com",
+ database: "myapp",
+ // Optional on React Native, which has both globally — pass your own to pin certificates or to test:
+ fetch: pinnedFetch,
+ streaming: { wsFactory: (url) => new WebSocket(url) },
 });
-client.auth.onTokensChanged((t) => SecureStore.setItemAsync("aouda", JSON.stringify(t)));   // keep the rotated refresh token
+client.auth.onTokensChanged((t) => SecureStore.setItemAsync("aouda", JSON.stringify(t))); // keep the rotated refresh token
 ```
 
 `fetch` (every HTTP call: data, auth, the long-poll fallback) and `streaming.wsFactory` (the streaming socket) work on every
@@ -101,76 +101,76 @@ callbacks there. CI runs a smoke on Hermes (sign in, a named query, a subscripti
 import { AoudaClient } from '@aouda/client';
 
 const client = new AoudaClient({
-  serverUrl: 'http://localhost:5000',
-  database: 'mydb',
+ serverUrl: 'http://localhost:5000',
+ database: 'mydb',
 });
-await client.connect();
+await client.connect;
 ```
 
 ### Consistency token (read-your-writes)
 
-The client captures `X-Aouda-Token` after every data-plane response and presents it on the next request. The default store is **in-memory per instance**. Recreating the client without sharing `consistencyTokenStore` **loses** read-your-writes. Pin a token with `.atLeast(token)`; fetch this node's current token with `getConsistencyToken()`. Full caveats: [Freshness](../guides/freshness.md).
+The client captures `X-Aouda-Token` after every data-plane response and presents it on the next request. The default store is **in-memory per instance**. Recreating the client without sharing `consistencyTokenStore` **loses** read-your-writes. Pin a token with `.atLeast(token)`; fetch this node's current token with `getConsistencyToken`. Full caveats: [Freshness](../guides/freshness.md).
 
 ```typescript
 import { AoudaClient, MemoryConsistencyTokenStore } from '@aouda/client';
 
-const store = new MemoryConsistencyTokenStore(); // share across instances / tabs
+const store = new MemoryConsistencyTokenStore; // share across instances / tabs
 const client = new AoudaClient({
-  serverUrl: 'http://localhost:5000',
-  database: 'mydb',
-  consistencyTokenStore: store,
+ serverUrl: 'http://localhost:5000',
+ database: 'mydb',
+ consistencyTokenStore: store,
 });
-await client.connect();
+await client.connect;
 
 await client.table('orders').insert({ id: 1, status: 'open' });
-const rows = await client.table('orders').atLeast(store.get('mydb')!).execute();
-const current = await client.getConsistencyToken();
+const rows = await client.table('orders').atLeast(store.get('mydb')!).execute;
+const current = await client.getConsistencyToken;
 ```
 
 ### The server's clock (**NativeClients, 0.4.0**)
 
 Every response's `Date` header tells the client how far the server's clock is from the device's. `client.serverClockOffsetMs`
-holds the last difference (undefined before the first response; about one second of resolution) and `client.serverNow()`
+holds the last difference (undefined before the first response; about one second of resolution) and `client.serverNow`
 applies it. Use it to judge a lease the server stamped — a `derived: { serverTime: "write" }` column such as `lastSeen` —
 against the server's clock, not the device's:
 
 ```typescript
-const online = rows.filter((r) => client.serverNow().getTime() - Date.parse(r.lastSeen) < 75_000);
+const online = rows.filter((r) => client.serverNow.getTime - Date.parse(r.lastSeen) < 75_000);
 ```
 
-`namedMutations.execute()` returns `op: "upsert"` (and `rowsAffected` = inserted + replaced) for an upsert, and `returning`
+`namedMutations.execute` returns `op: "upsert"` (and `rowsAffected` = inserted + replaced) for an upsert, and `returning`
 rows for `insert` and `upsert` definitions that declare them (**NativeClients, 0.4.0**).
 
 ### With Authentication
 
 ```typescript
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+// client.whoami — apiKey is an aouda_ key, or session, never both.
 const client = new AoudaClient({
-  serverUrl: 'http://localhost:5000',
-  database: 'mydb',
+ serverUrl: 'http://localhost:5000',
+ database: 'mydb',
 });
-await client.connect();
+await client.connect;
 await client.auth.signIn('user@example.com', 'secret', { deviceInfo: 'Ann’s laptop — MyApp' });
 
-// Sessions are devices (NativeClients, 0.4.0): signOut() ends this one; listSessions / revokeSession manage the others
+// Sessions are devices (NativeClients, 0.4.0): signOut ends this one; listSessions / revokeSession manage the others
 await client.auth.signOut({ scope: 'others' });
-const devices = await client.auth.listSessions();
+const devices = await client.auth.listSessions;
 
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+// client.whoami — apiKey is an aouda_ key, or session, never both.
 const backend = new AoudaClient({
-  serverUrl: 'http://localhost:5000',
-  database: 'mydb',
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+ serverUrl: 'http://localhost:5000',
+ database: 'mydb',
+// client.whoami — apiKey is an aouda_ key, or session, never both.
 });
-await backend.connect();
+await backend.connect;
 
 // A server key, for server/admin calls: the same option
 const admin = new AoudaClient({
-  serverUrl: 'http://localhost:5000',
-  database: 'mydb',
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+ serverUrl: 'http://localhost:5000',
+ database: 'mydb',
+// client.whoami — apiKey is an aouda_ key, or session, never both.
 });
-await admin.connect();
+await admin.connect;
 ```
 
 **Keeping tokens across restarts** (**NativeClients, 0.4.0**): `client.auth.onTokensChanged(({ accessToken, refreshToken,
@@ -179,7 +179,7 @@ reason }) => …)` is called on sign-in, on every refresh (automatic ones too) a
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-040).
 
-**Native sign-in through the browser** (**NativeClients, 0.4.0**): `createPkcePair()` (needs `crypto.getRandomValues` — on
+**Native sign-in through the browser** (**NativeClients, 0.4.0**): `createPkcePair` (needs `crypto.getRandomValues` — on
 React Native, `react-native-get-random-values`; see [React Native](#react-native-nativeclients-040)), then
 `web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state })` in the signed-in web front and
 `app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
@@ -207,12 +207,12 @@ the error as "try again later" drops or re-buffers every row while the key is ba
 
 ```typescript
 const client = new AoudaClient({
-  serverUrl, database, apiKey,
-  authFailurePolicy: {
-    failFast: true,                       // throw AoudaAuthenticationFatalError (an AoudaAuthenticationError; `cause` is the original)
-    sustainedAfter: 3,                    // default 3
-    onSustained: (info) => alert(info),   // once per streak: { errorCode, statusCode, consecutiveFailures, firstSeenAt, lastSeenAt, requestId }
-  },
+ serverUrl, database, apiKey,
+ authFailurePolicy: {
+ failFast: true, // throw AoudaAuthenticationFatalError (an AoudaAuthenticationError; `cause` is the original)
+ sustainedAfter: 3, // default 3
+ onSustained: (info) => alert(info), // once per streak: { errorCode, statusCode, consecutiveFailures, firstSeenAt, lastSeenAt, requestId }
+ },
 });
 ```
 
@@ -228,7 +228,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 of an auth-admin, browser-tier or scoped key). In `@aouda/client` **0.12.0** (npm, 2026-11-12) the `message` of an HTTP 401 or 403 with one of those codes (and
 `AUTH_API_KEY_REQUIRED`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `UNAUTHORIZED`, `AUTH_TOKEN_INVALID` / `_EXPIRED` / `_REVOKED`, `AUTHORIZATION_DENIED`) then carries
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400, ...) keeps the
+kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400,...) keeps the
 server's message exactly. The `/ready` reason codes `schema_pending` and `schema_drift` are documented in the [HTTP API](../reference/http-api.md#get-ready).
 
 **Named queries and mutations need an `execute` statement (**BL-1464, 0.16.0**).** The client sends named-artifact calls as before. A `403
@@ -241,8 +241,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```ts
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
-await client.auth.deleteEntitlement(userId, e.id);                                                                 // -> void
+// client.whoami — apiKey is an aouda_ key, or session, never both.
+await client.auth.deleteEntitlement(userId, e.id); // -> void
 ```
 
 | Type | Shape |
@@ -260,54 +260,54 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```typescript
 const users = await client.table('users')
-  .where('active', '=', true)
-  .orderBy('name', 'asc')
-  .limit(10)
-  .execute();
+.where('active', '=', true)
+.orderBy('name', 'asc')
+.limit(10)
+.execute;
 ```
 
 ### Projection
 
-`select()` takes column names as rest arguments (not an array):
+`select` takes column names as rest arguments (not an array):
 
 ```typescript
 const names = await client.table('users')
-  .select('name', 'email')
-  .execute();
+.select('name', 'email')
+.execute;
 ```
 
 ### Pagination
 
 ```typescript
 const page2 = await client.table('users')
-  .orderBy('id', 'asc')
-  .limit(20)
-  .offset(20)
-  .execute();
+.orderBy('id', 'asc')
+.limit(20)
+.offset(20)
+.execute;
 ```
 
 ### Count
 
 ```typescript
 const count = await client.table('users')
-  .where('active', '=', true)
-  .count();
+.where('active', '=', true)
+.count;
 ```
 
-`count()` posts to `/query/count`: the server counts and returns only the number (**architecture review, 0.3.0**).
+`count` posts to `/query/count`: the server counts and returns only the number (**architecture review, 0.3.0**).
 
-### Reading across partitions — `withCrossPartitionAccess()`
+### Reading across partitions — `withCrossPartitionAccess`
 
 A table with a partition key refuses a read that names no partition (`PARTITION_FILTER_REQUIRED`), because it would scan every
-partition. `withCrossPartitionAccess()` asks the server to skip that guard for the query, and it works on `execute()`, on `count()`
-and on `subscribe()` (**BL-1227, 0.9.0**; until this train it reached `execute()` and `count()` only, and `subscribe()` had no way to send it).
+partition. `withCrossPartitionAccess` asks the server to skip that guard for the query, and it works on `execute`, on `count`
+and on `subscribe` (**BL-1227, 0.9.0**; until this train it reached `execute` and `count` only, and `subscribe` had no way to send it).
 
 ```typescript
 // A trusted backend reads open orders across every partition
 const open = await client.table('orders')
-  .where('status', '=', 'open')
-  .withCrossPartitionAccess()
-  .execute();
+.where('status', '=', 'open')
+.withCrossPartitionAccess
+.execute;
 ```
 
 **The flag is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: what the query returns is what
@@ -337,10 +337,10 @@ The **data-plane** listener (the browser tier) ignores the flag. For subscriptio
 .where('name', 'like', 'A%')
 .where('email', 'isNull')
 .where('email', 'isNotNull')
-.where('age', 'between', [18, 65])  // two-element [min, max] tuple
+.where('age', 'between', [18, 65]) // two-element [min, max] tuple
 ```
 
-Multiple `.where()` calls are combined with AND at the top level.
+Multiple `.where` calls are combined with AND at the top level.
 
 `in`, `notIn`, and `like` are wire operators the engine evaluates. `isNull`, `isNotNull`, and `between`
 are client-side spellings the builder desugars before the request leaves the process — `eq null`,
@@ -350,48 +350,48 @@ are client-side spellings the builder desugars before the request leaves the pro
 
 - `%` matches any sequence of characters including none; `_` matches exactly one.
 - `\` escapes `%`, `_`, or `\` itself. A pattern ending in a lone `\`, or escaping anything else, is a
-  `400` — it is never reinterpreted as a literal.
+ `400` — it is never reinterpreted as a literal.
 - Matching is **ordinal and case-sensitive**, the same as `=` on a String column. Upper- or lower-case
-  both the column and the pattern if you need a case-insensitive search.
+ both the column and the pattern if you need a case-insensitive search.
 - A null column value never matches, not even `'%'`.
 - Strip user-supplied wildcards before wrapping, or a search box lets callers write their own patterns:
 
 ```ts
 const safe = userInput.replace(/[%_\\]/g, '');
-const { rows } = await client.table('instruments').where('searchText', 'like', `%${safe}%`).toList();
+const { rows } = await client.table('instruments').where('searchText', 'like', `%${safe}%`).toList;
 ```
 
 `like` does not satisfy the partition-filter rule and is not index-accelerated — it scans the column.
 
 ### Nested Groups (OR inside AND)
 
-Use `whereGroup(fn)` with a `WhereGroupBuilder` for nested boolean logic. Inside the group, `where()` ANDs predicates and `orWhere()` ORs them:
+Use `whereGroup(fn)` with a `WhereGroupBuilder` for nested boolean logic. Inside the group, `where` ANDs predicates and `orWhere` ORs them:
 
 ```typescript
 // Matches: active=true AND (role='admin' OR role='owner')
 const results = await client.table('users')
-  .where('active', '=', true)
-  .whereGroup(g => g
-    .where('role', '=', 'admin')
-    .orWhere('role', '=', 'owner')
-  )
-  .execute();
+.where('active', '=', true)
+.whereGroup(g => g
+.where('role', '=', 'admin')
+.orWhere('role', '=', 'owner')
+)
+.execute;
 ```
 
-For deeper nesting, use `subgroup()` inside a `WhereGroupBuilder`:
+For deeper nesting, use `subgroup` inside a `WhereGroupBuilder`:
 
 ```typescript
 // Matches: status='active' AND ((role='admin' AND region='us') OR tier='enterprise')
 const results = await client.table('users')
-  .where('status', '=', 'active')
-  .whereGroup(g => g
-    .subgroup(inner => inner
-      .where('role', '=', 'admin')
-      .where('region', '=', 'us')
-    )
-    .orWhere('tier', '=', 'enterprise')
-  )
-  .execute();
+.where('status', '=', 'active')
+.whereGroup(g => g
+.subgroup(inner => inner
+.where('role', '=', 'admin')
+.where('region', '=', 'us')
+)
+.orWhere('tier', '=', 'enterprise')
+)
+.execute;
 ```
 
 ---
@@ -406,44 +406,44 @@ Join methods take `(rightTable, leftColumn, rightColumn)` as positional string a
 
 ```typescript
 const orders = await client.table('orders')
-  .join('customers', 'customerId', 'id')
-  .select('orders.id', 'customers.name', 'orders.total')
-  .where('orders.total', '>', 100)
-  .orderBy('orders.total', 'desc')
-  .limit(50)
-  .execute();
+.join('customers', 'customerId', 'id')
+.select('orders.id', 'customers.name', 'orders.total')
+.where('orders.total', '>', 100)
+.orderBy('orders.total', 'desc')
+.limit(50)
+.execute;
 ```
 
 ### Left Join
 
 ```typescript
 const all = await client.table('customers')
-  .leftJoin('orders', 'id', 'customerId')
-  .execute();
+.leftJoin('orders', 'id', 'customerId')
+.execute;
 ```
 
 ### Right Join
 
 ```typescript
 const result = await client.table('orders')
-  .rightJoin('products', 'productId', 'id')
-  .execute();
+.rightJoin('products', 'productId', 'id')
+.execute;
 ```
 
 ### Full Outer Join
 
 ```typescript
 const result = await client.table('students')
-  .fullJoin('enrollments', 'id', 'studentId')
-  .execute();
+.fullJoin('enrollments', 'id', 'studentId')
+.execute;
 ```
 
 ### Cross Join
 
 ```typescript
 const result = await client.table('colors')
-  .crossJoin('sizes')
-  .execute();
+.crossJoin('sizes')
+.execute;
 ```
 
 ### Multi-Column Join Keys
@@ -452,25 +452,25 @@ Pass two parallel string arrays — left columns and right columns must have equ
 
 ```typescript
 const result = await client.table('orders')
-  .join('shipments', ['orderId', 'warehouseId'], ['orderId', 'warehouseId'])
-  .execute();
+.join('shipments', ['orderId', 'warehouseId'], ['orderId', 'warehouseId'])
+.execute;
 ```
 
 ### Chained Joins (up to 8 tables)
 
 ```typescript
 const result = await client.table('orders')
-  .join('customers', 'customerId', 'id')
-  .join('products', 'orders.productId', 'id')
-  .join('categories', 'products.categoryId', 'id')
-  .select('orders.id', 'customers.name', 'products.name', 'categories.name')
-  .execute();
+.join('customers', 'customerId', 'id')
+.join('products', 'orders.productId', 'id')
+.join('categories', 'products.categoryId', 'id')
+.select('orders.id', 'customers.name', 'products.name', 'categories.name')
+.execute;
 ```
 
 ### Post-Join Operations
 
 All standard operations work after joins:
-- `select('col1', 'col2', ...)` — project specific columns (rest args, not an array)
+- `select('col1', 'col2',...)` — project specific columns (rest args, not an array)
 - `where(column, op, value)` — filter on any column (use `'table.column'` for prefixed names)
 - `orderBy(column, direction)` — sort on any column
 - `limit(n)` / `offset(n)` — pagination
@@ -478,16 +478,16 @@ All standard operations work after joins:
 
 ### Filtering a joined table — `joinWhere` (**0.3.0**)
 
-`where()` filters the base table. `joinWhere(column, op, value)` filters the **last** join's table, by that table's column
+`where` filters the base table. `joinWhere(column, op, value)` filters the **last** join's table, by that table's column
 names, before it joins: a joined row it rejects takes part in no match (an inner join drops it, a left join answers the base
 row with nulls on that side). The server applies your row- and partition-level security for each joined table the same way,
 so a join onto a table you may read only part of is answered with that part.
 
 ```typescript
 const euOrders = await client.table('orders')
-  .leftJoin('owners', 'ownerId', 'id')
-  .joinWhere('region', '=', 'EU')
-  .execute();
+.leftJoin('owners', 'ownerId', 'id')
+.joinWhere('region', '=', 'EU')
+.execute;
 ```
 
 ---
@@ -495,7 +495,7 @@ const euOrders = await client.table('orders')
 ## 6) Aggregates
 
 (**ColumnarRead S16, 0.3.0.** Before this, `sum` / `min` / `max` / `groupBy` sent a field the server ignored, and
-`execute()` returned the table's plain rows. They now send the query message's `aggregates` / `groupBy`; see
+`execute` returned the table's plain rows. They now send the query message's `aggregates` / `groupBy`; see
 [`POST …/query`](../reference/http-api.md#post-apidatabasesdbquery).)
 
 ### Simple Aggregates
@@ -504,31 +504,31 @@ Without `groupBy` the answer is one row: one column per aggregate, named by its 
 
 ```typescript
 const { rows: [totals] } = await client.table('orders')
-  .countRows('n')                 // COUNT(*)
-  .sum('amount', 'total')         // optional alias names the output column
-  .min('createdAt')
-  .max('price')
-  .avg('price')
-  .countValues('discount')        // COUNT(discount): non-null values
-  .countDistinct('customerId')
-  .execute();
+.countRows('n') // COUNT(*)
+.sum('amount', 'total') // optional alias names the output column
+.min('createdAt')
+.max('price')
+.avg('price')
+.countValues('discount') // COUNT(discount): non-null values
+.countDistinct('customerId')
+.execute;
 ```
 
 ### Group By
 
 ```typescript
 const { rows } = await client.table('trades')
-  .where('Ticker', '=', 'AAPL')
-  .groupBy('Source', { column: 'DateTime', bucket: 'day', alias: 'd' })  // keys; bucket: minute, hour, day, week, month, year
-  .sum('Volume', 'vol')
-  .countRows('n')
-  .orderBy('vol', 'desc')         // over the output's names (keys and aggregates)
-  .limit(30)
-  .execute();                     // rows: the group keys, then one column per aggregate
+.where('Ticker', '=', 'AAPL')
+.groupBy('Source', { column: 'DateTime', bucket: 'day', alias: 'd' }) // keys; bucket: minute, hour, day, week, month, year
+.sum('Volume', 'vol')
+.countRows('n')
+.orderBy('vol', 'desc') // over the output's names (keys and aggregates)
+.limit(30)
+.execute; // rows: the group keys, then one column per aggregate
 ```
 
 `where`, `orderBy`, `offset` and `limit` combine with aggregates; `select`, `selectExpr`, `distinct` and joins do not
-(the server answers `400`). `count()` returns the number of matching rows, not an aggregate column: it drops the
+(the server answers `400`). `count` returns the number of matching rows, not an aggregate column: it drops the
 aggregates and `groupBy` and posts the query to `/query/count`, so no row is transferred — the filter and joins
 count, `select`, `orderBy`, `limit`, `offset` and `distinct` do not (**architecture review, 0.3.0**; it used to
 download every matching row through `/query`).
@@ -538,9 +538,9 @@ download every matching row through `/query`).
 ```typescript
 // One row per ticker: the one with the greatest ts (ties: the lowest primary key).
 const latest = await client.table('quotes')
-  .latestPerKey('ts', 'ticker')
-  .select('ticker', 'price', 'ts')
-  .execute();
+.latestPerKey('ts', 'ticker')
+.select('ticker', 'price', 'ts')
+.execute;
 ```
 
 `select`, `orderBy` and the page apply to the collapsed rows. A `LatestPerKey` materialized query of the same shape answers it
@@ -554,15 +554,15 @@ when it is current (`stats.routedTo`). It does not combine with aggregates, `gro
 
 ```typescript
 await client.table('users').insert({
-  name: 'Alice',
-  email: 'alice@example.com',
-  active: true,
+ name: 'Alice',
+ email: 'alice@example.com',
+ active: true,
 });
 
 // Bulk insert (ordinary multi-row — not P20 bulk-load)
 await client.table('events').insertMany([
-  { type: 'click', timestamp: new Date() },
-  { type: 'view', timestamp: new Date() },
+ { type: 'click', timestamp: new Date },
+ { type: 'view', timestamp: new Date },
 ]);
 ```
 
@@ -579,7 +579,7 @@ the generated ids as column arrays, one cell per inserted row, `null` where the 
 const result = await client.table('orders').insertMany([{ status: 'new' }, { id: 7, status: 'given' }]);
 result.generatedValues?.forRow(0); // { id: 42 }
 result.generatedValues?.forRow(1); // undefined — row 1 gave its own id
-result.generatedValues?.data;      // [[42, null]]
+result.generatedValues?.data; // [[42, null]]
 ```
 
 **On the wire** (**ColumnarCore S06, 0.2.0**): `insert` and `insertMany` send the rows as a binary column-batch
@@ -591,7 +591,7 @@ absent?}`), as this server requires (a body of row objects is refused `400 ROW_O
 array, a column whose rows disagree on type, a number in exponent notation (`1e21`), or more than the frame holds (4,096
 columns, 1,000,000 rows, a 16 MB string, an empty or 1 KB+ column name) are sent as JSON; so is everything for five
 minutes after a `415`, whatever a later response advertises (**BL-716, 0.2.0**).
-A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a `bigint` as the integer's digits, unrounded
+A `Date` goes as its JSON text (`toJSON`), as the JSON body carries it, and a `bigint` as the integer's digits, unrounded
 (**Lead S15, 0.6.0**; it was refused, as `JSON.stringify` refuses it). A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
 fraction as a decimal, digit for digit (**BL-704, 0.2.0**) — so the inserted rows are the same either way. A
 decimal column whose every value in the batch fits 64 bits at the column's largest scale goes as the frame's
@@ -622,8 +622,8 @@ on a table without retention.
 
 ```typescript
 const result = await client.table('trades').insertMany(rows);
-result.rowsInserted;  // stored
-result.expiredRows;   // accepted, below the horizon: never returned (undefined when 0)
+result.rowsInserted; // stored
+result.expiredRows; // accepted, below the horizon: never returned (undefined when 0)
 ```
 
 #### Identity-insert (explicit autoIncrement IDs)
@@ -632,16 +632,16 @@ Use `{ identityInsert: true }` when you must supply IDs on an `autoIncrement` co
 
 ```typescript
 await client.table('orders').insert(
-  { id: 1000, status: 'seeded' },
-  { identityInsert: true }
+ { id: 1000, status: 'seeded' },
+ { identityInsert: true }
 );
 
 await client.table('orders').insertMany(
-  [
-    { id: 0, status: 'literal-zero' },
-    { id: 500, status: 'reserved' },
-  ],
-  { identityInsert: true }
+ [
+ { id: 0, status: 'literal-zero' },
+ { id: 500, status: 'reserved' },
+ ],
+ { identityInsert: true }
 );
 ```
 
@@ -649,8 +649,8 @@ For large ingest, use P20 bulk-load with the same flag:
 
 ```typescript
 await client.table('orders').bulkLoad(rows, {
-  identityInsert: true,
-  idempotencyKey: 'orders-reseed-2026-07-31',
+ identityInsert: true,
+ idempotencyKey: 'orders-reseed-2026-07-31',
 });
 ```
 
@@ -667,16 +667,16 @@ query result's [typed columns](#query-responses-are-column-batch-frames-columnar
 import { ColumnBatch, column } from '@aouda/client';
 
 const batch = ColumnBatch.of(
-  column.int64('id', new BigInt64Array([1n, 2n, 3n])),          // or a Float64Array of safe integers, or numbers / bigints
-  column.string('sym', ['AAPL', 'MSFT', null]),                  // null = a null cell
-  column.double('px', new Float64Array([187.5, 410.25, 0.5])),
-  column.timestamp('ts', [new Date(), new Date(), new Date()]),  // or epoch ms; column.timestampTicks for 100-ns ticks
-  column.decimal('price', ['187.50', 410.25, undefined], 4),     // undefined = absent: insert and bulkLoad apply the default (BL-1104, next train)
-  column.bool('open', new Uint8Array([1, 0, 1])),
-).validate();
+ column.int64('id', new BigInt64Array([1n, 2n, 3n])), // or a Float64Array of safe integers, or numbers / bigints
+ column.string('sym', ['AAPL', 'MSFT', null]), // null = a null cell
+ column.double('px', new Float64Array([187.5, 410.25, 0.5])),
+ column.timestamp('ts', [new Date, new Date, new Date]), // or epoch ms; column.timestampTicks for 100-ns ticks
+ column.decimal('price', ['187.50', 410.25, undefined], 4), // undefined = absent: insert and bulkLoad apply the default
+ column.bool('open', new Uint8Array([1, 0, 1])),
+).validate;
 
-await client.table('trades').bulkLoad([batch]);   // one batch, an array, or a (async) generator of batches
-await client.table('trades').insert(batch);       // one insert; frames once the server has advertised them
+await client.table('trades').bulkLoad([batch]); // one batch, an array, or a (async) generator of batches
+await client.table('trades').insert(batch); // one insert; frames once the server has advertised them
 ```
 
 | Factory | Values | Kind on the wire |
@@ -692,9 +692,9 @@ await client.table('trades').insert(batch);       // one insert; frames once the
 
 A typed array is kept as it is, not copied: do not change it until the call that sends it has returned. A plain array may
 hold `null` (a null cell) and `undefined` (an **absent** cell — not given, so a generated id or the column's default applies;
-a bulk load applies it too, **BL-1104, next train**); a typed array takes `{ nulls, absent }` bitmaps. **Call `validate()` while building
+a bulk load applies it too,); a typed array takes `{ nulls, absent }` bitmaps. **Call `validate` while building
 batches**: it throws, naming the column and row, for everything the server's frame reader would refuse — a name given twice,
-empty or over 1 KB, a code past its dictionary, a timestamp outside .NET's `DateTime`, an int64 in a `Float64Array` that is
+empty or over 1 KB, a code past its dictionary, a timestamp outside.NET's `DateTime`, an int64 in a `Float64Array` that is
 not a safe integer, a string over 16 MiB, a bitmap shorter than its rows, more than 4,096 columns. A load validates each batch
 as it reaches it; a malformed one fails the load (the job stays open under your own `idempotencyKey` — see below).
 
@@ -715,109 +715,109 @@ every surface**: query results (frames or JSON), named queries, materialized que
 
 | Server type | Read as | Write with |
 |---|---|---|
-| `Double[]` (**BL-035, 0.9.0**) | `Float64Array` | `Float64Array` or `number[]` |
-| `Float32[]` (**BL-035, 0.9.0**) | `Float32Array` | `Float32Array` or `number[]` |
-| `Int32[]` (**BL-035, 0.9.0**) | `Int32Array` | `Int32Array` or `number[]` |
-| `Int64[]` (**BL-035, 0.9.0**) | `BigInt64Array` (exact past 2^53, from JSON too) | `BigInt64Array`, `bigint[]` or `number[]` |
-| `Byte[]` (**BL-035, 0.9.0**) | `Uint8Array` | `Uint8Array` (in a `ColumnBatch`, also a `number[]` of 0–255) |
-| `String[]` (**BL-035, 0.9.0**) | `string[]` | `string[]` |
+| `Double` (**BL-035, 0.9.0**) | `Float64Array` | `Float64Array` or `number` |
+| `Float32` (**BL-035, 0.9.0**) | `Float32Array` | `Float32Array` or `number` |
+| `Int32` (**BL-035, 0.9.0**) | `Int32Array` | `Int32Array` or `number` |
+| `Int64` (**BL-035, 0.9.0**) | `BigInt64Array` (exact past 2^53, from JSON too) | `BigInt64Array`, `bigint` or `number` |
+| `Byte` (**BL-035, 0.9.0**) | `Uint8Array` | `Uint8Array` (in a `ColumnBatch`, also a `number` of 0–255) |
+| `String` (**BL-035, 0.9.0**) | `string` | `string` |
 
 A null cell is `null`; an empty array is an empty typed array. `AoudaArrayValue` is the union of the six read types and
 `AOUDA_DATA_TYPES` lists every column type, the six array names included. A row object with arrays is inserted as JSON; a
 `ColumnBatch` goes as frames when the server advertises them, else as JSON column arrays
 ([the factories](#column-batches-lead-s14-060) gain `doubleArray`, `float32Array`, `int32Array`, `int64Array`, `byteArray` and
-`stringArray`, taking one array per row: a typed array is kept, a plain numeric array is converted once, a `string[]` is kept as it is (do not
+`stringArray`, taking one array per row: a typed array is kept, a plain numeric array is converted once, a `string` is kept as it is (do not
 change it before the send), and `null` is a null row).
 
 ```typescript
 await client.table('Samples').insert({
-  Id: 600,
-  D: new Float64Array([1.5, -0, 5e-324]),
-  F: new Float32Array([0.1]),
-  I: new Int32Array([1, 2, 3]),
-  L: new BigInt64Array([9007199254740993n]),
-  B: new Uint8Array([1, 2, 3]),
-  S: ['a', '日本語'],
+ Id: 600,
+ D: new Float64Array([1.5, -0, 5e-324]),
+ F: new Float32Array([0.1]),
+ I: new Int32Array([1, 2, 3]),
+ L: new BigInt64Array([9007199254740993n]),
+ B: new Uint8Array([1, 2, 3]),
+ S: ['a', '日本語'],
 });
 
-const { rows } = await client.table('Samples').where('Id', '=', 600).execute();
-rows[0].D;   // Float64Array [1.5, -0, 5e-324]  (the bits of -0 are kept: 8000000000000000)
-rows[0].L;   // BigInt64Array [9007199254740993n]
+const { rows } = await client.table('Samples').where('Id', '=', 600).execute;
+rows[0].D; // Float64Array [1.5, -0, 5e-324] (the bits of -0 are kept: 8000000000000000)
+rows[0].L; // BigInt64Array [9007199254740993n]
 ```
 
-**`-0` and plain arrays.** A typed float array keeps `-0` exactly. **A plain `number[]` written in a row object loses it**: it
+**`-0` and plain arrays.** A typed float array keeps `-0` exactly. **A plain `number` written in a row object loses it**: it
 goes through `JSON.stringify`, which writes `-0` as `0`. To keep `-0`, write a `Float64Array` / `Float32Array`. (The same plain
 `[1.5, -0]` read back as `3ff8000000000000, 0000000000000000` in the run this page was checked with; the typed array read back
 `3ff8000000000000, 8000000000000000`.)
 
 ```typescript
 const batch = ColumnBatch.of(
-  column.int64('Id', new BigInt64Array([602n, 603n])),
-  column.doubleArray('D', [new Float64Array([1, -0]), null]),   // row 603 is a null cell
-  column.stringArray('S', [[], ['x']]),                          // row 602 is an empty array
-).validate();
+ column.int64('Id', new BigInt64Array([602n, 603n])),
+ column.doubleArray('D', [new Float64Array([1, -0]), null]), // row 603 is a null cell
+ column.stringArray('S', [, ['x']]), // row 602 is an empty array
+).validate;
 await client.table('Samples').insert(batch);
 ```
 
 **The client does not repeat the server's limits for a row object**, but it refuses NaN and the infinities in a
-`Float64Array` / `Float32Array` (a `RangeError`; in a plain `number[]`, `JSON.stringify` writes them as `null` and the server
-refuses the null element), and checks a `ColumnBatch` before sending (`validate()`): at most 65,536 elements and 1 MiB a value, finite floats, no lone
+`Float64Array` / `Float32Array` (a `RangeError`; in a plain `number`, `JSON.stringify` writes them as `null` and the server
+refuses the null element), and checks a `ColumnBatch` before sending (`validate`): at most 65,536 elements and 1 MiB a value, finite floats, no lone
 surrogate. A `float32Array` factory rounds a plain `number` to the nearest float once, at construction; `int32Array`, `int64Array`
 and `byteArray` refuse an out-of-range element with a `RangeError`. A frame column's rows are fresh typed arrays you may keep and change.
 
 ```text
-RangeError  Value '0': element 0 is NaN; array elements must be finite numbers (NaN and ±Infinity are refused).
-AoudaApiError (ARRAY_COLUMN_UNSUPPORTED)  … an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).
+RangeError Value '0': element 0 is NaN; array elements must be finite numbers (NaN and ±Infinity are refused).
+AoudaApiError (ARRAY_COLUMN_UNSUPPORTED) … an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).
 ```
 
 An array column cannot be filtered, ordered, grouped, aggregated or joined on, in the builder or in a named query. The
 generator (`npx @aouda/client generate` ([Type Generation CLI](#type-generation-cli)) or `GET /api/databases/{db}/schema/typescript`) writes the read types above for rows and tables,
-and for a named mutation's arguments a union that also takes a plain array (`Float64Array | number[]`); `aouda generate typescript`,
+and for a named mutation's arguments a union that also takes a plain array (`Float64Array | number`); `aouda generate typescript`,
 which works offline from a schema file, writes the named queries' and mutations' types the same way, and no table types.
 
 A client older than this train fails on a framed response with an array column (*"Malformed column-batch frame: column '…' has
 unknown kind 9."*), and on the JSON surfaces (subscriptions, materialized queries, `returning`) it does not fail: it gives plain
-arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use this train's client for array columns.
+arrays, a `Byte` as base64 text and `Int64` elements past 2^53 rounded. Use this train's client for array columns.
 
 ### Bulk load: a body sent again, resume, and a committed job (**Lead S14, S22, 0.6.0**)
 
 - **The job's last body commits it** (**Lead S22, 0.6.0**). A load's frame bodies are numbered across the job, and the last
-  one carries the commit in its end frame, so a job is `:begin` and its `:append`s — no `:commit` round trip. `:commit` is sent
-  only for a job whose last rows went as JSON column arrays (a value no frame carries) or that has no rows, and names the frames
-  sent (`nextSequence`). `writeConcern`, `writeConcernTimeoutMs`, `mqWaitMs` and `waitForDeferredWork` go where they always did,
-  as far as you can see.
+ one carries the commit in its end frame, so a job is `:begin` and its `:append`s — no `:commit` round trip. `:commit` is sent
+ only for a job whose last rows went as JSON column arrays (a value no frame carries) or that has no rows, and names the frames
+ sent (`nextSequence`). `writeConcern`, `writeConcernTimeoutMs`, `mqWaitMs` and `waitForDeferredWork` go where they always did,
+ as far as you can see.
 - **A failed `:append` is sent again, safely** (**Lead S22, 0.6.0**; until then it was yours). On a lost connection, a timeout,
-  a `503` or a capacity refusal the SDK asks the server where the job is — a `:begin` with the job's idempotency key, which also
-  stops a stale request still reading the cut body — and sends the same body again: the server skips the frames it already holds,
-  so **a body sent twice is applied once**. A body the server applied whole is not sent again. Up to 4 attempts, 250 ms doubling
-  between them (or the server's `Retry-After`, at most 30 s). The retry policy (`retryPolicy`) still never re-sends an `:append`
-  itself: until Lead S14 it did, and a body the server partly applied was applied twice. A committing body whose answer was lost
-  returns the committed job (`alreadyCompleted: true`); one sent again while the first one's commit runs waits for it.
+ a `503` or a capacity refusal the SDK asks the server where the job is — a `:begin` with the job's idempotency key, which also
+ stops a stale request still reading the cut body — and sends the same body again: the server skips the frames it already holds,
+ so **a body sent twice is applied once**. A body the server applied whole is not sent again. Up to 4 attempts, 250 ms doubling
+ between them (or the server's `Retry-After`, at most 30 s). The retry policy (`retryPolicy`) still never re-sends an `:append`
+ itself: until Lead S14 it did, and a body the server partly applied was applied twice. A committing body whose answer was lost
+ returns the committed job (`alreadyCompleted: true`); one sent again while the first one's commit runs waits for it.
 - **A failed load leaves its job open** (holding its tables until the session's idle timeout). Run the same `bulkLoad` again
-  with the **same `idempotencyKey`** — pass one if you may need to — and it resumes from the server's `nextSequence`: bodies the
-  server holds are not sent, a body that straddles it is sent whole (the server skips its first frames), and the frames skipped
-  must carry exactly the rows the server holds — so the call must send the same rows with the same `appendBatchSize` /
-  `maxAppendBytes`; otherwise it is refused `409 BULK_LOAD_CURSOR_MISMATCH` and sends nothing (**Lead S22, 0.6.0**; it
-  resumed by rows, from `resumeFromRow`, which is gone). `handle.wasResumed` says so. Only a cancellation (`signal`) aborts the
-  job — and (**Lead group 3 review, 0.6.0**) a failed load whose `idempotencyKey` the SDK generated, since nothing could resume
-  it: on any failure before the commit is sent, and on a refusal of it; a lost answer after the last attempt aborts nothing, since
-  the commit may be running. The error does not carry the generated key. A job does not survive a server restart: the same key
-  then starts a fresh job and the load is sent from its first frame.
+ with the **same `idempotencyKey`** — pass one if you may need to — and it resumes from the server's `nextSequence`: bodies the
+ server holds are not sent, a body that straddles it is sent whole (the server skips its first frames), and the frames skipped
+ must carry exactly the rows the server holds — so the call must send the same rows with the same `appendBatchSize` /
+ `maxAppendBytes`; otherwise it is refused `409 BULK_LOAD_CURSOR_MISMATCH` and sends nothing (**Lead S22, 0.6.0**; it
+ resumed by rows, from `resumeFromRow`, which is gone). `handle.wasResumed` says so. Only a cancellation (`signal`) aborts the
+ job — and (**Lead group 3 review, 0.6.0**) a failed load whose `idempotencyKey` the SDK generated, since nothing could resume
+ it: on any failure before the commit is sent, and on a refusal of it; a lost answer after the last attempt aborts nothing, since
+ the commit may be running. The error does not carry the generated key. A job does not survive a server restart: the same key
+ then starts a fresh job and the load is sent from its first frame.
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
-  `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
-  `409 BULK_LOAD_INVALID_STATE`).
+ `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
+ `409 BULK_LOAD_INVALID_STATE`).
 - **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129). With
-  `validation: "strict"` it also refuses a null in any NOT NULL column, and a key the job holds twice or the table already holds
-  fails the job (`409 BULK_LOAD_DUPLICATE_PK`, an `AoudaApiError` with that `code`); `handle.validation` names the level.
-  `pkUniquenessOverride` is gone (**breaking**). See [A load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060).
+ `validation: "strict"` it also refuses a null in any NOT NULL column, and a key the job holds twice or the table already holds
+ fails the job (`409 BULK_LOAD_DUPLICATE_PK`, an `AoudaApiError` with that `code`); `handle.validation` names the level.
+ `pkUniquenessOverride` is gone (**breaking**). See [A load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060).
 
 ```typescript
 const key = `orders-${day}`;
 try {
-  await client.table('orders').bulkLoad(batches(), { idempotencyKey: key });
+ await client.table('orders').bulkLoad(batches, { idempotencyKey: key });
 } catch {
-  const handle = await client.table('orders').bulkLoad(batches(), { idempotencyKey: key }); // resumes, or returns the commit
-  handle.wasResumed; handle.alreadyCompleted;
+ const handle = await client.table('orders').bulkLoad(batches, { idempotencyKey: key }); // resumes, or returns the commit
+ handle.wasResumed; handle.alreadyCompleted;
 }
 ```
 
@@ -825,17 +825,17 @@ try {
 
 `bulkLoad` (and `bulkLoadJobs`) take `durability?: 'strict' | 'os'`, sent as `:begin`'s `options.durability`, and the handle's
 `durability` says the level the job committed at (`BulkLoadDurability`; an outcome read from `:status` carries it too). Omitted, the load
-takes the database's level for a load: `'os'` in a database at `os` (`'strict'` when every table of the job names `strict`; **BL-1175, next train**), `'strict'` everywhere else.
+takes the database's level for a load: `'os'` in a database at `os` (`'strict'` when every table of the job names `strict`;), `'strict'` everywhere else.
 
 ```typescript
 const handle = await client.table('trades').bulkLoad(batches, { durability: 'os' });
-handle.durability;   // 'os'
+handle.durability; // 'os'
 ```
 
 `'os'` skips the fsync before the commit. After a power loss before the server has synced the job, the job is dropped whole and
-`GET .../bulk-load/{jobId}` reads `state: "lost"`, `errorCode: "BULK_LOAD_LOST"`: run the same `bulkLoad` again with the same
+`GET.../bulk-load/{jobId}` reads `state: "lost"`, `errorCode: "BULK_LOAD_LOST"`: run the same `bulkLoad` again with the same
 `idempotencyKey`. `'os'` for a multi-table job, a table with vector columns, or an edge or
-vector table is refused `400 BULK_LOAD_INVALID_OPTIONS` — such a job in an `os` database names `durability: 'strict'`, which is allowed there (**BL-1175, next train**). See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060).
+vector table is refused `400 BULK_LOAD_INVALID_OPTIONS` — such a job in an `os` database names `durability: 'strict'`, which is allowed there. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060).
 
 ### Several jobs into one table (**Lead S18b, S22, 0.6.0**)
 
@@ -844,7 +844,7 @@ commits — the server queues it behind the table's load lock — and yields eac
 
 ```typescript
 for await (const handle of client.table('trades').bulkLoadJobs(days, { idempotencyKey: 'trades-2026-10' })) {
-  console.log(`${handle.jobId}: ${handle.rowsLoaded} rows`);   // days: an (async) iterable of bulkLoad sources
+ console.log(`${handle.jobId}: ${handle.rowsLoaded} rows`); // days: an (async) iterable of bulkLoad sources
 }
 ```
 
@@ -864,16 +864,16 @@ one at a time.
 
 ```typescript
 await client.table('users')
-  .where('id', '=', 123)
-  .update({ active: false });
+.where('id', '=', 123)
+.update({ active: false });
 ```
 
 ### Delete
 
 ```typescript
 await client.table('users')
-  .where('id', '=', 123)
-  .delete();
+.where('id', '=', 123)
+.delete;
 ```
 
 (**Horizon, 0.5.0**) A delete whose only condition is the table's first cluster column (a `Timestamp` or `Date`) `<` or `<=` a
@@ -908,20 +908,20 @@ db.options.durability; // 'os'
 
 ```typescript
 // List tables
-const tables = await client.tables.list();
+const tables = await client.tables.list;
 
 // Get table schema
 const schema = await client.tables.get('users');
 
 // Create table
 await client.tables.createTable({
-  database: 'mydb',
-  name: 'users',
-  columns: [
-    { name: 'id', type: 'Int64', primaryKeyOrder: 1 },
-    { name: 'name', type: 'String' },
-    { name: 'email', type: 'String' },
-  ],
+ database: 'mydb',
+ name: 'users',
+ columns: [
+ { name: 'id', type: 'Int64', primaryKeyOrder: 1 },
+ { name: 'name', type: 'String' },
+ { name: 'email', type: 'String' },
+ ],
 });
 
 // Add a column
@@ -948,19 +948,19 @@ the instant below which rows are gone). See [Retention](../guides/retention.md).
 
 ```typescript
 await client.tables.createTable({
-  database: 'market',
-  name: 'trades',
-  columns: [
-    { name: 'Id', type: 'Int64', primaryKeyOrder: 1 },
-    { name: 'Ts', type: 'Timestamp', clusterOrder: 1, isNullable: true },
-    { name: 'Price', type: 'Double' },
-  ],
-  policy: { storageTemperature: 'Auto', retention: { keep: '90d' } },
+ database: 'market',
+ name: 'trades',
+ columns: [
+ { name: 'Id', type: 'Int64', primaryKeyOrder: 1 },
+ { name: 'Ts', type: 'Timestamp', clusterOrder: 1, isNullable: true },
+ { name: 'Price', type: 'Double' },
+ ],
+ policy: { storageTemperature: 'Auto', retention: { keep: '90d' } },
 });
 
 const policy = await client.tables.updatePolicy('trades', { retention: { keep: '30d' } });
 policy.retention; // { keep: '30d' }
-policy.horizon;   // e.g. '2026-09-16T08:41:00Z'
+policy.horizon; // e.g. '2026-09-16T08:41:00Z'
 ```
 
 ### Declarative Schema Operations
@@ -969,23 +969,23 @@ policy.horizon;   // e.g. '2026-09-16T08:41:00Z'
 
 ```typescript
 // Export the current live schema as a plain JSON document
-const exported: Record<string, unknown> = await client.schema.export();
+const exported: Record<string, unknown> = await client.schema.export;
 
 // Compute a diff between the live catalog and a desired schema document
 const diff = await client.schema.diff(desiredSchemaDoc);
-// diff.changes: SchemaChange[]
+// diff.changes: SchemaChange
 // diff.summary: DiffSummary
-// diff.warnings: SchemaChangeWarning[]  ← unsupported modifications (type changes, PK changes, etc.)
+// diff.warnings: SchemaChangeWarning ← unsupported modifications (type changes, PK changes, etc.)
 
 // Apply a desired schema document (returns apply result + optional historyId)
 const result = await client.schema.apply(desiredSchemaDoc);
-// result.result.summary.applied, .skipped, .failed
+// result.result.summary.applied,.skipped,.failed
 // result.historyId
 
 // Apply with options
 const result = await client.schema.apply(desiredSchemaDoc, {
-  allowDestructive: true,  // allow DropColumn / DropTable
-  dryRun: true,            // plan only, do not execute
+ allowDestructive: true, // allow DropColumn / DropTable
+ dryRun: true, // plan only, do not execute
 });
 
 // Schema history (newest first)
@@ -998,17 +998,17 @@ const history = await client.schema.history({ limit: 20, offset: 0 });
 
 ```typescript
 interface DiffSummary {
-  totalChanges: number;          // safeChanges + destructiveChanges
-  safeChanges: number;           // non-destructive changes
-  destructiveChanges: number;    // DropColumn + DropTable
-  tablesCreated: number;         // CreateTable count
-  tablesDropped: number;         // DropTable count
-  columnsAdded: number;          // AddColumn count
-  columnsDropped: number;        // DropColumn count
-  columnsAltered?: number;       // UpdateColumnAutoIncrement count (optional — undefined on older servers)
-  policiesUpdated: number;       // UpdatePolicy count
-  durabilitiesUpdated: number;   // UpdateDurability count
-  settingsUpdated: number;       // UpdateSettings count
+ totalChanges: number; // safeChanges + destructiveChanges
+ safeChanges: number; // non-destructive changes
+ destructiveChanges: number; // DropColumn + DropTable
+ tablesCreated: number; // CreateTable count
+ tablesDropped: number; // DropTable count
+ columnsAdded: number; // AddColumn count
+ columnsDropped: number; // DropColumn count
+ columnsAltered?: number; // UpdateColumnAutoIncrement count (optional — undefined on older servers)
+ policiesUpdated: number; // UpdatePolicy count
+ durabilitiesUpdated: number; // UpdateDurability count
+ settingsUpdated: number; // UpdateSettings count
 }
 ```
 
@@ -1017,7 +1017,7 @@ interface DiffSummary {
 ```typescript
 const altered = diff.summary.columnsAltered ?? 0;
 if (altered > 0) {
-  console.log(`${altered} column(s) altered`);
+ console.log(`${altered} column(s) altered`);
 }
 ```
 
@@ -1027,13 +1027,13 @@ Each entry in `diff.changes` is a `SchemaChange`:
 
 ```typescript
 interface SchemaChange {
-  type: string;             // e.g. "AddColumn", "DropColumn", "UpdateColumnAutoIncrement"
-  tableName?: string | null;
-  columnName?: string | null;
-  isDestructive: boolean;
-  details: string;          // human-readable description
-  before?: unknown;         // previous value (where applicable)
-  after?: unknown;          // new value (where applicable)
+ type: string; // e.g. "AddColumn", "DropColumn", "UpdateColumnAutoIncrement"
+ tableName?: string | null;
+ columnName?: string | null;
+ isDestructive: boolean;
+ details: string; // human-readable description
+ before?: unknown; // previous value (where applicable)
+ after?: unknown; // new value (where applicable)
 }
 ```
 
@@ -1045,8 +1045,8 @@ Warnings are returned alongside changes for modifications the engine cannot exec
 
 ```typescript
 interface SchemaChangeWarning {
-  code?: string;
-  message?: string;
+ code?: string;
+ message?: string;
 }
 ```
 
@@ -1058,7 +1058,7 @@ The recommended pattern is export → patch → apply:
 
 ```typescript
 // Get the current live schema
-const exported = await client.schema.export();
+const exported = await client.schema.export;
 
 // Locate the column and flip its autoIncrement flag
 const tables = exported['tables'] as Record<string, unknown>;
@@ -1066,18 +1066,18 @@ const table = tables['orders'] as Record<string, unknown>;
 const columns = table['columns'] as Array<Record<string, unknown>>;
 
 const patched = {
-  ...exported,
-  tables: {
-    ...tables,
-    orders: {
-      ...table,
-      columns: columns.map(col =>
-        col['name'] === 'id'
-          ? { ...col, autoIncrement: true }   // or false to disable
-          : col
-      ),
-    },
-  },
+...exported,
+ tables: {
+...tables,
+ orders: {
+...table,
+ columns: columns.map(col =>
+ col['name'] === 'id'
+ ? {...col, autoIncrement: true } // or false to disable
+ : col
+),
+ },
+ },
 };
 
 // Apply — no allowDestructive needed (this is a safe change)
@@ -1094,7 +1094,7 @@ console.log('ColumnsAltered:', result.result.summary);
 ### Type Generation CLI
 
 ```bash
-npx @aouda/client generate --server http://localhost:5000 --database mydb --output ./types
+npx @aouda/client generate --server http://localhost:5000 --database mydb --output./types
 ```
 
 Generates TypeScript interfaces from Aouda table schemas.
@@ -1117,7 +1117,7 @@ Branches are schema-level constructs managed via `client.branches`. Data operati
 
 ```typescript
 // List branches (excludes implicit main)
-const branches = await client.branches.list();
+const branches = await client.branches.list;
 
 // Create branch (parent defaults to "main")
 await client.branches.create({ name: 'feature-x' });
@@ -1141,7 +1141,7 @@ const result = await client.branches.merge('feature-x', { execute: true });
 await client.branches.delete('feature-x');
 ```
 
-**Note:** `client.branches.merge()` with no options (or `dryRun: true`) returns a `MergeResult` with the plan. Pass `{ execute: true }` to actually apply the merge and get back a `MergeExecutionResult`.
+**Note:** `client.branches.merge` with no options (or `dryRun: true`) returns a `MergeResult` with the plan. Pass `{ execute: true }` to actually apply the merge and get back a `MergeExecutionResult`.
 
 ---
 
@@ -1149,7 +1149,7 @@ await client.branches.delete('feature-x');
 
 ### WebSocket Subscriptions
 
-`subscribe()` is synchronous (no `await`). It returns a `Subscription` that is also an `AsyncIterable`. Unsubscribe with `await subscription.unsubscribe()`.
+`subscribe` is synchronous (no `await`). It returns a `Subscription` that is also an `AsyncIterable`. Unsubscribe with `await subscription.unsubscribe`.
 
 The subscription delivers two event types via `onChange`:
 - `op: "insert"` — a row was inserted; `row` contains the new row.
@@ -1160,9 +1160,9 @@ An `onSnapshot` callback receives the initial consistent snapshot of existing ro
 
 **Dates and timestamps in a subscription** (**BL-1391, 0.11.0**). A snapshot page names a `Timestamp` or `Date` column in
 `column_types`, and the SDK hands a JavaScript `Date` for both, in the snapshot and in every later change's `row` and `prev` (a change
-does not repeat the names). A `Timestamp` arrives on the wire as .NET ticks (UTC) and becomes its instant, rounded to the millisecond.
-A `Date` arrives as whole days since 1970-01-01 and becomes a `Date` at **00:00:00 UTC** of that day: read it with `getUTCFullYear()` /
-`getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. **Breaking for a caller that read the
+does not repeat the names). A `Timestamp` arrives on the wire as.NET ticks (UTC) and becomes its instant, rounded to the millisecond.
+A `Date` arrives as whole days since 1970-01-01 and becomes a `Date` at **00:00:00 UTC** of that day: read it with `getUTCFullYear` /
+`getUTCMonth` / `getUTCDate` or `toISOString.slice(0, 10)`, never the local-time getters. **Breaking for a caller that read the
 day number itself.** A change event's own `key` payload (a delete) stays the wire value. Query results are different: there a `Date`
 column is still the day number.
 (**Lead S14, 0.6.0**) The server sends a snapshot's pages as column arrays; the SDK gives you rows, as before. A snapshot
@@ -1172,45 +1172,43 @@ subscription ends) — never a snapshot with rows missing.
 ```typescript
 // Callback style
 const subscription = client.table('events')
-  .subscribe({
-    onSnapshot: (rows, version) => console.log('Initial rows:', rows),
-    onChange: (event) => {
-      if (event.op === 'insert') console.log('New:', event.row);
-      if (event.op === 'update') console.log('Updated:', event.row, 'was:', event.prev);
-      if (event.op === 'delete') console.log('Deleted key:', event.key);
-    },
-    onError: (err) => console.error('Subscription error:', err),
-  });
+.subscribe({
+ onSnapshot: (rows, version) => console.log('Initial rows:', rows),
+ onChange: (event) => {
+ if (event.op === 'insert') console.log('New:', event.row);
+ if (event.op === 'update') console.log('Updated:', event.row, 'was:', event.prev);
+ if (event.op === 'delete') console.log('Deleted key:', event.key);
+ },
+ onError: (err) => console.error('Subscription error:', err),
+ });
 
 // Async-iterator style
 for await (const event of subscription) {
-  if (event.type === 'snapshot') {
-    console.log('Snapshot rows:', event.rows);
-  } else {
-    console.log('Change:', event.op, event.row ?? event.key);
-  }
+ if (event.type === 'snapshot') {
+ console.log('Snapshot rows:', event.rows);
+ } else {
+ console.log('Change:', event.op, event.row ?? event.key);
+ }
 }
 
 // Unsubscribe (always await — it sends an unsubscribe frame to the server)
-await subscription.unsubscribe();
+await subscription.unsubscribe;
 ```
 
-Subscriptions can also be filtered using the query builder's `where()` predicates:
+Subscriptions can also be filtered using the query builder's `where` predicates:
 
 ```typescript
 // Subscribe only to events matching a filter
 const sub = client.table('events')
-  .where('severity', '=', 'error')
-  .subscribe({
-    onChange: (event) => console.log('Error event:', event.row),
-  });
+.where('severity', '=', 'error')
+.subscribe({
+ onChange: (event) => console.log('Error event:', event.row),
+ });
 ```
 
 A filter may use any operator the query builder has, `in` and `notIn` (the wire's `nin`) included
 (`.where('severity', 'in', ['error', 'fatal'])`). (**BL-1226, 0.9.0**) A server up to 0.8.0 refuses a subscription whose filter
-uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct.
-
-(**BL-1036, next train**) Give a subscription's filter **one way** — the builder's `where()` predicates *or* `subscribe({ filter })`,
+uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct. Give a subscription's filter **one way** — the builder's `where` predicates *or* `subscribe({ filter })`,
 not both. With both, this client merges the two objects member by member: a shorthand `options.filter` (`{ severity: { eq: 'error' } }`)
 beside the builder's `and` list makes a filter of both forms, which the server now refuses with `INVALID_SUBSCRIPTION_FILTER` naming
 the shorthand column (a server up to 0.16.0 dropped the shorthand half without a word), and a structured `options.filter` replaces the
@@ -1237,19 +1235,19 @@ either on the builder or in the options; if both ask, the subscription asks once
 ```typescript
 // On the query builder
 const sub = client.table('orders')
-  .withCrossPartitionAccess()
-  .subscribe({
-    onSnapshot: (rows, version) => console.log('Initial rows:', rows.length, version),
-    onChange: (event) => console.log(event.op, event.row ?? event.key),
-  });
+.withCrossPartitionAccess
+.subscribe({
+ onSnapshot: (rows, version) => console.log('Initial rows:', rows.length, version),
+ onChange: (event) => console.log(event.op, event.row ?? event.key),
+ });
 
 // Or in the subscribe options (SubscribeOptions.crossPartitionAccess)
 const sub2 = client.table('orders')
-  .where('status', '=', 'open')
-  .subscribe({
-    crossPartitionAccess: true,
-    onChange: (event) => console.log(event.op, event.row),
-  });
+.where('status', '=', 'open')
+.subscribe({
+ crossPartitionAccess: true,
+ onChange: (event) => console.log(event.op, event.row),
+ });
 ```
 
 The SDK sends `cross_partition_access: true` on the `subscribe` message, only when you ask, and sends it again on every resubscribe after
@@ -1260,16 +1258,16 @@ answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The wir
 
 #### Named queries and the flag
 
-A named query that binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` too, on `execute()`,
-`batch()` and `subscribe()`. Each takes the flag **per call**, as a sibling of the arguments (**BL-1227, 0.9.0**). A definition
+A named query that binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` too, on `execute`,
+`batch` and `subscribe`. Each takes the flag **per call**, as a sibling of the arguments (**BL-1227, 0.9.0**). A definition
 cannot set it, and there is no batch-wide switch: each batch item carries its own.
 
 ```typescript
 import type {
-  NamedQueryBatchItem,
-  NamedQueryBatchOptions,
-  NamedQueryExecuteOptions,
-  NamedQuerySubscribeOptions,
+ NamedQueryBatchItem,
+ NamedQueryBatchOptions,
+ NamedQueryExecuteOptions,
+ NamedQuerySubscribeOptions,
 } from '@aouda/client';
 
 // execute(name, args, NamedQueryExecuteOptions)
@@ -1277,17 +1275,17 @@ const execOptions: NamedQueryExecuteOptions = { crossPartitionAccess: true };
 const open = await client.namedQueries.execute('orders_by_status', { status: 'open' }, execOptions);
 
 // batch(items, NamedQueryBatchOptions): the flag is on the item; the options hold { signal?, atLeast? }
-const items: NamedQueryBatchItem[] = [
-  { name: 'orders_by_status', args: { status: 'open' }, crossPartitionAccess: true },
-  { name: 'customer_card', args: { id: 7 } },
+const items: NamedQueryBatchItem = [
+ { name: 'orders_by_status', args: { status: 'open' }, crossPartitionAccess: true },
+ { name: 'customer_card', args: { id: 7 } },
 ];
 const batchOptions: NamedQueryBatchOptions = { signal: AbortSignal.timeout(10_000) };
 const slots = await client.namedQueries.batch(items, batchOptions);
 
 // subscribe(name, args, NamedQuerySubscribeOptions)
 const subOptions: NamedQuerySubscribeOptions = {
-  crossPartitionAccess: true,
-  onChange: (event) => console.log(event.op, event.row),
+ crossPartitionAccess: true,
+ onChange: (event) => console.log(event.op, event.row),
 };
 const live = client.namedQueries.subscribe('orders_by_status', { status: 'open' }, subOptions);
 ```
@@ -1303,27 +1301,27 @@ row, and a delete before a time on any other table removes a range in one statem
 in the `SubscriptionEvent` union:
 
 - `SubscriptionHorizonEvent` — `type: "horizon"`, `column`, `horizon` (ISO-8601 UTC), `version`, `token?`, `columnType?`: the table's horizon rose.
-  Drop every held row whose `column` is below `horizon` or null, and keep no later row below it.
+ Drop every held row whose `column` is below `horizon` or null, and keep no later row below it.
 - `SubscriptionRangeDeleteEvent` — `type: "range_delete"`, `column`, `before`, `version`, `token?`, `columnType?`: rows below `before` were deleted
-  (a null time was not). Rows that arrive later are live whatever their time.
+ (a null time was not). Rows that arrive later are live whatever their time.
 
 The snapshot event (`SubscriptionSnapshotEvent`) of such a table carries `horizon` and `horizonColumn`; a windowed result's snapshot
 holds only its stored rows, at or after the horizon. The `subscribe` options (and a named-query subscribe's) take `onHorizon(event)`
 and `onRangeDelete(event)`; the async iterator yields the same events. Two helpers, exported from `@aouda/client`, do the dropping:
 `applyNotice(rows, event)` returns the rows a notice (or a snapshot's horizon) keeps, and `noticeRemoves(row, event)` answers for one
-row. They compare times exactly, in .NET ticks — rows carry a `Timestamp` as ticks on the JSON wire, the notices carry ISO strings.
+row. They compare times exactly, in.NET ticks — rows carry a `Timestamp` as ticks on the JSON wire, the notices carry ISO strings.
 On a `Date` column a row carries its day number (days since the Unix epoch); the notice says so (`columnType: "date"`, and
 `horizonColumnType: "date"` on the snapshot event), and the helpers read a whole number there as days.
 
 ```typescript
 import { applyNotice } from '@aouda/client';
 
-let rows: Trade[] = [];
+let rows: Trade = ;
 const sub = client.table<Trade>('trades').subscribe({
-  onSnapshot: (snapshot) => { rows = snapshot; },
-  onChange: (event) => { /* insert / update / delete, as before */ },
-  onHorizon: (event) => { rows = applyNotice(rows, event); },
-  onRangeDelete: (event) => { rows = applyNotice(rows, event); },
+ onSnapshot: (snapshot) => { rows = snapshot; },
+ onChange: (event) => { /* insert / update / delete, as before */ },
+ onHorizon: (event) => { rows = applyNotice(rows, event); },
+ onRangeDelete: (event) => { rows = applyNotice(rows, event); },
 });
 ```
 
@@ -1341,27 +1339,27 @@ on a table reads it on a delay: queries return only rows at least N seconds old,
 age. Nothing changes in the calls you make. Two error codes are exported for it:
 
 - `AUTH_EMBARGO_UNSUPPORTED` — thrown as an `AoudaApiError` (`403`) by a write, a materialized query, graph traversal, vector search
-  or a branch query on the embargoed table. Retrying with the same credential gets the same answer.
+ or a branch query on the embargoed table. Retrying with the same credential gets the same answer.
 - `SUBSCRIPTION_EMBARGO_RESET` — the server ended the subscription: it held back more changes than its limit, or the credential's
-  embargo changed. The `Subscription` **resubscribes fresh by itself** (a new snapshot, no `resume_from`) and your `onSnapshot`
-  receives it. A second reset before that snapshot arrives goes to `onError`, as any other subscription error does.
+ embargo changed. The `Subscription` **resubscribes fresh by itself** (a new snapshot, no `resume_from`) and your `onSnapshot`
+ receives it. A second reset before that snapshot arrives goes to `onError`, as any other subscription error does.
 
 ```typescript
 import { AoudaApiError, AUTH_EMBARGO_UNSUPPORTED } from '@aouda/client';
 
 try {
-  await client.table('quotes').insert({ symbol: 'AAPL', price: 191.2 });
+ await client.table('quotes').insert({ symbol: 'AAPL', price: 191.2 });
 } catch (err) {
-  if (err instanceof AoudaApiError && err.code === AUTH_EMBARGO_UNSUPPORTED) {
-    // This credential reads `quotes` on a delay and cannot write it.
-  }
+ if (err instanceof AoudaApiError && err.code === AUTH_EMBARGO_UNSUPPORTED) {
+ // This credential reads `quotes` on a delay and cannot write it.
+ }
 }
 ```
 
 #### One connection, many subscriptions
 
 Every subscription and write stream on a client shares **one** WebSocket per
-`(serverUrl, database)`. `subscribe()` on an already-connected client reuses that socket; it does
+`(serverUrl, database)`. `subscribe` on an already-connected client reuses that socket; it does
 not open another. Bind as many live views as the application needs — a list, a detail pane, a
 presence feed — and they multiplex.
 
@@ -1380,7 +1378,7 @@ own event iterator, and `keyOf` (it fills `key` on *your* insert and update even
 with `key: null`). A consumer that joins an entry already running is handed the rows the entry
 holds as a snapshot, then its own `snapshot` event — no second request reaches the server. One that
 joins while the snapshot is still arriving, or while the client re-subscribes fresh, waits for it. (A joiner's callbacks run a
-microtask after `subscribe()` returns.)
+microtask after `subscribe` returns.)
 Rows are shared between consumers, not copied: treat them as read-only.
 A callback that throws (and a throwing `keyOf`) is reported to *that* consumer's `onError` — logged with `console.error` when it has
 none — and never stops the others receiving the event. `for await … break` disposes the consumer. Arguments the key cannot represent
@@ -1391,7 +1389,7 @@ Four cases do **not** share, and the consumer gets a server subscription of its 
 - a subscribe that passes `resumeFrom` (it asks for a position in the stream);
 - a late joiner when the entry holds more than 100 000 rows (a fixed SDK limit that equals the server's default `MaxSnapshotRows`; changing the server key does not change it);
 - a late joiner when the entry's rows cannot be kept current — most often a projection that omits
-  the primary key, so a `delete` (which carries only the key) cannot be applied;
+ the primary key, so a `delete` (which carries only the key) cannot be applied;
 - anything with different arguments or options.
 
 A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in `@aouda/client` before **0.12.0**; the
@@ -1411,14 +1409,14 @@ handshake carries none). Three refusals have typed errors, all `AoudaApiError`s 
 catch for connection failures does not swallow a cap:
 
 - **`IDENTITY_CONNECTION_LIMIT_EXCEEDED`** (`AoudaConnectionLimitError`): the identity already holds its connections. It is
-  **terminal** on both transports: the first `connect()` rejects with it, a reconnect stops and reports it, and every consumer of
-  every subscription hears it. The client does **not** fall back to long-poll, which counts against the same limit.
+ **terminal** on both transports: the first `connect` rejects with it, a reconnect stops and reports it, and every consumer of
+ every subscription hears it. The client does **not** fall back to long-poll, which counts against the same limit.
 - **`SUBSCRIBE_RATE_EXCEEDED`**: the server's per-identity subscribe bucket was empty. The client waits for `retry_after_ms` (or the
-  long-poll `Retry-After` header) and sends the subscribe again, up to 3 times; then every consumer fails with
-  `AoudaSubscribeRateLimitError` (`retryAfterMs`). A reconnect that replays more than 256 subscriptions spreads the rest out (one every
-  40 ms) so recovery does not trip the bucket itself.
+ long-poll `Retry-After` header) and sends the subscribe again, up to 3 times; then every consumer fails with
+ `AoudaSubscribeRateLimitError` (`retryAfterMs`). A reconnect that replays more than 256 subscriptions spreads the rest out (one every
+ 40 ms) so recovery does not trip the bucket itself.
 - **`SUBSCRIPTION_LIMIT_EXCEEDED`** (`AoudaSubscriptionLimitError`): the server's message, which names the cap and the count, is the
-  error's `message`, unchanged.
+ error's `message`, unchanged.
 
 A reconnect's backoff starts over only after the connection has **stayed up for 10 seconds**, not as soon as `auth_ok` arrives, so a
 server that authenticates and then closes is retried at 1, 2, 4, 8 … seconds rather than once a second.
@@ -1435,10 +1433,10 @@ Subscription ids are stable for the life of the `Subscription` object and are re
 reconnects, which is what the server expects — see [the `id`
 contract](../reference/http-api.md#subscribe).
 
-> **Fixed in 0.1.25 (`BL-635`), released 2026-09-23.** Before that release `connect()` was not idempotent:
+> **Fixed in 0.1.25 (`BL-635`), released 2026-09-23.** Before that release `connect` was not idempotent:
 > each subscription's start opened its **own** socket, orphaning the previous one — still open,
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-> socket's `auth_ok` completed a different socket's `connect()` and the rest never settled. An
+> socket's `auth_ok` completed a different socket's `connect` and the rest never settled. An
 > application binding several live views in one tick got several server sessions, and the
 > reconnect replay could then land a subscription id on a session that already held it. The server
 > refused it with `DUPLICATE_SUBSCRIPTION_ID`, the client treated any subscription error as fatal
@@ -1456,13 +1454,13 @@ Full typed `client.admin.*` surface covering all server management operations.
 ### Health and Metrics
 
 ```typescript
-const health = await client.admin.health.check();
-const readiness = await client.admin.health.ready(); // { ready, reasons } (BL-1393, 0.11.0)
-const metrics = await client.admin.metrics();
-const info = await client.admin.server.info();
+const health = await client.admin.health.check;
+const readiness = await client.admin.health.ready; // { ready, reasons } (BL-1393, 0.11.0)
+const metrics = await client.admin.metrics;
+const info = await client.admin.server.info;
 ```
 
-`admin.health.ready()` returns every reason the server is not ready (**BL-1393, 0.11.0**). `ReadinessResponse` is
+`admin.health.ready` returns every reason the server is not ready (**BL-1393, 0.11.0**). `ReadinessResponse` is
 `{ ready, reasons }`, each reason `{ code, message, subject? }` with a stable `code` (`setup_required`, `database_pending`,
 `database_not_open`, `configured_key_inactive`, `component_unhealthy`, and the rest listed under [`GET /ready`](../reference/http-api.md#get-ready)); `reasons`
 is empty when `ready`. The single `reason` string is gone, so a caller that printed it prints `reasons` instead.
@@ -1470,9 +1468,9 @@ is empty when `ready`. The single `reason` string is gone, so a caller that prin
 ### Replication
 
 ```typescript
-const status = await client.admin.replication.status();
-const topology = await client.admin.replication.topology();
-const coverage = await client.admin.replication.coverage();
+const status = await client.admin.replication.status;
+const topology = await client.admin.replication.topology;
+const coverage = await client.admin.replication.coverage;
 ```
 
 ### Cluster Management (P16)
@@ -1480,25 +1478,25 @@ const coverage = await client.admin.replication.coverage();
 ```typescript
 // Join cluster
 await client.admin.cluster.join({
-  replicaSetName: 'my-cluster',
-  primaryAddress: '192.168.1.10:5000',
-  thisNodeAddress: '192.168.1.11:5001',
+ replicaSetName: 'my-cluster',
+ primaryAddress: '192.168.1.10:5000',
+ thisNodeAddress: '192.168.1.11:5001',
 });
 
 // Leave cluster
-await client.admin.cluster.leave();
+await client.admin.cluster.leave;
 
 // Promote secondary
-await client.admin.cluster.promote();
+await client.admin.cluster.promote;
 
 // Failover primary
-await client.admin.cluster.failover();
+await client.admin.cluster.failover;
 
 // Drain node
 await client.admin.cluster.drain('192.168.1.12:5002');
 
 // Get/patch cluster config
-const config = await client.admin.cluster.getConfig();
+const config = await client.admin.cluster.getConfig;
 await client.admin.cluster.patchConfig({ heartbeatIntervalMs: 2000 });
 ```
 
@@ -1509,17 +1507,17 @@ A backup is a **set** (one id, every database, the auth database first); see [Ba
 
 ```typescript
 import {
-  AoudaApiError,
-  BACKUP_OPERATION_TIMEOUT_MS,
-  isBackupErrorCode,
-  type RetentionPolicy,
+ AoudaApiError,
+ BACKUP_OPERATION_TIMEOUT_MS,
+ isBackupErrorCode,
+ type RetentionPolicy,
 } from '@aouda/client';
 
 // Trigger backup (a set for every database)
 const made = await client.admin.backup.trigger({ incremental: true });
 
 // List backups: `complete` is false for a set a member failed, `refused` says why a record could not be read
-const { backups } = await client.admin.backup.list();
+const { backups } = await client.admin.backup.list;
 const restorable = backups.filter((b) => b.complete && b.refused === undefined);
 
 // One set: per member database, the manifest's cut, redo-start position and its branches
@@ -1532,8 +1530,8 @@ await client.admin.backup.restore(made.backupId);
 // Point-in-time restore — the last transaction commit <= targetTime; backupId is optional
 // (omitted, the server chooses the newest backup at or before the target)
 const restored = await client.admin.backup.restore({
-  backupId: made.backupId,
-  targetTime: '2026-05-01T12:00:00Z',
+ backupId: made.backupId,
+ targetTime: '2026-05-01T12:00:00Z',
 });
 console.log(restored.pitr, restored.branches);
 
@@ -1541,71 +1539,69 @@ console.log(restored.pitr, restored.branches);
 // pitrWindow is a duration as the server writes it (d.hh:mm:ss)
 const policy: RetentionPolicy = { keepLast: 5, pitrWindow: '7.00:00:00' };
 await client.admin.backup.setRetention(policy);
-console.log(await client.admin.backup.getRetention());
+console.log(await client.admin.backup.getRetention);
 
 // Prune: a dry run by default; { execute: true } deletes what the server plans when it executes
-const plan = await client.admin.backup.prune();
+const plan = await client.admin.backup.prune;
 for (const set of plan.sets) console.log(set.backupId, set.keep ? 'kept' : 'deleted', set.rules);
 await client.admin.backup.prune({ execute: true });
 
 // Schedule
-const schedule = await client.admin.backup.getSchedule();
+const schedule = await client.admin.backup.getSchedule;
 await client.admin.backup.setSchedule({ cronExpression: '0 2 * * *', incremental: schedule.incremental });
 
 // A backup error carries the server's code and a `remedyText`: what to do, as an instruction
 try {
-  await client.admin.backup.restore('no-such-backup');
+ await client.admin.backup.restore('no-such-backup');
 } catch (error) {
-  if (error instanceof AoudaApiError && isBackupErrorCode(error.code)) {
-    console.error(error.code, error.remedyText);
-  }
+ if (error instanceof AoudaApiError && isBackupErrorCode(error.code)) {
+ console.error(error.code, error.remedyText);
+ }
 }
 ```
 
-(**Durability-1 S14, next train**)
-
 - **`show`, `prune`, `getRetention` and `setRetention`**, the `{ backupId, targetTime }` form of `restore` and **`remedyText`** are new.
-  `setSchedule` takes `cronExpression` — a `cron` property was never part of the contract and is refused by the compiler (this page used to show it).
+ `setSchedule` takes `cronExpression` — a `cron` property was never part of the contract and is refused by the compiler (this page used to show it).
 - **A backup call that runs long is not cut off at the client's 30 s default.** `trigger`, `restore` (both forms) and an *executed*
-  `prune` wait up to `BACKUP_OPERATION_TIMEOUT_MS` (one hour) and take a last argument `{ timeout?, signal? }`; every other backup
-  call keeps the client's default. A call that times out may still be running on the server — a retry meets `409 BACKUP_IN_PROGRESS`.
+ `prune` wait up to `BACKUP_OPERATION_TIMEOUT_MS` (one hour) and take a last argument `{ timeout?, signal? }`; every other backup
+ call keeps the client's default. A call that times out may still be running on the server — a retry meets `409 BACKUP_IN_PROGRESS`.
 - **`remedyText`** is set on the `AoudaApiError` of every `/admin/backup/*` error (`BACKUP_ERROR_CODES` is the closed list;
-  `isBackupErrorCode` narrows). It is a different member from `remedy`, which stays the structured auth remedy of a `403`.
-  A backup call can also meet `DISK_FULL` (507) and `WAL_FAILED` (503): the server applied nothing, but with a `retryPolicy` set (the
-  default is none) the client re-sends `trigger`, `restore` and `prune` only after a refusal that proves "not applied" — `503`
-  `MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVER_STARTING`, `SETUP_REQUIRED`, `429 SERVER_AT_CAPACITY` — or a connection that
-  never opened, so these two reach your code: retry after `Retry-After` yourself. `setSchedule` and `setRetention` replace the whole value,
-  so a repeat changes nothing, and they are re-sent after any transient failure, these two included.
+ `isBackupErrorCode` narrows). It is a different member from `remedy`, which stays the structured auth remedy of a `403`.
+ A backup call can also meet `DISK_FULL` (507) and `WAL_FAILED` (503): the server applied nothing, but with a `retryPolicy` set (the
+ default is none) the client re-sends `trigger`, `restore` and `prune` only after a refusal that proves "not applied" — `503`
+ `MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVER_STARTING`, `SETUP_REQUIRED`, `429 SERVER_AT_CAPACITY` — or a connection that
+ never opened, so these two reach your code: retry after `Retry-After` yourself. `setSchedule` and `setRetention` replace the whole value,
+ so a repeat changes nothing, and they are re-sent after any transient failure, these two included.
 - **After a restore, discard the consistency token your data clients hold.** A restore rewinds the node; a token from before it is
-  ahead of the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a fresh client, or
-  stop passing the old token — `AoudaClient` has no call that clears its token store; a `MemoryConsistencyTokenStore` you passed as
-  `consistencyTokenStore` can `forget(database)`. Studio discards its data clients after a restore it ran.
+ ahead of the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a fresh client, or
+ stop passing the old token — `AoudaClient` has no call that clears its token store; a `MemoryConsistencyTokenStore` you passed as
+ `consistencyTokenStore` can `forget(database)`. Studio discards its data clients after a restore it ran.
 
 ### Configuration (P16)
 
 ```typescript
-const config = await client.admin.config.get();
+const config = await client.admin.config.get;
 await client.admin.config.patch({ memoryBudgetMb: 4096, loggingLevel: 'Warning' });
-const schema = await client.admin.config.schema();
+const schema = await client.admin.config.schema;
 ```
 
 ### Node Info (P16)
 
 ```typescript
-const node = await client.admin.node.get();
+const node = await client.admin.node.get;
 const logs = await client.admin.node.logs({ level: 'Error', limit: 100 });
 
 // Stream logs (SSE)
 const stream = client.admin.node.streamLogs({ level: 'Warning' });
 for await (const entry of stream) {
-  console.log(entry);
+ console.log(entry);
 }
 ```
 
 ### Capabilities (P16)
 
 ```typescript
-const caps = await client.admin.capabilities();
+const caps = await client.admin.capabilities;
 // caps.mode: 'standalone' | 'clustered'
 // caps.backupProviders: ['local']
 // caps.version: '0.1.0'
@@ -1625,7 +1621,7 @@ const caps = await client.admin.capabilities();
 | `aouda_cluster_health` | Health, readiness, replication health, and optional detail + node info |
 | `aouda_backup_trigger` | Trigger an immediate backup |
 | `aouda_backup_list` | List existing backups |
-| `aouda_backup_restore` | Restore a backup by ID — an **exact** restore only: it takes no `targetTime`, and point-in-time restore, retention and prune are not offered to an agent (**Durability-1 S14, next train**) |
+| `aouda_backup_restore` | Restore a backup by ID — an **exact** restore only: it takes no `targetTime`, and point-in-time restore, retention and prune are not offered to an agent |
 | `aouda_backup_get_schedule` | Get current backup schedule |
 | `aouda_backup_set_schedule` | Update backup schedule |
 | `aouda_cluster_join` | Join this node to a replica set |
@@ -1669,14 +1665,14 @@ Documentation: `aouda-client-ts/docs/dev/MCP-Cluster-Tools.md`.
 import { MaterializedQueryType } from '@aouda/client';
 
 // List materialized queries
-const queries = await client.materializedQueries.list();
+const queries = await client.materializedQueries.list;
 
 // Create — type and config are required
 await client.materializedQueries.create({
-  name: 'active_users_summary',
-  sourceTable: 'users',
-  type: MaterializedQueryType.Filter,         // 4 — only active rows
-  config: { where: [{ column: 'active', op: '=', value: true }] },
+ name: 'active_users_summary',
+ sourceTable: 'users',
+ type: MaterializedQueryType.Filter, // 4 — only active rows
+ config: { where: [{ column: 'active', op: '=', value: true }] },
 });
 
 // Check status
@@ -1685,9 +1681,9 @@ const status = await client.materializedQueries.status('active_users_summary');
 // status.rowCount, status.lastUpdatedUtc, status.errorMessage
 
 // ⚠️ state === Ready means READABLE, not CURRENT. Read these three for currency:
-//   status.isStale      — true when the result is readable but not up to date
-//   status.staleReason  — why, in a sentence; null unless isStale
-//   status.currentLag   — how long it has BEEN behind; null when it is not behind
+// status.isStale — true when the result is readable but not up to date
+// status.staleReason — why, in a sentence; null unless isStale
+// status.currentLag — how long it has BEEN behind; null when it is not behind
 // A caught-up idle query reports currentLag === null forever, not a growing number, so
 // null means "current", never "unknown". See reference/http-api.md, "Is this query
 // current?". Polling state alone is how twelve of thirteen queries on one production
@@ -1701,13 +1697,13 @@ const status = await client.materializedQueries.status('active_users_summary');
 // Query results (returns all rows; options reserved for future use)
 const results = await client.materializedQueries.query('active_users_summary');
 // results.columns / results.data: the column arrays the server sends (Lead S14, 0.6.0); results.rowCount
-// results.rows: Record<string, unknown>[] — the same cells as objects
+// results.rows: Record<string, unknown> — the same cells as objects
 // results.stats: { rowsScanned, rowsReturned, executionMs }; results.token
 
 // Drop
 await client.materializedQueries.drop('active_users_summary');
 
-// Refresh (BL-419, 0.1.22): refresh() now resolves the outcome instead of void.
+// Refresh (BL-419, 0.1.22): refresh now resolves the outcome instead of void.
 // "complete" (200) only reaches you with await: true; "scheduled" (202) means the rebuild is
 // still running — fire-and-forget, or the server's await window elapsed. Either way the rebuild
 // is never cancelled. A 202 with an empty body (an already-deployed server hitting the
@@ -1716,44 +1712,44 @@ await client.materializedQueries.drop('active_users_summary');
 const outcome = await client.materializedQueries.refresh('active_users_summary', { await: true });
 // outcome: "complete" | "scheduled"
 
-// refreshAndWait() (BL-419, 0.1.22) is the answer to "after a 202, how do I know it's done?"
-// — it issues the refresh and, on "scheduled", polls status() until the query leaves Rebuilding.
+// refreshAndWait (BL-419, 0.1.22) is the answer to "after a 202, how do I know it's done?"
+// — it issues the refresh and, on "scheduled", polls status until the query leaves Rebuilding.
 const finished = await client.materializedQueries.refreshAndWait('active_users_summary', {
-  timeoutMs: 5 * 60_000,   // optional caller deadline; default: none
-  pollIntervalMs: 2000,    // optional; default 2000, floor 250
+ timeoutMs: 5 * 60_000, // optional caller deadline; default: none
+ pollIntervalMs: 2000, // optional; default 2000, floor 250
 });
 // Throws if the query reaches state 3 (Error), or if timeoutMs elapses.
 ```
 
 **Windows** (**Horizon, 0.5.0**): `create` takes `window: { keep, column? }` (`MaterializedQueryWindow`) on an `aggregate` with
 a time bucket or a `topNPerGroup` grouped by a time column; the result stores only its groups within `keep` of the server's clock, and
-a read of an older range is computed from the source. `status()` reports `window` and `horizon` (ISO-8601 UTC). A window over a table
+a read of an older range is computed from the source. `status` reports `window` and `horizon` (ISO-8601 UTC). A window over a table
 with retention is refused. See [Materialized Queries](../guides/materialized.md).
 
 ```typescript
 await client.materializedQueries.create({
-  name: 'candles_1m',
-  sourceTable: 'trades',
-  type: MaterializedQueryType.Aggregate,
-  config: {
-    groupByColumns: [{ column: 'Ticker' }, { column: 'Ts', function: 'truncateToMinute', outputName: 'Minute' }],
-    aggregates: [{ function: 'count', outputName: 'n' }],
-  },
-  window: { keep: '7d' },
+ name: 'candles_1m',
+ sourceTable: 'trades',
+ type: MaterializedQueryType.Aggregate,
+ config: {
+ groupByColumns: [{ column: 'Ticker' }, { column: 'Ts', function: 'truncateToMinute', outputName: 'Minute' }],
+ aggregates: [{ function: 'count', outputName: 'n' }],
+ },
+ window: { keep: '7d' },
 });
 const candles = await client.materializedQueries.status('candles_1m');
-candles.window;  // { keep: '7d' }
+candles.window; // { keep: '7d' }
 candles.horizon; // groups before it are computed from the source on read
 ```
 
-**Do not** call `refresh()` for a table you just bulk-loaded with the default
+**Do not** call `refresh` for a table you just bulk-loaded with the default
 `postLoadMqBehavior: "auto"` — the engine brings those queries current after the commit, in the background, with the
 table's pass over the load's segments (**WorkloadCore S10, 0.3.0**; before, it accumulated them during the load).
 The bulk-load handle can wait on it directly instead (BL-419, 0.1.22):
 
 ```typescript
 const handle = await client.table('users').bulkLoad(rows);
-handle.mqRebuildStatus;                     // snapshot at commit: "pending" | "inProgress" | …
+handle.mqRebuildStatus; // snapshot at commit: "pending" | "inProgress" | …
 const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 2000 });
 // finalStatus: "completed" | "skipped" | "unknown" (terminal — no live session to report from)
 // Throws if the rebuild status reaches "failed".
@@ -1763,9 +1759,9 @@ const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 20
 
 ```typescript
 const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 0 = no wait (0.4.0; 30000 in 0.3.0)
-loaded.mqStatus;        // "current" | "behind" | "skipped" | "none"; "unknown" from an older server
+loaded.mqStatus; // "current" | "behind" | "skipped" | "none"; "unknown" from an older server
 loaded.mqFrontierToken; // the lowest frontier among the load's queries, as a consistency token (absent: no query)
-loaded.mqWaitedMs;      // how long :commit waited for them
+loaded.mqWaitedMs; // how long :commit waited for them
 ```
 
 The load is durable whatever `mqStatus` says; `"behind"` means the queries' maintenance is still running. To read
@@ -1792,14 +1788,14 @@ import { AoudaConflictError, Formula, FormulaConflictError, fx } from "@aouda/cl
 
 // An ordinary table with one extra column: "formula" is an Expression column that drives "value".
 await client.tables.createTable({
-  database,
-  name: "pnl",
-  columns: [
-    { name: "Field", type: "String", primaryKeyOrder: 1 },
-    { name: "Period", type: "Int64", primaryKeyOrder: 2 },
-    { name: "value", type: "Decimal", precision: 18, scale: 2, isNullable: true },
-    { name: "formula", type: "Expression", drives: "value" },
-  ],
+ database,
+ name: "pnl",
+ columns: [
+ { name: "Field", type: "String", primaryKeyOrder: 1 },
+ { name: "Period", type: "Int64", primaryKeyOrder: 2 },
+ { name: "value", type: "Decimal", precision: 18, scale: 2, isNullable: true },
+ { name: "formula", type: "Expression", drives: "value" },
+ ],
 });
 
 // A row with no formula is an input. A key column a reference leaves out (Period) is the formula row's own,
@@ -1808,58 +1804,58 @@ const revenue = fx.cellHere("value", { Field: "Revenue" });
 const cost = fx.cellHere("value", { Field: "Cost" });
 const profit = fx.sub(revenue, cost);
 await client.table("pnl").insertMany([
-  { Field: "Revenue", Period: 2026, value: 1000 },
-  { Field: "Cost", Period: 2026, value: 600 },
-  { Field: "Profit", Period: 2026, formula: Formula.from(profit) },
-  { Field: "Margin", Period: 2026, formula: Formula.from(fx.round(fx.div(profit, revenue), 2)) },
+ { Field: "Revenue", Period: 2026, value: 1000 },
+ { Field: "Cost", Period: 2026, value: 600 },
+ { Field: "Profit", Period: 2026, formula: Formula.from(profit) },
+ { Field: "Margin", Period: 2026, formula: Formula.from(fx.round(fx.div(profit, revenue), 2)) },
 ]);
 
 // A read right after a write waits for the formulas (the client's own token) and answers 409 TOKEN_UNSATISFIED
 // if they are still behind: read again.
-async function readPeriod(): Promise<Record<string, unknown>[]> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return (await client.table("pnl").where("Period", "=", 2026).execute()).rows;
-    } catch (e) {
-      if (!(e instanceof AoudaConflictError && e.code === "TOKEN_UNSATISFIED") || attempt >= 40) throw e;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
+async function readPeriod: Promise<Record<string, unknown>> {
+ for (let attempt = 0; ; attempt++) {
+ try {
+ return (await client.table("pnl").where("Period", "=", 2026).execute).rows;
+ } catch (e) {
+ if (!(e instanceof AoudaConflictError && e.code === "TOKEN_UNSATISFIED") || attempt >= 40) throw e;
+ await new Promise((resolve) => setTimeout(resolve, 250));
+ }
+ }
 }
 
 // Zero revenue makes Margin a division by zero: its value is null, and explain says why.
 await client.table("pnl").where("Field", "=", "Revenue").update({ value: 0 });
-const why = await client.table("pnl").explain({ Field: "Margin", Period: 2026 }, "value");   // why.reason: "division by zero."
+const why = await client.table("pnl").explain({ Field: "Margin", Period: 2026 }, "value"); // why.reason: "division by zero."
 
 // Only the server writes a formula row's value.
 try {
-  await client.table("pnl").where("Field", "=", "Profit").update({ value: 5 });
+ await client.table("pnl").where("Field", "=", "Profit").update({ value: 5 });
 } catch (e) {
-  if (!(e instanceof FormulaConflictError && e.kind === "valueWriteRefused")) throw e;
+ if (!(e instanceof FormulaConflictError && e.kind === "valueWriteRefused")) throw e;
 }
 ```
 
 - **`fx` builds the formula as the wire node; nothing is evaluated in the client.** `fx.cell(table, column, key)` reads a value of another
-  table by its full primary key, `fx.cellHere(column, key)` a value of the formula row's own table, `fx.col(column)` a column of the formula
-  row itself. A primary-key column left out of a `key` is the formula row's own. The functions are `fx.add`, `sub`, `mul`, `div`, `min`,
-  `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not`, `round`, `coalesce`, `concat` and `cast`; a constant is
-  `fx.lit(value)`. Arity, a null key part and a bad `cast` type are checked locally; everything else is the server's. A `bigint` is exact at
-  any magnitude in a key or a literal.
+ table by its full primary key, `fx.cellHere(column, key)` a value of the formula row's own table, `fx.col(column)` a column of the formula
+ row itself. A primary-key column left out of a `key` is the formula row's own. The functions are `fx.add`, `sub`, `mul`, `div`, `min`,
+ `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not`, `round`, `coalesce`, `concat` and `cast`; a constant is
+ `fx.lit(value)`. Arity, a null key part and a bad `cast` type are checked locally; everything else is the server's. A `bigint` is exact at
+ any magnitude in a key or a literal.
 - **`Formula.from(node)` is the value of an Expression column** in an `insert` or `update` row; `null` makes the row an input again. It goes
-  on the wire as its JSON object. A read gives the Expression column back as a `Formula` (`null` for an input row); the type
-  `GET …/schema/typescript` generates for it is `Formula | null`. A live subscription's rows carry the formula's JSON object:
-  `Formula.fromValue(cell)` reads that (or the formula's text, or `null`) to the same `Formula`. `formula.equals(other)` compares two by
-  structure, property order aside (`1` and `1.0` are one number in JavaScript); `formula.toString()` is its JSON text.
+ on the wire as its JSON object. A read gives the Expression column back as a `Formula` (`null` for an input row); the type
+ `GET …/schema/typescript` generates for it is `Formula | null`. A live subscription's rows carry the formula's JSON object:
+ `Formula.fromValue(cell)` reads that (or the formula's text, or `null`) to the same `Formula`. `formula.equals(other)` compares two by
+ structure, property order aside (`1` and `1.0` are one number in JavaScript); `formula.toString` is its JSON text.
 - **The driven column is an ordinary typed column** (a `Decimal` is a `number` in a query read). A formula whose value cannot be computed
-  leaves the cell `null`, not `0`; `client.table(name).explain(key, column)` returns a `FormulaExplanation` — the row's `kind` and `formula`,
-  each reference's resolved key and current value, the `value` computed now or the `reason` it has none, the `storedValue` and the cells
-  that read this one (`readBy`) — showing only what the caller may read. A division is typed `Decimal` with scale 6: `fx.round(x, 2)` it to
-  put it in a `Decimal(18,2)` column, or the write is refused (`FormulaValidationError`, `invalid`).
+ leaves the cell `null`, not `0`; `client.table(name).explain(key, column)` returns a `FormulaExplanation` — the row's `kind` and `formula`,
+ each reference's resolved key and current value, the `value` computed now or the `reason` it has none, the `storedValue` and the cells
+ that read this one (`readBy`) — showing only what the caller may read. A division is typed `Decimal` with scale 6: `fx.round(x, 2)` it to
+ put it in a `Decimal(18,2)` column, or the write is refused (`FormulaValidationError`, `invalid`).
 - **A read waits for your own writes** (the client's stored token) for the server's default 250 ms. If the formulas are further behind, the
-  read answers `409 TOKEN_UNSATISFIED` (`AoudaConflictError`), which is not retried automatically: read again. There is no per-read wait
-  option. A replica refuses a token read of a formula table (`FormulaTokenRequiresPrimaryError`, 421): read from the primary.
+ read answers `409 TOKEN_UNSATISFIED` (`AoudaConflictError`), which is not retried automatically: read again. There is no per-read wait
+ option. A replica refuses a token read of a formula table (`FormulaTokenRequiresPrimaryError`, 421): read from the primary.
 - **Security is the table's:** a formula may reference only rows its writer may read (`FormulaReferenceNotReadableError`, 403), and a
-  formula table's grants and row conditions are an ordinary table's.
+ formula table's grants and row conditions are an ordinary table's.
 
 **Typed errors.** Each is a subclass of the class the client already throws for its status, so existing handlers keep catching it:
 
@@ -1875,26 +1871,26 @@ try {
 
 ## 14) Columnar Output
 
-For high-performance data processing, bypass row conversion and get the raw columnar payload directly. `select()` takes rest args (not an array):
+For high-performance data processing, bypass row conversion and get the raw columnar payload directly. `select` takes rest args (not an array):
 
 ```typescript
 const columnar = await client.table('events')
-  .select('timestamp', 'value')
-  .limit(10000)
-  .toColumnar();
+.select('timestamp', 'value')
+.limit(10000)
+.toColumnar;
 
 // columnar.columns: ['timestamp', 'value']
-// columnar.types: ['Timestamp', 'Double']   ← exact wire type names (capitalized)
+// columnar.types: ['Timestamp', 'Double'] ← exact wire type names (capitalized)
 // columnar.data: [[...ticks as numbers], [...values]]
 // columnar.rowCount: 10000
 // columnar.stats: { rowsScanned, rowsReturned, segmentsAccessed, executionMs }
 ```
 
-`columnar.types` contains the server-declared Aouda type names (`'Int64'`, `'String'`, `'Timestamp'`, `'Double'`, etc.). Timestamp values arrive as Int64 .NET ticks — use `coerceColumnarValue(value, typeName)` (exported from `@aouda/client`) to convert them to ISO 8601 strings if needed.
+`columnar.types` contains the server-declared Aouda type names (`'Int64'`, `'String'`, `'Timestamp'`, `'Double'`, etc.). Timestamp values arrive as Int64.NET ticks — use `coerceColumnarValue(value, typeName)` (exported from `@aouda/client`) to convert them to ISO 8601 strings if needed.
 
 ### Query responses are column-batch frames (**ColumnarRead S16, 0.3.0**)
 
-A query (`execute()`, `toColumnar()`, `namedQueries.execute()`) asks for the binary
+A query (`execute`, `toColumnar`, `namedQueries.execute`) asks for the binary
 [column-batch frame](../reference/http-api.md#post-apidatabasesdbquery)
 (`Accept: application/vnd.aouda.column-batch-v2, application/json;q=0.5`) and reads whatever the server sends by its
 `Content-Type`. An older server, or a result a frame cannot carry, answers JSON as before.
@@ -1906,13 +1902,13 @@ response started writes the error in the end frame; the client drops the frames 
 error's code gets as a JSON body (an `INTERNAL_ERROR` is an `AoudaServerError`). `stats.rowsScanned` of a streamed read is the rows
 the server read. This client needs a server that speaks `ACB2`; an `ACB1` frame body (an older server) throws, naming the version. The values are the same either
 way: integers, `Date` (days since 1970-01-01), decimals and `UInt64` as numbers, `Guid` as a string, and a `Timestamp`
-row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks. (**LoadSpeed S13, 0.4.0**) A
+row value as an ISO 8601 string. `toColumnar.data` keeps the JSON body's.NET ticks. (**LoadSpeed S13, 0.4.0**) A
 decimal column arrives as `ScaledDecimal` at the column's scale and is read as a number as before; a frame carrying the
 retired 128-bit `Decimal` kind (6) throws.
 
 From frames, the columns are held as typed arrays (`result.typedColumns`) and `result.rows` are **views** over them
 rather than one object per row. Property access, `Object.keys`, spread, `JSON.stringify`, assignment and `delete` behave
-as on a plain object. A view cannot be structured-cloned: pass `{ ...row }` to `structuredClone`, `postMessage` or
+as on a plain object. A view cannot be structured-cloned: pass `{...row }` to `structuredClone`, `postMessage` or
 IndexedDB.
 
 **An `Int64` past 2^53** (**Lead S15, 0.6.0**). A row holds every integer as a JavaScript number, so a value above
@@ -1922,10 +1918,10 @@ that range as a `bigint` (any other cell as `raw(r)` gives it), and a `bigint` i
 query's argument, an inserted value — is sent as its digits:
 
 ```typescript
-const result = await client.table('events').limit(100).execute();
+const result = await client.table('events').limit(100).execute;
 const id = result.typedColumns?.find((c) => c.name === 'id');
-const key = id?.exact(0) ?? result.rows[0].id;         // 9007199254740993n, not 9007199254740992
-await client.table('events').where('id', '=', key).delete();
+const key = id?.exact(0) ?? result.rows[0].id; // 9007199254740993n, not 9007199254740992
+await client.table('events').where('id', '=', key).delete;
 ```
 
 A result read as JSON (an older server) has no `typedColumns`, so its keys past 2^53 cannot be recovered.
@@ -1942,13 +1938,13 @@ A `Timestamp` read through JSON could come back one millisecond early, because a
 | P5 | Core client, query builder, CRUD, schema, type generation CLI | Foundation |
 | P6 | Multi-database support | `new AoudaClient({ database: 'db2' })` |
 | P10 | WebSocket transport, streaming API | Real-time subscriptions |
-| P14 | Server-side count, WhereClause groups | `count()`, nested `whereGroup` |
-| P15 | All join types (inner/left/right/full/cross), chained joins, multi-column keys | `join()`, `leftJoin()`, `rightJoin()`, `fullJoin()`, `crossJoin()` |
-| P16 H.1 | Aggregate query builder | `sum()`, `min()`, `max()`, `groupBy()` |
+| P14 | Server-side count, WhereClause groups | `count`, nested `whereGroup` |
+| P15 | All join types (inner/left/right/full/cross), chained joins, multi-column keys | `join`, `leftJoin`, `rightJoin`, `fullJoin`, `crossJoin` |
+| P16 H.1 | Aggregate query builder | `sum`, `min`, `max`, `groupBy` |
 | P16 H.2 | Extended filter operators | `where(col, 'in', [...])`, `'notIn'`, `'like'`, `'isNull'`, `'isNotNull'`, `'between'` |
 | P16 H.3 | Materialized queries client API | `client.materializedQueries.*` |
-| P16 H.4 | Columnar output API | `.toColumnar()` |
+| P16 H.4 | Columnar output API | `.toColumnar` |
 | P16 H.5 | Schema seed CLI | `npx @aouda/client schema seed` |
 | P16 H.6 | Admin API coverage (cluster, backup, config, node) | `client.admin.cluster.*`, `client.admin.backup.*`, etc. |
-| P16 G.1–G.4 | MCP cluster tools + docs | `createAoudaClusterMcpToolSet()` |
+| P16 G.1–G.4 | MCP cluster tools + docs | `createAoudaClusterMcpToolSet` |
 | BL-126b (0.1.6) | `DiffSummary.columnsAltered` field; `UpdateColumnAutoIncrement` schema change type surfaced in diffs | `diff.summary.columnsAltered` |

@@ -105,37 +105,35 @@ An unlinked database on the data plane is governed by `_serverauth`. Its anonymo
 
 #### `GET /api/auth/whoami`
 
-Both listeners. Never `403`. Optional query `database` keeps statements whose resource is `*`, names that database, or begins with it. `server` is not filtered out by a database name.
-
-(**BL-1611, next train**) A `?database=` that no auth database governs (only possible on a server with no server auth database) has no `anonymous`: `401 AUTH_CREDENTIAL_MISSING`. On the admin listener, a path the server does not serve answers a presented credential's own refusal, and a credential that resolves gets an empty `404` (**BL-1613, next train**).
+Both listeners. Never `403`. Optional query `database` keeps statements whose resource is `*`, names that database, or begins with it. `server` is not filtered out by a database name. A `?database=` that no auth database governs (only possible on a server with no server auth database) has no `anonymous`: `401 AUTH_CREDENTIAL_MISSING`. On the admin listener, a path the server does not serve answers a presented credential's own refusal, and a credential that resolves gets an empty `404`.
 
 No credential on the admin listener: `401 AUTH_CREDENTIAL_MISSING` with remedy `sign-in`. No credential on the data plane with `?database=`: `200` as that database's `anonymous`, `"credential": null`, and **no** `remedy` member. No credential on the data plane without `database`: `400 INVALID_REQUEST`.
 
 ```json
 {
-  "principal": {
-    "name": "rates-feeder",
-    "authDatabase": "auth",
-    "id": "00000000-0000-0000-0000-000000000000",
-    "source": "declared",
-    "disabled": false
-  },
-  "credential": { "type": "derived-key", "id": "aouda_exampleexampleex" },
-  "database": null,
-  "listener": "admin",
-  "policy": {
-    "roles": ["rates-feeder"],
-    "attributes": {},
-    "statements": [
-      {
-        "actions": ["write"],
-        "resources": ["rates/table/DepositQuote"],
-        "where": { "column": "source", "op": "in", "value": ["tullett"] },
-        "from": "role:rates-feeder"
-      }
-    ]
-  },
-  "permissionVersion": 1
+ "principal": {
+ "name": "rates-feeder",
+ "authDatabase": "auth",
+ "id": "00000000-0000-0000-0000-000000000000",
+ "source": "declared",
+ "disabled": false
+ },
+ "credential": { "type": "derived-key", "id": "aouda_exampleexampleex" },
+ "database": null,
+ "listener": "admin",
+ "policy": {
+ "roles": ["rates-feeder"],
+ "attributes": {},
+ "statements": [
+ {
+ "actions": ["write"],
+ "resources": ["rates/table/DepositQuote"],
+ "where": { "column": "source", "op": "in", "value": ["tullett"] },
+ "from": "role:rates-feeder"
+ }
+ ]
+ },
+ "permissionVersion": 1
 }
 ```
 
@@ -162,7 +160,7 @@ Prefix `/api/auth/{authDatabase}` on the admin listener. `{authDatabase}` is com
 | `GET` | `…/roles/{name}` | `manage` on `<auth>/role/<name>` | | |
 | `PATCH` | `…/roles/{name}` | the same | members replaced | A `name` that is not a string is `400`. A rename is one write. |
 | `DELETE` | `…/roles/{name}` | the same | | Built-ins are `409 AUTH_BUILTIN_READ_ONLY` |
-| `GET` | `…/signup` | `manage` on `<auth>` | | `{ "enabled": false, "roles": [], "statements": [] }` is the default |
+| `GET` | `…/signup` | `manage` on `<auth>` | | `{ "enabled": false, "roles":, "statements": }` is the default |
 | `PUT` | `…/signup` | the same | `{ "enabled", "roles"?, "statements"? }` | The whole setting. `enabled` is required. |
 
 Store refusals: `403 AUTH_POLICY_DENIED` when `manage` or coverage fails; `400 AUTH_PUBLIC_UNRESTRICTED` for public reach; `400 AUTH_POLICY_INVALID` for a strict-reader problem, the governance rule, or an unknown role; `400 AUTH_ATTRIBUTE_CAP` for an attribute cap; `409 AUTH_NAME_TAKEN` when the name is taken without regard to case; `404 AUTH_PRINCIPAL_NOT_FOUND`, `AUTH_ROLE_NOT_FOUND`, or `AUTH_CREDENTIAL_NOT_FOUND`. A path segment that fails its grammar is `400` and is not echoed. A `2xx` that wrote a statement naming a column its table lacks carries `warnings: [{ "code": "AUTH_STATEMENT_COLUMN_UNKNOWN" | "AUTH_STATEMENT_ARRAY_COLUMN", "pointer", "message" }]`.
@@ -217,11 +215,9 @@ Open sockets end as [Revocation](../auth/credentials.md#revocation) describes: o
 | `POST` | `/api/databases/{db}/auth/signin` | `{ "email", "password", "databases"? }` | A token pair. Omitted `databases` means the session has no database limit. |
 | `POST` | `/api/auth/signin` | the same | A `_serverauth` principal. |
 | `POST` | `…/auth/refresh` | the refresh token | A new pair at the same `aal`. |
-| `POST` | `…/auth/signout` | | Revokes the session. Idempotent: repeating it with the same token answers `200` again (**BL-1019, next train**). |
+| `POST` | `…/auth/signout` | | Revokes the session. Idempotent: repeating it with the same token answers `200` again. |
 
-A session token carries `iss`, `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` from its limit. An omitted `databases` on sign-in (no limit) is `aud: ["*"]` — not the auth database name. The library may also write `nbf`. It does not carry a role list or a permission list.
-
-(**BL-1019, next train**) A password change (`PUT …/auth/password`) that answers `503` or `409` changed nothing: the old password still signs in. An administrator's `DELETE /api/auth/admin/sessions/{id}` ends a session by its id whether or not it still has a row (`204`); `404` only when neither a session row nor a refresh family has that id.
+A session token carries `iss`, `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` from its limit. An omitted `databases` on sign-in (no limit) is `aud: ["*"]` — not the auth database name. The library may also write `nbf`. It does not carry a role list or a permission list. A password change (`PUT …/auth/password`) that answers `503` or `409` changed nothing: the old password still signs in. An administrator's `DELETE /api/auth/admin/sessions/{id}` ends a session by its id whether or not it still has a row (`204`); `404` only when neither a session row nor a refresh family has that id.
 
 Password reset and MFA stay on the routes in [Setup and flows](../auth/setup.md). The admin path segment `users/{id}` takes the principal's id.
 
@@ -233,15 +229,15 @@ Every code in this table uses one body. Null members are omitted. `suggestion`, 
 
 ```json
 {
-  "error": "AUTH_POLICY_DENIED",
-  "message": "auth/rates-feeder may not write rates/table/DepositQuote.",
-  "requestId": "00000000000000000000000000000000",
-  "remedy": {
-    "kind": "grant",
-    "principal": "auth/rates-feeder",
-    "statement": { "actions": ["write"], "resources": ["rates/table/DepositQuote"] },
-    "owner": "declaration"
-  }
+ "error": "AUTH_POLICY_DENIED",
+ "message": "auth/rates-feeder may not write rates/table/DepositQuote.",
+ "requestId": "00000000000000000000000000000000",
+ "remedy": {
+ "kind": "grant",
+ "principal": "auth/rates-feeder",
+ "statement": { "actions": ["write"], "resources": ["rates/table/DepositQuote"] },
+ "owner": "declaration"
+ }
 }
 ```
 
@@ -322,8 +318,8 @@ admin routes and in `error` on the `/api/auth/...` routes; there is no `remedy` 
 | Declared object | Refused | Still allowed |
 |---|---|---|
 | A database the file declares | `DELETE /api/databases/{db}`; `POST /api/databases` with its name (in any case) | quarantine, unquarantine, backup, restore; rows |
-| The schema of a database whose declaration names a `schema` | `POST .../schema/apply` (unless `options.dryRun: true`), every table, column, edge-table, vector-column and materialized-query create, change or drop, `POST .../branches/{name}/merge` with `execute: true`, and a row insert into a missing table that `Aouda:Schema:InferenceMode = Extend` would create | a dry-run apply, `schema/diff`, `schema/seed`, a merge plan, row writes, truncate, `:refresh` |
-| A declared principal (and `anonymous`, when the file declares it) | any member but `disabled` (statements, roles, attributes, description, a rename), its deletion, a key minted or an OIDC trust added for it, deleting one of its declared credentials | `disabled` on its own (the emergency action; clearing it is refused when the file itself declares `"disabled": true`), revoking a credential (`POST .../credentials/{id}/revoke`), a limited key it mints, a person's own password change (a declared password is a seed) |
+| The schema of a database whose declaration names a `schema` | `POST.../schema/apply` (unless `options.dryRun: true`), every table, column, edge-table, vector-column and materialized-query create, change or drop, `POST.../branches/{name}/merge` with `execute: true`, and a row insert into a missing table that `Aouda:Schema:InferenceMode = Extend` would create | a dry-run apply, `schema/diff`, `schema/seed`, a merge plan, row writes, truncate, `:refresh` |
+| A declared principal (and `anonymous`, when the file declares it) | any member but `disabled` (statements, roles, attributes, description, a rename), its deletion, a key minted or an OIDC trust added for it, deleting one of its declared credentials | `disabled` on its own (the emergency action; clearing it is refused when the file itself declares `"disabled": true`), revoking a credential (`POST.../credentials/{id}/revoke`), a limited key it mints, a person's own password change (a declared password is a seed) |
 | A declared role | its change, rename and deletion; creating its name | giving it to a runtime principal |
 | The `signup` setting the file declares | `PUT /api/auth/{authDatabase}/signup` | — |
 
@@ -360,10 +356,10 @@ database (**BL-1585**, documented; the public answer is unchanged).
 To tell a bad key from a missing database, use what only the operator can see:
 
 - the server log's `Auth failure` warning for the request now ends with *the database in the path does not exist on this server: not
-  created yet, still starting, or misspelt; see /ready* when it is the database (**BL-1585, 0.16.0**); the same line without that
-  note means the key;
+ created yet, still starting, or misspelt; see /ready* when it is the database (**BL-1585, 0.16.0**); the same line without that
+ note means the key;
 - `GET /ready` lists `database_pending` (declared in `Aouda:Databases`, not created yet) and `database_not_open` (registered, not
-  open) with the database as `subject`, and answers `503` until they are gone;
+ open) with the database as `subject`, and answers `503` until they are gone;
 - `GET /api/databases` with a server credential lists the databases that exist.
 
 A start-up script should wait for `/ready` to be `200` before it uses a service key, and treat a `401` after that as the key.
@@ -419,7 +415,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Wait | `waitMs` / `X-Aouda-Wait-Ms` (default 250, cap 30 000) |
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
-| Materialized query | (**WorkloadCore, 0.3.0**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
+| Materialized query | (**WorkloadCore, 0.3.0**) A token-bearing read of a materialized query (`POST.../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
 | Formula table | (**ADR 0072, 0.14.0**) A token on any read of a table that has an `Expression` column (`/query`, `/query/count`, a join side, a named query, subscribe) — input rows included — is judged by the **formula maintainer's progress**: it is covered once every commit up to the token has been recomputed, and a commit that left a value unchanged covers it. A lapse is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says (`fetchPrimary` does not turn it into a `421`; `fail` answers `409` at once). A replica answers `421 FORMULA_TOKEN_REQUIRES_PRIMARY`; a node whose maintainer is not running, `503 FORMULA_NOT_MAINTAINED`. A read joining a formula table and a materialized query's result is covered as far as both are; a materialized query built over a formula table is not yet judged by the formula maintainer (BL-1486). A snapshot's token and a change event's token are covers (keep the highest), a notice's is not. See [Formulas](../guides/formulas.md#when-values-change-eventual-consistency-and-tokens). |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
@@ -430,7 +426,7 @@ MQ list/status and `POST …/materialized-queries/{name}/query` stamp `token` as
 
 `POST …/materialized-queries/{name}/query` reads the whole result, held to `Aouda:Query:MaxResultRows` and the read budget like every
 materialising read (**BL-776, 0.3.0**): a result over the read budget is `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` —
-or, (**BL-1033, next train**) when the result alone exceeds the most the read path may ever hold on the database, `400 STATEMENT_TOO_LARGE`
+or when the result alone exceeds the most the read path may ever hold on the database, `400 STATEMENT_TOO_LARGE`
 with no `Retry-After`; a result over the row ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (**release blockers, 0.3.0**; it was a `503`), because
 retrying is refused the same way — read it with a filtered `POST …/tables/{result}/query` and a `limit`, or its aggregates.
 (**BL-944, 0.4.0**) The same holds when the refusal or the ceiling arrives wrapped in another error: it is a `503` with
@@ -453,10 +449,10 @@ All errors return a JSON body with this structure:
 
 ```json
 {
-  "error": "Human-readable error message",
-  "code": "ERROR_CODE",
-  "details": "Optional additional information",
-  "requestId": "echoed-request-id"
+ "error": "Human-readable error message",
+ "code": "ERROR_CODE",
+ "details": "Optional additional information",
+ "requestId": "echoed-request-id"
 }
 ```
 
@@ -466,7 +462,7 @@ All errors return a JSON body with this structure:
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path; or a `where` (or a group inside it, or a `joins[].where`) holds no condition (**BL-1036, next train**; see [Where Clause](#where-clause)) |
+| `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path; or a `where` (or a group inside it, or a `joins.where`) holds no condition (see [Where Clause](#where-clause)) |
 | `INVALID_FORMAT` | 400 | (**Lead S12, 0.6.0**) The request names the `format` query parameter (`/query`, a named query's execute or batch). It is no longer read: every JSON result is column arrays (`columns`, `data`), and the binary form is asked for with `Accept: application/vnd.aouda.column-batch-v2`. Any value is refused, `columnar` included, so an old client asking for `rows` is told rather than handed a body it misreads. Drop the parameter |
 | `ROW_OBJECTS_UNSUPPORTED` | 400 / 415 | (**Lead S12, 0.6.0**) A write body carries row objects (`rows`, or a named mutation's batch argument given as an array of objects), which no surface reads any more: `POST …/rows`, a branch insert, a named mutation's `batchParam`, the schema seed and `aouda.seed.json`, and a WebSocket `stream_rows` (as its `error` code). A bulk-load `:append` sent as NDJSON (`application/x-ndjson`) is refused the same way with `415`. Send [column arrays](#column-arrays-the-write-body) — `columns`, `data` and, for a cell that is not given, `absent` — or upgrade the client library. Nothing was written |
 | `MISSING_TABLE` | 400 | Table name is missing from request |
@@ -476,10 +472,10 @@ All errors return a JSON body with this structure:
 | `INVALID_VALUE` | 400 | Invalid value type or format |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) A column-batch body of a version this server no longer reads: an `ACB1` frame, or the retired media type `application/vnd.aouda.column-batch`. The message names the version found and the one expected (`ACB2`, `application/vnd.aouda.column-batch-v2`). Upgrade the client; nothing of the request was applied |
 | `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, 0.5.0**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
-| `STATEMENT_TOO_LARGE` | 400 | (**BL-1033, next train**) The statement **alone** needs more memory than the read path may ever hold on this database — its transient budget (`T15`, a fraction of the database's governed share), the ceiling a read has when no other work is running. A `DELETE` or `UPDATE` (on `…/rows`, in a `rows/batch` — as its first operation — or as a named mutation) whose matched rows, or a read (`/query`, a named query, a branch query, `POST …/materialized-queries/{name}/query`, a subscription's snapshot) whose held result, cannot fit it. **No `Retry-After`: the same statement is refused the same way on an idle server.** Nothing was applied. The message names the bytes the statement needs and the ceiling; `details` says what to do: narrow the statement (a tighter `where`, a `limit`, a `DELETE` in pieces) or have the operator raise the database's share. On a WebSocket it is the `error` frame's `code`, its message ending with that remedy instead of "retry after N s"; in a column-batch frame response it is the error end frame's `code` with `status` 400; an auth endpoint (sign-in, sign-up, refresh, MFA) answers it `400` in the auth error payload, `error: STATEMENT_TOO_LARGE`. Before, it was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After`, every time, and a client that honoured it (both SDKs do) retried to its own bound. A statement that fits alone and was refused because other work held the memory is still `MEMORY_BUDGET_EXCEEDED` |
-| `ARRAY_COLUMN_UNSUPPORTED` | 400 | (**BL-035, 0.9.0**) An [array column](../guides/array-columns.md) is used where it cannot be: in a primary key, `unique`, `references`, partition or cluster column, `autoIncrement`, a `default` given as text, `derived`, a check, a transform predicate, the permission column or a `memoryFilter`; in a query's `where` (a null test included), `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, `selectExpr` input, join key or `perKey` key; in a `setExpr`, a named mutation's `where` or `orderBy`, or a `min` / `max` / `maxLength` / `enum` constraint on a parameter it is written from; in an row conditions rule (on `/query` and a join side, a named query, `POST …/materialized-queries/{name}/query`, at subscribe, and on an update or delete: `PATCH` / `DELETE …/rows`, `POST …/rows/batch`, a named mutation's `update` or `delete` — an insert checked against such a rule is denied with `403`); in a `DELETE …/rows` or `rows/batch` delete's `orderBy`; in a subscription `filter` or `conflate.key` (an `error` message with this code); in a bulk-load route or tee under `applyTransforms` that copies it into a column of another type or a scalar into it; or as an edge table's source, destination or label column (**BL-1249, next train**: an array **property**
+| `STATEMENT_TOO_LARGE` | 400 | The statement **alone** needs more memory than the read path may ever hold on this database — its transient budget (`T15`, a fraction of the database's governed share), the ceiling a read has when no other work is running. A `DELETE` or `UPDATE` (on `…/rows`, in a `rows/batch` — as its first operation — or as a named mutation) whose matched rows, or a read (`/query`, a named query, a branch query, `POST …/materialized-queries/{name}/query`, a subscription's snapshot) whose held result, cannot fit it. **No `Retry-After`: the same statement is refused the same way on an idle server.** Nothing was applied. The message names the bytes the statement needs and the ceiling; `details` says what to do: narrow the statement (a tighter `where`, a `limit`, a `DELETE` in pieces) or have the operator raise the database's share. On a WebSocket it is the `error` frame's `code`, its message ending with that remedy instead of "retry after N s"; in a column-batch frame response it is the error end frame's `code` with `status` 400; an auth endpoint (sign-in, sign-up, refresh, MFA) answers it `400` in the auth error payload, `error: STATEMENT_TOO_LARGE`. Before, it was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After`, every time, and a client that honoured it (both SDKs do) retried to its own bound. A statement that fits alone and was refused because other work held the memory is still `MEMORY_BUDGET_EXCEEDED` |
+| `ARRAY_COLUMN_UNSUPPORTED` | 400 | (**BL-035, 0.9.0**) An [array column](../guides/array-columns.md) is used where it cannot be: in a primary key, `unique`, `references`, partition or cluster column, `autoIncrement`, a `default` given as text, `derived`, a check, a transform predicate, the permission column or a `memoryFilter`; in a query's `where` (a null test included), `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, `selectExpr` input, join key or `perKey` key; in a `setExpr`, a named mutation's `where` or `orderBy`, or a `min` / `max` / `maxLength` / `enum` constraint on a parameter it is written from; in an row conditions rule (on `/query` and a join side, a named query, `POST …/materialized-queries/{name}/query`, at subscribe, and on an update or delete: `PATCH` / `DELETE …/rows`, `POST …/rows/batch`, a named mutation's `update` or `delete` — an insert checked against such a rule is denied with `403`); in a `DELETE …/rows` or `rows/batch` delete's `orderBy`; in a subscription `filter` or `conflate.key` (an `error` message with this code); in a bulk-load route or tee under `applyTransforms` that copies it into a column of another type or a scalar into it; or as an edge table's source, destination or label column : an array **property**
 of an edge table is accepted at create and at `POST …/tables/{name}/columns` — it was refused, with the clause "a column of an edge
-table", since 0.9.0). The `error` names the column, its type and the clause: `ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).` In a named query or materialized definition applied with `schema apply`, the entry is `Failed` and its reason starts with the code, instead of a `400`. A bad **value** (a non-finite or null element, an over-limit array) is not this code: it is the surface's own invalid-value code, `NAMED_QUERY_BIND_FAILED`, `NAMED_MUTATION_BIND_FAILED` or `INVALID_REQUEST` |
+table", since 0.9.0). The `error` names the column, its type and the clause: `ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double; an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).` In a named query or materialized definition applied with `schema apply`, the entry is `Failed` and its reason starts with the code, instead of a `400`. A bad **value** (a non-finite or null element, an over-limit array) is not this code: it is the surface's own invalid-value code, `NAMED_QUERY_BIND_FAILED`, `NAMED_MUTATION_BIND_FAILED` or `INVALID_REQUEST` |
 
 #### Resource Errors (4xx)
 
@@ -493,7 +489,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `PARTITION_KEY_FIXED` | 400 | (**BL-1199, 0.9.0**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
 | `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
-| `BRANCH_EXISTS` | 409 | A branch with the specified name already exists, compared without regard to case (**BL-1341, next train**); or a branch of that name is still being deleted — its name stays reserved until the delete's cleanup (engine shutdown, segment references, files) is done, so retry the create afterwards (**Correctness-Hardening S27, next train**) |
+| `BRANCH_EXISTS` | 409 | A branch with the specified name already exists, compared without regard to case; or a branch of that name is still being deleted — its name stays reserved until the delete's cleanup (engine shutdown, segment references, files) is done, so retry the create afterwards |
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
 | `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter. `crossPartitionAccess` waives it and nothing else; on the data-plane listener it is not accepted and the guard decides (**BL-1227, 0.9.0**) |
@@ -535,7 +531,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_KEY_ROUTE_MISMATCH` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Signin credentials are invalid (wrong password or non-existent email) |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
-| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh presented with the newest, unexpired refresh token of a family of a principal an administrator disabled (a rotated or expired token is `401 AUTH_REFRESH_TOKEN_INVALID`; **BL-1002, next train**). The body is the auth payload and includes `suggestion` (not the remedy envelope). That principal's access token is `401 AUTH_CREDENTIAL_REVOKED`. Disabling the principal ends its open sessions |
+| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh presented with the newest, unexpired refresh token of a family of a principal an administrator disabled (a rotated or expired token is `401 AUTH_REFRESH_TOKEN_INVALID`;). The body is the auth payload and includes `suggestion` (not the remedy envelope). That principal's access token is `401 AUTH_CREDENTIAL_REVOKED`. Disabling the principal ends its open sessions |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
 | `RELOAD_REFUSED` | 422 | (**BL-1427, 0.14.0**) `POST /api/admin/reload`: the declaration has an `error` finding (what the next start would refuse); nothing was changed. The body is the plan with every finding |
 | `RELOAD_PARTIAL` | 207 | (**BL-1427, 0.14.0**) A reload stopped part-way (`failedStep`); the steps before it are applied, `/ready` says `reload_failed`. Reload again |
@@ -575,7 +571,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, 0.14.0**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
 | `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, 0.14.0**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda plan`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint; `aouda plan` and the start report it as the finding `SCHEMA_OVERLAY_INVALID` ([Declaration Finding Codes](plan-codes.md)). Fix: move the member to the base file. Before, it was dropped |
 | `EXPRESSION_OVERFLOW` | 400 | (**BL-1481, 0.15.0**) A `setExpr`, or a derived column's expression, overflowed 64-bit integer or 18-digit decimal arithmetic for a row; nothing written |
-| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp). At `…/bulk-load/:append`, also when `set-identity` was removed from a table's transform since `:begin` and a frame carries a value in such a column (**BL-1579, next train**) |
+| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp). At `…/bulk-load/:append`, also when `set-identity` was removed from a table's transform since `:begin` and a frame carries a value in such a column |
 
 #### State Errors (4xx)
 
@@ -615,16 +611,16 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log, then the auth bootstrap, the declared schema files, roles, keys and replication) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this). (**BL-1462, 0.14.0**) The port is open for the whole start, and this answers every caller but the health probes, loopback included |
 | `SETUP_REQUIRED` | 503 | The server's data directory has never been set up and nothing is declared (no server key, no `a declared principal`), so it is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, 0.14.0**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
-| `INTERNAL_ERROR` | 500 | An internal error occurred. (**Durability-1 S10, next train**) Also the answer to a read of a cold segment whose column file is missing or short: it is refused instead of answered with nulls, and the server log carries `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> found=<missing | n bytes | no pages> expected=<…>`; restore the database from a backup ([Backup and restore](../guides/backup.md)) |
-| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out — and, for an update, a delete, a truncate or a merge, a failure to write its deletion masks (a full disk) **after** it committed: the write is durable and visible, and the next open replays its log frame (**BL-1729, next train**). No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice. (**BL-1034, next train**) Also the answer when the request timeout fires after the write was applied — a `504 REQUEST_TIMEOUT` there said "not applied" — including a `rows/batch` whose timeout fired after some of its operations were applied (read the data to see which), and an edge or vector insert (`…/edges`, `…/vectors/{column}`), which this code now covers too |
-| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. (**BL-1033, next train**) A statement that alone exceeds the read path's ceiling — one no retry can satisfy — is `400 STATEMENT_TOO_LARGE` instead, with no `Retry-After`; this code is the transient refusal, which a retry can satisfy once other work releases its memory. |
-| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`; a materialized result's maintenance is still admitted up to `MaxWalBytes`, so a result that is behind catches up and releases its WAL (**BL-787, next train**). Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
-| `DISK_FULL` | 507 | (**BL-1658, next train**) The disk the request had to write to is full — the WAL, a bulk load's files, the backup target. The request was **not applied** (a WAL write is cut back to where it started; a bulk load stops before its commit point; a backup publishes nothing). `Retry-After: 30`; there is no estimate of when an operator frees space. Answered by every write endpoint, a bulk load's `:commit` and `:append` (an `:append` once the job has failed with it), `POST /admin/backup/trigger`, and `POST /admin/backup/restore` before it changes anything, naming the bytes it needs and the bytes free (**BL-1761, next train**), with no database name in the message. Retry after freeing space; no restart is needed — except when the full disk failed a WAL `fsync` (or the cut-back itself): the log then stops and answers `WAL_FAILED` until a restart. The SDKs do not re-send a write refused with a `507` (a write is re-sent only after a refusal that proves it was not applied — the memory, WAL-capacity, server-at-capacity and start-up refusals — or a connection that never opened): it surfaces as the error; retry after `Retry-After`. |
-| `WAL_FAILED` | 503 | (**BL-1703, next train**) A write or an `fsync` of the database's WAL failed earlier, and the log refuses every write until the database is reopened — a later sync cannot prove the failed range reached the disk. The request was **not applied**. `Retry-After: 60`. Clears only at a restart of the server (or of the database); read the log for the first failure. The SDKs do not re-send a write refused with it (it is not among the refusals that prove "not applied" to them, above); retry after `Retry-After`. |
-| `PROMOTION_INCOMPLETE` | 409 | (**BL-1202, next train**) `POST /api/databases/{db}/tables/{name}/promote-all-cold-for-update`: some of the table's cold segments were not promoted for update (a segment whose rows could not be loaded, or that a coalesce replaced meanwhile). The message gives the counts and `details` each segment's status; the segments that were promoted **stay promoted**, and a second call is idempotent. Before, such a call answered `200 { "promoted": n }` counting every attempt. A capacity refusal part-way keeps its own status and code and says how many were promoted before it |
+| `INTERNAL_ERROR` | 500 | An internal error occurred. Also the answer to a read of a cold segment whose column file is missing or short: it is refused instead of answered with nulls, and the server log carries `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> found=<missing | n bytes | no pages> expected=<…>`; restore the database from a backup ([Backup and restore](../guides/backup.md)) |
+| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out — and, for an update, a delete, a truncate or a merge, a failure to write its deletion masks (a full disk) **after** it committed: the write is durable and visible, and the next open replays its log frame. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice. Also the answer when the request timeout fires after the write was applied — a `504 REQUEST_TIMEOUT` there said "not applied" — including a `rows/batch` whose timeout fired after some of its operations were applied (read the data to see which), and an edge or vector insert (`…/edges`, `…/vectors/{column}`), which this code now covers too |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. A statement that alone exceeds the read path's ceiling — one no retry can satisfy — is `400 STATEMENT_TOO_LARGE` instead, with no `Retry-After`; this code is the transient refusal, which a retry can satisfy once other work releases its memory. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`; a materialized result's maintenance is still admitted up to `MaxWalBytes`, so a result that is behind catches up and releases its WAL. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
+| `DISK_FULL` | 507 | The disk the request had to write to is full — the WAL, a bulk load's files, the backup target. The request was **not applied** (a WAL write is cut back to where it started; a bulk load stops before its commit point; a backup publishes nothing). `Retry-After: 30`; there is no estimate of when an operator frees space. Answered by every write endpoint, a bulk load's `:commit` and `:append` (an `:append` once the job has failed with it), `POST /admin/backup/trigger`, and `POST /admin/backup/restore` before it changes anything, naming the bytes it needs and the bytes free, with no database name in the message. Retry after freeing space; no restart is needed — except when the full disk failed a WAL `fsync` (or the cut-back itself): the log then stops and answers `WAL_FAILED` until a restart. The SDKs do not re-send a write refused with a `507` (a write is re-sent only after a refusal that proves it was not applied — the memory, WAL-capacity, server-at-capacity and start-up refusals — or a connection that never opened): it surfaces as the error; retry after `Retry-After`. |
+| `WAL_FAILED` | 503 | A write or an `fsync` of the database's WAL failed earlier, and the log refuses every write until the database is reopened — a later sync cannot prove the failed range reached the disk. The request was **not applied**. `Retry-After: 60`. Clears only at a restart of the server (or of the database); read the log for the first failure. The SDKs do not re-send a write refused with it (it is not among the refusals that prove "not applied" to them, above); retry after `Retry-After`. |
+| `PROMOTION_INCOMPLETE` | 409 | `POST /api/databases/{db}/tables/{name}/promote-all-cold-for-update`: some of the table's cold segments were not promoted for update (a segment whose rows could not be loaded, or that a coalesce replaced meanwhile). The message gives the counts and `details` each segment's status; the segments that were promoted **stay promoted**, and a second call is idempotent. Before, such a call answered `200 { "promoted": n }` counting every attempt. A capacity refusal part-way keeps its own status and code and says how many were promoted before it |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) `POST …/tables/{name}/rows/batch` only: operation `k` (`k` ≥ 1) was refused for capacity. Operations `0` to `k − 1` **were applied**; operation `k` and the ones after it were not. `details` names `appliedOperations=k`, `totalOperations=n` and the refusal's own code. **No `Retry-After`**, deliberately: re-sending the whole batch would apply its first `k` operations twice. Re-send only the remaining operations (`operations[k..]`) as a new batch. A refusal of operation `0` is still the plain `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` with `Retry-After`: nothing was applied. It used to be that plain refusal whatever `k` was, which both SDKs re-send |
 | `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
-| `REQUEST_TIMEOUT` | 504 | The request ran past the server's request timeout (`Aouda:RequestTimeoutMs`, 30 s by default; the bulk-load `:append` / `:commit` and `:refresh` endpoints have their own). (**BL-1034, next train**) A data write answered `504` — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert, an edge or vector insert — **applied nothing**: the timeout is honoured only before the write's commit point, so it is safe to retry. A write the server had already applied when the timeout fired is answered `500 WRITE_APPLIED_RESPONSE_FAILED` instead (do not re-send it). Before, a timeout inside a table, branch, database, graph, vector or query endpoint was answered `500 INTERNAL_ERROR` "Failed to …", which a client could not tell from a bug, and an applied write that then timed out was answered `504`. (This row used to name the code `TIMEOUT`; the server has always sent `REQUEST_TIMEOUT`.) |
+| `REQUEST_TIMEOUT` | 504 | The request ran past the server's request timeout (`Aouda:RequestTimeoutMs`, 30 s by default; the bulk-load `:append` / `:commit` and `:refresh` endpoints have their own). A data write answered `504` — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert, an edge or vector insert — **applied nothing**: the timeout is honoured only before the write's commit point, so it is safe to retry. A write the server had already applied when the timeout fired is answered `500 WRITE_APPLIED_RESPONSE_FAILED` instead (do not re-send it). Before, a timeout inside a table, branch, database, graph, vector or query endpoint was answered `500 INTERNAL_ERROR` "Failed to …", which a client could not tell from a bug, and an applied write that then timed out was answered `504`. (This row used to name the code `TIMEOUT`; the server has always sent `REQUEST_TIMEOUT`.) |
 | `OVERLOADED` | 503 | Server is overloaded |
 
 **`Retry-After` is readable from a browser (**architecture review, 0.3.0**).** Every CORS policy exposes it, so a
@@ -637,7 +633,7 @@ These also appear as WebSocket `error` `code` values where noted.
 
 (**BL-944, 0.4.0**) **A refusal on a WebSocket is its own code.** A `stream_rows` write, a subscription's snapshot and a
 subscription's permission read that the server refused for capacity answer `MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `DISK_FULL` or `WAL_FAILED`
-(message ending "retry after N s"), and a write conflict `WRITE_CONFLICT` — wherever the refusal arose. (**BL-1033, next train**) A snapshot or a
+(message ending "retry after N s"), and a write conflict `WRITE_CONFLICT` — wherever the refusal arose. A snapshot or a
 `stream_rows` statement that alone exceeds the read path's ceiling answers `STATEMENT_TOO_LARGE`, its message ending with the remedy
 and no "retry after". Before, a wrapped refusal
 or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED` and a refused permission read `PERMISSION_REVOKED`
@@ -645,14 +641,14 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 
 | Code | HTTP / WS | Description |
 |------|-----------|-------------|
-| `NAMED_QUERY_DEPRECATED` | 200 warning | Hash is deprecated; execute/subscribe still succeeds. `warnings[]` includes `hash` and optional `sunsetAt`. |
+| `NAMED_QUERY_DEPRECATED` | 200 warning | Hash is deprecated; execute/subscribe still succeeds. `warnings` includes `hash` and optional `sunsetAt`. |
 | `NAMED_MUTATION_DEPRECATED` | 200 warning | Same for named mutations |
 | `NAMED_MUTATION_UNCAPPED_DELETE` | 400 (schema apply) | Named-mutation delete is missing a numeric `limit` cap |
 | `NAMED_MUTATION_RETURNING_STAR` | 400 (schema apply) | Named-mutation `returning` contains `*` |
 | `NAMED_MUTATION_VALUE_NODE_INVALID` | 400 (schema apply) | A `values` / `set` entry is an object node that is neither `{ "param": "<name>" }` nor `{ "value": <literal> }` |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
 | `DUPLICATE_PRIMARY_KEY` | 409 | *BL-636, 0.1.37.* An insert named a primary key a live row already holds. `details` carries the offending key. Use `op: "upsert"` (named mutation) or `mode: "upsert"` (write-stream) when the write is meant to replace. Previously surfaced as `500 INTERNAL_ERROR` |
-| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) A DELETE or UPDATE (table `PATCH` / `DELETE` rows, `rows/batch`, a named mutation) did not commit: it re-checks the rows it matched at its commit and runs again from its scan when another writer changed one, and another writer kept deleting or rewriting them through all 16 of its attempts. Nothing of it was applied (in `rows/batch`, the operations before it were). Retry the request with backoff. (**BL-939, next train**) Also answered when a write read a table's key mode while an ALTER of that mode began ("… read its key mode as …"), and when a table that names its rows by logged id holds buffered rows whose logged ids are not known and flushing them was refused ("… logged ids are not known …"): nothing was applied; retry. Previously surfaced as `500 INTERNAL_ERROR`. The C# SDK raises it as `AoudaRequestException` (`StatusCode` 409, `ErrorCode` `WRITE_CONFLICT`) and does not retry it itself. An admin auth write that keeps conflicting answers it in the auth payload shape |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) A DELETE or UPDATE (table `PATCH` / `DELETE` rows, `rows/batch`, a named mutation) did not commit: it re-checks the rows it matched at its commit and runs again from its scan when another writer changed one, and another writer kept deleting or rewriting them through all 16 of its attempts. Nothing of it was applied (in `rows/batch`, the operations before it were). Retry the request with backoff. Also answered when a write read a table's key mode while an ALTER of that mode began ("… read its key mode as …"), and when a table that names its rows by logged id holds buffered rows whose logged ids are not known and flushing them was refused ("… logged ids are not known …"): nothing was applied; retry. Previously surfaced as `500 INTERNAL_ERROR`. The C# SDK raises it as `AoudaRequestException` (`StatusCode` 409, `ErrorCode` `WRITE_CONFLICT`) and does not retry it itself. An admin auth write that keeps conflicting answers it in the auth payload shape |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |
@@ -661,14 +657,14 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_PROJECTION_REQUIRED` | 400 (schema apply) | Named query omitted `select` / `selectExpr` |
 | `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
 | `NAMED_QUERY_TOO_MANY_JOINS` | 400 (schema apply) | Join count exceeds cap (default 3) |
-| `NAMED_QUERY_COLUMN_INVALID` | 400 (schema apply) | (**BL-997, BL-857, next train**) A column a definition names cannot execute: a joined definition's `select`, `orderBy` or `orderByChoices` must be written `Table.Column`; names are case-sensitive and checked against the table the clause binds to (the base `where` the base table, `joins[i].where` its join's); a sort column must be of a type the engine orders (not `Bool`, `Guid`, `Float32` or `Byte`). The message names the clause and the spelling to use. |
-| `JOIN_KEY_TYPE_MISMATCH` | 400 | (**Correctness-Hardening S08, next train**) A join's two key columns have types that can never compare (see the Join Clause). Also raised by `schema apply` for a named query, and by a named-query subscribe as an `error` message. Join on comparable types, or store the key in one type on both tables. |
-| `MATERIALIZED_QUERY_NEEDS_SOURCE_KEY` | — (schema apply) | (**BL-1326, next train**) A primary-key change would leave a `topNPerGroup` materialized query without a source key. In schema apply it is a `Failed` entry whose `reason` starts with the code. No retry satisfies it: drop the named `topNPerGroup` queries first, or keep a primary key. |
-| `BRANCH_TABLE_UNAVAILABLE` | 409 | (**BL-1333, next train**) A branch query or insert named a table the database dropped (or, for a materialized query's result, rebuilt into a new table) after the branch was created. Create a new branch to read the current table; the branch's other tables answer as before. |
+| `NAMED_QUERY_COLUMN_INVALID` | 400 (schema apply) | A column a definition names cannot execute: a joined definition's `select`, `orderBy` or `orderByChoices` must be written `Table.Column`; names are case-sensitive and checked against the table the clause binds to (the base `where` the base table, `joins[i].where` its join's); a sort column must be of a type the engine orders (not `Bool`, `Guid`, `Float32` or `Byte`). The message names the clause and the spelling to use. |
+| `JOIN_KEY_TYPE_MISMATCH` | 400 | A join's two key columns have types that can never compare (see the Join Clause). Also raised by `schema apply` for a named query, and by a named-query subscribe as an `error` message. Join on comparable types, or store the key in one type on both tables. |
+| `MATERIALIZED_QUERY_NEEDS_SOURCE_KEY` | — (schema apply) | A primary-key change would leave a `topNPerGroup` materialized query without a source key. In schema apply it is a `Failed` entry whose `reason` starts with the code. No retry satisfies it: drop the named `topNPerGroup` queries first, or keep a primary key. |
+| `BRANCH_TABLE_UNAVAILABLE` | 409 | A branch query or insert named a table the database dropped (or, for a materialized query's result, rebuilt into a new table) after the branch was created. Create a new branch to read the current table; the branch's other tables answer as before. |
 | `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"`. By design: the data-plane cannot compose a query (ADR 0040 C-2). Subscribe by name, or send the table subscription (`target` + `filter`) to the **admin** listener with a credential whose statements allow it |
 | `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-name also sent a client `filter` |
-| `INVALID_SUBSCRIPTION_FILTER` | WS error | A table `subscribe`'s `filter` cannot be used: not an object, a shorthand entry that is not one operator object, a member a where clause or a condition does not have, a shorthand column mixed into the structured form, no condition at all (`{}` included), a `null` list entry, or over the rewrite's bound. The subscription is not created. (**BL-1036, next train**) Up to 0.16.0 a member the types lack and a mixed filter were parsed with the member dropped, and a filter with no condition as "no filter" — the subscription received rows its filter did not select; a `null` entry failed the subscribe without this code |
+| `INVALID_SUBSCRIPTION_FILTER` | WS error | A table `subscribe`'s `filter` cannot be used: not an object, a shorthand entry that is not one operator object, a member a where clause or a condition does not have, a shorthand column mixed into the structured form, no condition at all (`{}` included), a `null` list entry, or over the rewrite's bound. The subscription is not created. Up to 0.16.0 a member the types lack and a mixed filter were parsed with the member dropped, and a filter with no condition as "no filter" — the subscription received rows its filter did not select; a `null` entry failed the subscribe without this code |
 | `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
 | `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
@@ -712,27 +708,27 @@ Lists databases visible to the caller.
 
 ```json
 {
-  "databases": [
-    {
-      "name": "myapp",
-      "state": "Active",
-      "createdAt": "2026-06-26T10:00:00.0000000Z",
-      "options": {
-        "maxMemoryShareBytes": null,
-        "defaultTemperature": "Auto",
-        "durability": "strict",
-        "replicationMode": "Replicate"
-      },
-      "isInternal": false,
-      "isAuthDatabase": false,
-      "authDatabaseKind": "none",
-      "auth": {
-        "enabled": false,
-        "database": null
-      }
-    }
-  ],
-  "count": 1
+ "databases": [
+ {
+ "name": "myapp",
+ "state": "Active",
+ "createdAt": "2026-06-26T10:00:00.0000000Z",
+ "options": {
+ "maxMemoryShareBytes": null,
+ "defaultTemperature": "Auto",
+ "durability": "strict",
+ "replicationMode": "Replicate"
+ },
+ "isInternal": false,
+ "isAuthDatabase": false,
+ "authDatabaseKind": "none",
+ "auth": {
+ "enabled": false,
+ "database": null
+ }
+ }
+ ],
+ "count": 1
 }
 ```
 
@@ -781,22 +777,22 @@ Direct lookup of a specific database by name. Returns the database if it exists 
 
 ```json
 {
-  "name": "myapp",
-  "state": "Active",
-  "createdAt": "2026-06-26T10:00:00.0000000Z",
-  "options": {
-    "maxMemoryShareBytes": null,
-    "defaultTemperature": "Auto",
-    "durability": "strict",
-    "replicationMode": "Replicate"
-  },
-  "auth": {
-    "enabled": true,
-    "database": "auth"
-  },
-  "isInternal": false,
-  "isAuthDatabase": false,
-  "authDatabaseKind": "none"
+ "name": "myapp",
+ "state": "Active",
+ "createdAt": "2026-06-26T10:00:00.0000000Z",
+ "options": {
+ "maxMemoryShareBytes": null,
+ "defaultTemperature": "Auto",
+ "durability": "strict",
+ "replicationMode": "Replicate"
+ },
+ "auth": {
+ "enabled": true,
+ "database": "auth"
+ },
+ "isInternal": false,
+ "isAuthDatabase": false,
+ "authDatabaseKind": "none"
 }
 ```
 
@@ -828,8 +824,8 @@ X-Aouda-Token: 01a1b2c3d4e5f60708090a0b0c0d0e0f10111213
 
 ```json
 {
-  "database": "appdb",
-  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
+ "database": "appdb",
+ "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
 
@@ -847,13 +843,13 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 
 ```json
 {
-  "name": "myapp",
-  "durability": "strict",
-  "replicationMode": "Replicate",
-  "maxMemoryShareBytes": null,
-  "defaultTemperature": "Auto",
-  "kind": "data",
-  "auth": { "enabled": true }
+ "name": "myapp",
+ "durability": "strict",
+ "replicationMode": "Replicate",
+ "maxMemoryShareBytes": null,
+ "defaultTemperature": "Auto",
+ "kind": "data",
+ "auth": { "enabled": true }
 }
 ```
 
@@ -876,15 +872,15 @@ Sign-up is not a member of this body. Set it with `PUT /api/auth/{authDatabase}/
 
 ```json
 {
-  "name": "myapp",
-  "state": "Active",
-  "auth": {
-    "enabled": true,
-    "database": "auth"
-  },
-  "isInternal": false,
-  "isAuthDatabase": false,
-  "authDatabaseKind": "none"
+ "name": "myapp",
+ "state": "Active",
+ "auth": {
+ "enabled": true,
+ "database": "auth"
+ },
+ "isInternal": false,
+ "isAuthDatabase": false,
+ "authDatabaseKind": "none"
 }
 ```
 
@@ -901,16 +897,16 @@ Drops a database. Returns `204 No Content` immediately after the foreground swit
 The endpoint performs a fast foreground switch, then returns `204`. All cleanup happens in the background via the persistent job queue:
 
 1. **Foreground (synchronous, completes before 204):**
-   - Verifies the database is in `Active` state (→ `404` if not found).
-   - Removes the engine from query routing.
-   - Persists `Dropping` state in `databases.json` (atomic write).
-   - Writes a `DropDatabase` job record to `pending_jobs.json` (atomic write, crash-safe).
-   - Returns `204 No Content`.
+ - Verifies the database is in `Active` state (→ `404` if not found).
+ - Removes the engine from query routing.
+ - Persists `Dropping` state in `databases.json` (atomic write).
+ - Writes a `DropDatabase` job record to `pending_jobs.json` (atomic write, crash-safe).
+ - Returns `204 No Content`.
 
 2. **Background (asynchronous, via `PendingOpsWorker` + `DropDatabaseJobHandler`):**
-   - Phase 1: Engine `DropDisposeAsync` — drains WAL, disposes engine and branch engines; skips HRA snapshot (data is discarded, not persisted).
-   - Phase 2: Directory delete — `Directory.Delete(path, recursive)` with exponential-backoff retry (1 s → 2 s → … → 30 s cap).
-   - Phase 3: Registry completion — removes the database from `databases.json` entirely.
+ - Phase 1: Engine `DropDisposeAsync` — drains WAL, disposes engine and branch engines; skips HRA snapshot (data is discarded, not persisted).
+ - Phase 2: Directory delete — `Directory.Delete(path, recursive)` with exponential-backoff retry (1 s → 2 s → … → 30 s cap).
+ - Phase 3: Registry completion — removes the database from `databases.json` entirely.
 
 **Crash safety:** the job record in `pending_jobs.json` is written before `204` is returned. On any restart, `PendingOpsWorker.StartAsync` loads all `Running`/`Interrupted` jobs and re-executes them. On the recovery path, engine dispose (Phase 1) is skipped because the engine is no longer in memory; the worker proceeds directly to directory delete and registry completion.
 
@@ -950,8 +946,8 @@ Clears the quarantine and reopens the database: `204 No Content` when it opens. 
 | `404` | `DATABASE_NOT_FOUND` | Database does not exist |
 | `400` | `INVALID_REQUEST` | The request was refused as invalid (the message says why) |
 | `503` | `LEGACY_WAL_PRESENT` | A leftover `insert.wal` from an older layout is in the database; it is refused again and the database stays quarantined |
-| `503` | `RESTORE_INCOMPLETE` | A restore of this database did not complete; it stays quarantined until a restore of it completes (**BL-1739, next train**) |
-| `503` | `DATABASE_QUARANTINED` | The reopen was refused again and the database stays quarantined; the message says why. For a damaged WAL segment it is the coded refusal `FILE_FORMAT_REFUSED: kind=wal-segment`, naming the segment and the position and the way on: `salvagePastCorruptWal=true`, or a restore (**BL-1741, next train**) |
+| `503` | `RESTORE_INCOMPLETE` | A restore of this database did not complete; it stays quarantined until a restore of it completes |
+| `503` | `DATABASE_QUARANTINED` | The reopen was refused again and the database stays quarantined; the message says why. For a damaged WAL segment it is the coded refusal `FILE_FORMAT_REFUSED: kind=wal-segment`, naming the segment and the position and the way on: `salvagePastCorruptWal=true`, or a restore |
 
 ---
 
@@ -977,21 +973,21 @@ Execute a query against a table.
 
 ```json
 {
-  "database": "mydb",
-  "table": "orders",
-  "select": ["id", "customer", "total"],
-  "where": {
-    "and": [
-      {"column": "total", "op": "gte", "value": 100},
-      {"column": "status", "op": "eq", "value": "active"}
-    ]
-  },
-  "orderBy": [
-    {"column": "total", "descending": true},
-    {"column": "customer", "descending": false}
-  ],
-  "offset": 0,
-  "limit": 1000
+ "database": "mydb",
+ "table": "orders",
+ "select": ["id", "customer", "total"],
+ "where": {
+ "and": [
+ {"column": "total", "op": "gte", "value": 100},
+ {"column": "status", "op": "eq", "value": "active"}
+ ]
+ },
+ "orderBy": [
+ {"column": "total", "descending": true},
+ {"column": "customer", "descending": false}
+ ],
+ "offset": 0,
+ "limit": 1000
 }
 ```
 
@@ -999,15 +995,15 @@ Execute a query against a table.
 |-------|------|----------|-------------|
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
 | `table` | string | Yes | Table name to query |
-| `select` | string[] | No | Columns to return (null = all) |
+| `select` | string | No | Columns to return (null = all) |
 | `where` | object | No | Filter predicates |
-| `orderBy` | object[] | No | Sort columns (see below) |
+| `orderBy` | object | No | Sort columns (see below) |
 | `offset` | number | No | Rows to skip (default: 0) |
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
 | A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
-| `joins` | object[] | No | JOIN clauses to apply in order (see below). |
-| `aggregates` | object[] | No | (**ColumnarRead S16, 0.3.0**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
-| `groupBy` | object[] | No | (**ColumnarRead S16, 0.3.0**) GROUP BY keys; requires `aggregates`. |
+| `joins` | object | No | JOIN clauses to apply in order (see below). |
+| `aggregates` | object | No | (**ColumnarRead S16, 0.3.0**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
+| `groupBy` | object | No | (**ColumnarRead S16, 0.3.0**) GROUP BY keys; requires `aggregates`. |
 | `perKey` | object | No | `{ "keys": [...], "orderBy": "col", "latest": true }` — one row per distinct `keys` tuple, the one with the greatest (`latest: false`: least) `orderBy` value, ties to the lowest primary key. `select`, `orderBy` and the page apply to the collapsed rows; a `LatestPerKey` / `FirstPerKey` materialized query of the same shape answers it when current (`stats.routedTo`). Not with `aggregates`, `groupBy`, `distinct`, `selectExpr` or `joins` (400); `/query/count` refuses it (**BL-801, 0.3.0**). |
 
 **Where Clause:**
@@ -1015,63 +1011,63 @@ Execute a query against a table.
 
 ```json
 {
-  "and": [{"column": "...", "op": "...", "value": ...}],
-  "or": [{"column": "...", "op": "...", "value": ...}],
-  "groups": [
-    {
-      "and": [{"column": "tenant_id", "op": "eq", "value": 42}]
-    }
-  ]
+ "and": [{"column": "...", "op": "...", "value":...}],
+ "or": [{"column": "...", "op": "...", "value":...}],
+ "groups": [
+ {
+ "and": [{"column": "tenant_id", "op": "eq", "value": 42}]
+ }
+ ]
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `and` | Condition[] | All conditions must match (AND). |
-| `or` | Condition[] | Any condition must match (OR). |
-| `groups` | WhereClause[] | Nested sub-clauses. Each group is AND'd with the top-level conditions. Enables safe composition of independent filter layers (e.g., row conditions partition scope + row conditions row scope). Maximum nesting depth: **5** (`ProtocolConstants.MaxWhereClauseNestingDepth`). |
+| `and` | Condition | All conditions must match (AND). |
+| `or` | Condition | Any condition must match (OR). |
+| `groups` | WhereClause | Nested sub-clauses. Each group is AND'd with the top-level conditions. Enables safe composition of independent filter layers (e.g., row conditions partition scope + row conditions row scope). Maximum nesting depth: **5** (`ProtocolConstants.MaxWhereClauseNestingDepth`). |
 
 `groups` contains nested `WhereClause` objects that are AND-combined with the top-level `and`/`or`. Use `groups` to express nested boolean logic (e.g. `AND(OR(...))`). Each group can itself contain `and`, `or`, and nested `groups`.
 
-**A `where` is read strictly (**BL-1036, next train**).** The two rules below hold wherever a where clause is accepted: `POST …/query`
-and `…/query/count` (with `aggregates` and `groupBy` too), each `joins[].where`, a `setExpr` `conditional`'s `when`, `PATCH` and
+**A `where` is read strictly.** The two rules below hold wherever a where clause is accepted: `POST …/query`
+and `…/query/count` (with `aggregates` and `groupBy` too), each `joins.where`, a `setExpr` `conditional`'s `when`, `PATCH` and
 `DELETE …/tables/{name}/rows`, `POST …/rows/batch`, and a WebSocket or long-poll `subscribe` `filter` (below). Up to 0.16.0 a where the
 server could not read was not refused: it filtered less, or nothing.
 
 - **A member a where clause or a condition does not have is `400`.** A where clause has only `and`, `or` and `groups`; a condition has
-  only `column`, `op`, `value`, `param`, `whenParamPresent` and `ignoreCase`. A condition written at the top level
-  (`"where": {"column": "v", "op": "gte", "value": 3}` instead of `"where": {"and": [{…}]}`), a misspelt list (`"ors"`) or a misspelt
-  member (`"vlaue"`, `"values"`, `"ignore_case"`) is refused before the request runs, and nothing is read or written. The body is the
-  framework's validation body (it has no `code`); `errors` is keyed by the member's JSON path and the message names the member:
+ only `column`, `op`, `value`, `param`, `whenParamPresent` and `ignoreCase`. A condition written at the top level
+ (`"where": {"column": "v", "op": "gte", "value": 3}` instead of `"where": {"and": [{…}]}`), a misspelt list (`"ors"`) or a misspelt
+ member (`"vlaue"`, `"values"`, `"ignore_case"`) is refused before the request runs, and nothing is read or written. The body is the
+ framework's validation body (it has no `code`); `errors` is keyed by the member's JSON path and the message names the member:
 
-  ```json
-  {
-    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
-    "title": "One or more validation errors occurred.",
-    "status": 400,
-    "errors": {
-      "$.where.column": ["The JSON property 'column' could not be mapped to any .NET member contained in type 'Aouda.Protocol.WhereClause'."]
-    },
-    "traceId": "00-…"
-  }
-  ```
+ ```json
+ {
+ "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+ "title": "One or more validation errors occurred.",
+ "status": 400,
+ "errors": {
+ "$.where.column": ["The JSON property 'column' could not be mapped to any.NET member contained in type 'Aouda.Protocol.WhereClause'."]
+ },
+ "traceId": "00-…"
+ }
+ ```
 
-  `errors` may also hold a `"request"` entry (*"The request field is required."*): the body as a whole could not be read. Up to 0.16.0
-  the member was dropped. A condition at the top level left an empty where clause, and the read answered **every row**; a stray list
-  beside a valid one dropped those conditions, which widened what an update or a delete touched.
-- **A where clause with no condition is `400 INVALID_REQUEST`** — `{}`, `{"and": []}`, `{"or": []}`, `{"groups": []}`, and any group
-  inside it or a join's `where` that holds none (`{"and": [{…}], "groups": [{}]}`). The `error` names where it is: *The where clause has
-  no condition at 'where.groups[0]': give at least one condition in "and", "or" or "groups", or omit "where" to read every row.* (the
-  path is `joins[0].where` for a join's). To read every row, omit `where` (or send `null`). Up to 0.16.0 an empty clause read every row
-  and an empty group was skipped. On `PATCH` / `DELETE …/rows` and `rows/batch`, an empty top-level `where` keeps its refusal
-  (*WHERE clause is required and must contain at least one condition.*, prefixed `Operation[i]` in a batch); an empty group inside a
-  mutation's `where` is now refused with the message above, where before it was skipped and the write ran on the other conditions.
+ `errors` may also hold a `"request"` entry (*"The request field is required."*): the body as a whole could not be read. Up to 0.16.0
+ the member was dropped. A condition at the top level left an empty where clause, and the read answered **every row**; a stray list
+ beside a valid one dropped those conditions, which widened what an update or a delete touched.
+- **A where clause with no condition is `400 INVALID_REQUEST`** — `{}`, `{"and": }`, `{"or": }`, `{"groups": }`, and any group
+ inside it or a join's `where` that holds none (`{"and": [{…}], "groups": [{}]}`). The `error` names where it is: *The where clause has
+ no condition at 'where.groups[0]': give at least one condition in "and", "or" or "groups", or omit "where" to read every row.* (the
+ path is `joins[0].where` for a join's). To read every row, omit `where` (or send `null`). Up to 0.16.0 an empty clause read every row
+ and an empty group was skipped. On `PATCH` / `DELETE …/rows` and `rows/batch`, an empty top-level `where` keeps its refusal
+ (*WHERE clause is required and must contain at least one condition.*, prefixed `Operation[i]` in a batch); an empty group inside a
+ mutation's `where` is now refused with the message above, where before it was skipped and the write ran on the other conditions.
 - **A `null` entry in a list is `400 INVALID_REQUEST`** (`"and": [null]`, `"groups": [null]`), naming where it is: *The where clause
-  holds a null at 'where.and[0]': …*; a subscription `filter` with one is `INVALID_SUBSCRIPTION_FILTER`. Up to 0.16.0 it answered
-  `500 INTERNAL_ERROR`.
+ holds a null at 'where.and[0]': …*; a subscription `filter` with one is `INVALID_SUBSCRIPTION_FILTER`. Up to 0.16.0 it answered
+ `500 INTERNAL_ERROR`.
 - A **named query**'s definition already refused an unknown member at `schema/apply` (`SCHEMA_UNKNOWN_MEMBER`). A named query whose
-  conditions are all `whenParamPresent` and whose arguments are all absent still reads every row: the rule is about what a client
-  sends, not about a definition's bound clause.
+ conditions are all `whenParamPresent` and whose arguments are all absent still reads every row: the rule is about what a client
+ sends, not about a definition's bound clause.
 
 **Operators:**
 
@@ -1115,15 +1111,15 @@ Default `false` — omitted, existing payloads and named-query hashes are unaffe
 
 - `%` matches any sequence of characters, including none. `_` matches exactly one character.
 - `\` escapes `%`, `_`, or `\` itself. A pattern that ends in a lone `\`, or escapes anything else, is
-  rejected with `INVALID_REQUEST` (400) rather than treated as a literal.
+ rejected with `INVALID_REQUEST` (400) rather than treated as a literal.
 - Matching is **ordinal and case-sensitive** by default, the same as `eq` on a String column — add
-  `"ignoreCase": true` for a case-insensitive match (see above).
+ `"ignoreCase": true` for a case-insensitive match (see above).
 - A **null** column value never matches — not even `"%"` — following SQL's `NULL LIKE x` is unknown.
 - The value is a *pattern*, not a comparand: a `like` condition against a non-String column is rejected
-  (`INVALID_REQUEST`, 400), and a named query that declares one is rejected at `schema/apply` with
-  `INVALID_OPERATOR`.
+ (`INVALID_REQUEST`, 400), and a named query that declares one is rejected at `schema/apply` with
+ `INVALID_OPERATOR`.
 - `like` does **not** satisfy the [partition-filter rule](../guides/browser-tier-read-limits.md), even for
-  a pure prefix pattern.
+ a pure prefix pattern.
 - There is no index acceleration: a `like` predicate is a scan of the column.
 
 Encoding conventions:
@@ -1140,8 +1136,8 @@ storing a definition that could never execute.
 
 ```json
 [
-  {"column": "columnName", "descending": false},
-  {"column": "anotherColumn", "descending": true}
+ {"column": "columnName", "descending": false},
+ {"column": "anotherColumn", "descending": true}
 ]
 ```
 
@@ -1160,13 +1156,11 @@ storing a definition that could never execute.
 | `type` | string | No | Join type: `"inner"` (default), `"left"`, `"right"`, `"full"`, `"cross"`. |
 | `leftColumn` | string | No | Left key column for single-column joins. |
 | `rightColumn` | string | No | Right key column for single-column joins. |
-| `leftColumns` | string[] | No | Left key columns for multi-column joins. |
-| `rightColumns` | string[] | No | Right key columns for multi-column joins. |
+| `leftColumns` | string | No | Left key columns for multi-column joins. |
+| `rightColumns` | string | No | Right key columns for multi-column joins. |
 | `where` | object | No | A filter on the joined table, in the `where` format; its column names are that table's, and its values are read with that table's culture (a slash date on its `Date` column is read the way a `where` on that table reads it). It applies to the joined table's rows before they join (**BL-818, 0.3.0**). |
 
-For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
-
-(**Correctness-Hardening S08, next train**) **Join keys of two numeric types join by value**: an `Int32` key meets a `Double` `2.0`, an `Int64` a `Decimal(p,s)` `2.00`, an `Int64` a `UInt64` of the same value. Two key types that can never compare — a string with a number, a `Timestamp` with a `Date`, a `Guid` with a string, a `Bool` with a number, a `Double` / `Float32` with a `Decimal(p,s)` — are refused `400 JOIN_KEY_TYPE_MISMATCH`, naming both columns and their types, when the query is built and again when it runs. A key column that does not exist, or is not a visible column (an aggregate result's hidden state column), is refused as an unknown column. `selectExpr` cannot be combined with `joins` (`400 INVALID_REQUEST`): a joined query computes no column.
+For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither. **Join keys of two numeric types join by value**: an `Int32` key meets a `Double` `2.0`, an `Int64` a `Decimal(p,s)` `2.00`, an `Int64` a `UInt64` of the same value. Two key types that can never compare — a string with a number, a `Timestamp` with a `Date`, a `Guid` with a string, a `Bool` with a number, a `Double` / `Float32` with a `Decimal(p,s)` — are refused `400 JOIN_KEY_TYPE_MISMATCH`, naming both columns and their types, when the query is built and again when it runs. A key column that does not exist, or is not a visible column (an aggregate result's hidden state column), is refused as an unknown column. `selectExpr` cannot be combined with `joins` (`400 INVALID_REQUEST`): a joined query computes no column.
 
 **The query's `where` filters the base table; a join's `where` filters its joined table.** A joined row the join's `where`
 rejects takes part in no match: an inner or cross join drops it, a left join answers the base row with `null` in that table's
@@ -1183,18 +1177,18 @@ and for `…/query/count`.
 **Join example:**
 ```json
 {
-  "database": "mydb",
-  "table": "orders",
-  "select": ["orders.id", "customers.name", "orders.total"],
-  "joins": [
-    {
-      "table": "customers",
-      "type": "inner",
-      "leftColumn": "customer_id",
-      "rightColumn": "id"
-    }
-  ],
-  "limit": 100
+ "database": "mydb",
+ "table": "orders",
+ "select": ["orders.id", "customers.name", "orders.total"],
+ "joins": [
+ {
+ "table": "customers",
+ "type": "inner",
+ "leftColumn": "customer_id",
+ "rightColumn": "id"
+ }
+ ],
+ "limit": 100
 }
 ```
 
@@ -1204,32 +1198,32 @@ and for `…/query/count`.
 
 ```json
 {
-  "database": "mydb",
-  "table": "trades",
-  "where": {"and": [{"column": "Ticker", "op": "eq", "value": "AAPL"}]},
-  "groupBy": [
-    {"column": "Source"},
-    {"column": "DateTime", "bucket": "day", "alias": "d"}
-  ],
-  "aggregates": [
-    {"func": "count"},
-    {"func": "sum", "column": "Volume", "alias": "vol"},
-    {"func": "min", "column": "Price"},
-    {"func": "avg", "column": "Price"},
-    {"func": "countDistinct", "column": "Venue"}
-  ],
-  "orderBy": [{"column": "vol", "descending": true}],
-  "limit": 30
+ "database": "mydb",
+ "table": "trades",
+ "where": {"and": [{"column": "Ticker", "op": "eq", "value": "AAPL"}]},
+ "groupBy": [
+ {"column": "Source"},
+ {"column": "DateTime", "bucket": "day", "alias": "d"}
+ ],
+ "aggregates": [
+ {"func": "count"},
+ {"func": "sum", "column": "Volume", "alias": "vol"},
+ {"func": "min", "column": "Price"},
+ {"func": "avg", "column": "Price"},
+ {"func": "countDistinct", "column": "Venue"}
+ ],
+ "orderBy": [{"column": "vol", "descending": true}],
+ "limit": 30
 }
 ```
 
 | Field | Values |
 |---|---|
-| `aggregates[].func` | `count` (no `column`: the rows; with a `column`: its non-null values), `sum`, `min`, `max`, `avg`, `countDistinct` (the distinct non-null values). Case-insensitive. Every function but `count` needs a `column`. |
-| `aggregates[].alias` | The result column's name. Without it: `COUNT`, or `{FUNC}_{column}` — `COUNT_x`, `SUM_x`, `MIN_x`, `MAX_x`, `AVG_x`, `COUNT_DISTINCT_x`. |
-| `groupBy[].column` | The column grouped by. |
-| `groupBy[].bucket` | A time bucket of a `Timestamp` column: `minute`, `hour`, `day`, `week` (ISO, from Monday), `month`, `year`. The key is the bucket's start. |
-| `groupBy[].alias` | The key column's name (the column's name otherwise). |
+| `aggregates.func` | `count` (no `column`: the rows; with a `column`: its non-null values), `sum`, `min`, `max`, `avg`, `countDistinct` (the distinct non-null values). Case-insensitive. Every function but `count` needs a `column`. |
+| `aggregates.alias` | The result column's name. Without it: `COUNT`, or `{FUNC}_{column}` — `COUNT_x`, `SUM_x`, `MIN_x`, `MAX_x`, `AVG_x`, `COUNT_DISTINCT_x`. |
+| `groupBy.column` | The column grouped by. |
+| `groupBy.bucket` | A time bucket of a `Timestamp` column: `minute`, `hour`, `day`, `week` (ISO, from Monday), `month`, `year`. The key is the bucket's start. |
+| `groupBy.alias` | The key column's name (the column's name otherwise). |
 
 The answer is the ordinary query response (column arrays, or frames). It holds the group keys, then one column per
 aggregate in the order asked; without `groupBy` it is **one row**. `where` selects the rows aggregated, and `orderBy` (over the
@@ -1262,44 +1256,44 @@ accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 
 ```json
 {
-  "columns": ["id", "customer", "total"],
-  "types": ["Int64", "String", "Double"],
-  "data": [
-    [1, 2, 3],
-    ["Alice", "Bob", "Charlie"],
-    [100.50, 200.75, 150.00]
-  ],
-  "rowCount": 3,
-  "stats": {
-    "rowsScanned": 1000,
-    "rowsReturned": 3,
-    "segmentsAccessed": 5,
-    "executionMs": 15
-  }
+ "columns": ["id", "customer", "total"],
+ "types": ["Int64", "String", "Double"],
+ "data": [
+ [1, 2, 3],
+ ["Alice", "Bob", "Charlie"],
+ [100.50, 200.75, 150.00]
+ ],
+ "rowCount": 3,
+ "stats": {
+ "rowsScanned": 1000,
+ "rowsReturned": 3,
+ "segmentsAccessed": 5,
+ "executionMs": 15
+ }
 }
 ```
 
 `columns` names the result's columns, `types` their types, and `data` holds **one array per column**, in the order of
 `columns`, all `rowCount` long: row *i* is index *i* of every array.
 
-(**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md)** is named in `types` by its array type (`"Double[]"`), and
-its cell in `data` is a JSON array, `null` for a null cell and `[]` for an empty one (a `Byte[]` cell is a base64 string, `""` when
-empty). Numbers are written in the shortest form that reads back to the same value; `-0` is written `-0`; an `Int64[]` element is a
-JSON integer (above 2^53 a plain `JSON.parse` loses digits, as it does for a scalar `Int64`); a **`Float32[]` element is written as
+(**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md)** is named in `types` by its array type (`"Double"`), and
+its cell in `data` is a JSON array, `null` for a null cell and `` for an empty one (a `Byte` cell is a base64 string, `""` when
+empty). Numbers are written in the shortest form that reads back to the same value; `-0` is written `-0`; an `Int64` element is a
+JSON integer (above 2^53 a plain `JSON.parse` loses digits, as it does for a scalar `Int64`); a **`Float32` element is written as
 the shortest text of the value widened to `double`** (`0.1f` is `0.10000000149011612`), which a JavaScript reader turns back into
 the same float:
 
 ```json
 {
-  "columns": ["CurveId", "Tenors", "Rates", "Residuals"],
-  "types": ["Int32", "Int32[]", "Double[]", "Float32[]"],
-  "data": [
-    [1, 2],
-    [[90, 180, 365, 730], []],
-    [[0.0412, 0.0398, 0.0377, 0.0361], [-0, 5E-324, 1.7976931348623157E+308, 0.1]],
-    [[0.10000000149011612, -0.25, 0, 0.5], null]
-  ],
-  "rowCount": 2
+ "columns": ["CurveId", "Tenors", "Rates", "Residuals"],
+ "types": ["Int32", "Int32", "Double", "Float32"],
+ "data": [
+ [1, 2],
+ [[90, 180, 365, 730], ],
+ [[0.0412, 0.0398, 0.0377, 0.0361], [-0, 5E-324, 1.7976931348623157E+308, 0.1]],
+ [[0.10000000149011612, -0.25, 0, 0.5], null]
+ ],
+ "rowCount": 2
 }
 ```
 
@@ -1343,29 +1337,29 @@ Only a server that dies mid-body still cuts a response, and a body without its e
 The same applies to `POST …/named-queries/{name}/query`; the named-query batch stays JSON.
 
 - **Body:** data frames, each at most 65,536 rows — fewer for a wide result, so that no frame decodes past the reader's 256 MB a
-  frame — then **one end frame** (**Lead S09, 0.6.0**). There is always at least one data frame: an empty result is one frame
-  of 0 rows that still names every column. Every frame carries every column, in result order. A result that names a column twice
-  is answered as JSON. The end frame's `rowCount` is the frames' rows, checked by the reader: a body cut anywhere — between two
-  frames included — is an error, not a shorter answer.
+ frame — then **one end frame** (**Lead S09, 0.6.0**). There is always at least one data frame: an empty result is one frame
+ of 0 rows that still names every column. Every frame carries every column, in result order. A result that names a column twice
+ is answered as JSON. The end frame's `rowCount` is the frames' rows, checked by the reader: a body cut anywhere — between two
+ frames included — is an error, not a shorter answer.
 - **One query exports every row (**LoadScan, 0.5.0**; streamed from its first row since **Lead S09, 0.6.0**).** A
-  `POST …/query` asked for frames with **no page** (`limit: 0`, no `offset`) and no `orderBy`, `distinct`, grouping, aggregate,
-  join or computed column is **streamed**: the server writes the frames while it reads the table, a batch at a time (tens of MB,
-  sized to a quarter of the read path's memory ceiling), and states the row count and the statistics in the end frame. It no
-  longer holds the first batch, or reads the table a second time to count it, before the first byte. Such a read is **not
-  refused** at the read path's memory ceiling (`503 MEMORY_BUDGET_EXCEEDED`, or `400 STATEMENT_TOO_LARGE` for a result that alone
-  exceeds it, (**BL-1033, next train**)) or at `Aouda:Query:MaxResultRows`
-  (`400 RESULT_TOO_LARGE`): both bound a result the server holds, and the same read answered as JSON — or as a named query — is
-  still held whole and still refused there. A batch is sized from what the rows' frames actually cost — the first is one row
-  group, so long strings are measured before they are batched — and the size only grows with what it meets: a table whose rows
-  become much wider partway through can still pass the ceiling in one batch, and that read then ends with an error end frame
-  (`STATEMENT_TOO_LARGE`, status 400, when that batch alone exceeds the ceiling — the same read meets it again — **BL-1033, next
-  train**; `MEMORY_BUDGET_EXCEEDED`, status 503, when other work held the memory). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
-  budget) and come in the order the JSON answer's rows have. Its `stats.rowsScanned` is the rows the scan read (the rows of the row
-  groups no statistic ruled out) and `executionMs` the time to the last frame (**Lead S09, 0.6.0**: before, `rowsScanned`
-  repeated `rowsReturned` and `executionMs` was the time to the count). A string value over 16 MB fails a streamed read with an
-  error end frame where a held read is answered as JSON.
+ `POST …/query` asked for frames with **no page** (`limit: 0`, no `offset`) and no `orderBy`, `distinct`, grouping, aggregate,
+ join or computed column is **streamed**: the server writes the frames while it reads the table, a batch at a time (tens of MB,
+ sized to a quarter of the read path's memory ceiling), and states the row count and the statistics in the end frame. It no
+ longer holds the first batch, or reads the table a second time to count it, before the first byte. Such a read is **not
+ refused** at the read path's memory ceiling (`503 MEMORY_BUDGET_EXCEEDED`, or `400 STATEMENT_TOO_LARGE` for a result that alone
+ exceeds it) or at `Aouda:Query:MaxResultRows`
+ (`400 RESULT_TOO_LARGE`): both bound a result the server holds, and the same read answered as JSON — or as a named query — is
+ still held whole and still refused there. A batch is sized from what the rows' frames actually cost — the first is one row
+ group, so long strings are measured before they are batched — and the size only grows with what it meets: a table whose rows
+ become much wider partway through can still pass the ceiling in one batch, and that read then ends with an error end frame
+ (`STATEMENT_TOO_LARGE`, status 400, when that batch alone exceeds the ceiling — the same read meets it again — **BL-1033, next
+ train**; `MEMORY_BUDGET_EXCEEDED`, status 503, when other work held the memory). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
+ budget) and come in the order the JSON answer's rows have. Its `stats.rowsScanned` is the rows the scan read (the rows of the row
+ groups no statistic ruled out) and `executionMs` the time to the last frame (**Lead S09, 0.6.0**: before, `rowsScanned`
+ repeated `rowsReturned` and `executionMs` was the time to the count). A string value over 16 MB fails a streamed read with an
+ error end frame where a held read is answered as JSON.
 - **Headers** carry only what is known before the first frame (**Lead S09, 0.6.0**); the rest of the JSON envelope is the
-  end frame's:
+ end frame's:
 
 | Header | Content |
 |---|---|
@@ -1396,10 +1390,10 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 | `Boolean` | `Bool` (3) | Bitmap |
 | `String` | `String` (4) | A dictionary per frame |
 | `Guid` | `String` (4) | The `D` form (`0f8fad5b-d9cb-469f-a165-70867728950e`) |
-| `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
+| `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries.NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
 | `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
 | `Decimal` (`Decimal(p,s)`) | `ScaledDecimal` (8) | The unscaled value at the column's declared scale `s` |
-| `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (**BL-035, 0.9.0**) | `Array` (9) | The array, with the column's own element kind; **elements are not widened** |
+| `Double`, `Float32`, `Int32`, `Int64`, `Byte`, `String` (**BL-035, 0.9.0**) | `Array` (9) | The array, with the column's own element kind; **elements are not widened** |
 | A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
 
 (**LoadSpeed S13, 0.4.0**) A decimal column always goes out as `ScaledDecimal` at its declared scale; the 128-bit
@@ -1407,7 +1401,7 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 scale; one whose values no 64-bit integer holds at one scale goes as JSON.) Up to 0.3.x a decimal column's kind was chosen from the values it held, and
 an empty or all-null `Decimal(p,s)` column, or an undeclared `Decimal`, could come as kind 6.
 
-`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`. (**BL-035, 0.9.0**) It names an array column by its array type (`["Int64","Double[]","String[]"]`).
+`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`. (**BL-035, 0.9.0**) It names an array column by its array type (`["Int64","Double","String"]`).
 `GET /admin/capabilities` lists `queryColumnBatch: true`.
 
 ---
@@ -1451,9 +1445,9 @@ Execute one named query by unique name.
 
 ```json
 {
-  "args": {
-    "ticker": "AAPL"
-  }
+ "args": {
+ "ticker": "AAPL"
+ }
 }
 ```
 
@@ -1471,14 +1465,14 @@ Execute one named query by unique name.
 
 ```json
 {
-  "columns": ["ticker", "qty"],
-  "types": ["String", "Int64"],
-  "data": [["AAPL"], [10]],
-  "rowCount": 1,
-  "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 },
-  "warnings": [
-    { "code": "NAMED_QUERY_DEPRECATED", "name": "equity.quoteByTicker", "sunsetAt": "2026-12-01T00:00:00Z" }
-  ]
+ "columns": ["ticker", "qty"],
+ "types": ["String", "Int64"],
+ "data": [["AAPL"], [10]],
+ "rowCount": 1,
+ "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 },
+ "warnings": [
+ { "code": "NAMED_QUERY_DEPRECATED", "name": "equity.quoteByTicker", "sunsetAt": "2026-12-01T00:00:00Z" }
+ ]
 }
 ```
 
@@ -1505,10 +1499,10 @@ Read-only batch envelope. Every element is evaluated against **one read snapshot
 
 ```json
 {
-  "queries": [
-    { "name": "equity.quoteByTicker", "args": { "ticker": "AAPL" } },
-    { "name": "equity.stockOverview", "args": { "accountId": 42 } }
-  ]
+ "queries": [
+ { "name": "equity.quoteByTicker", "args": { "ticker": "AAPL" } },
+ { "name": "equity.stockOverview", "args": { "accountId": 42 } }
+ ]
 }
 ```
 
@@ -1524,19 +1518,19 @@ Each element may also carry **`crossPartitionAccess`** (boolean, camelCase, omit
 
 ```json
 {
-  "results": [
-    {
-      "columns": ["ticker", "qty"],
-      "types": ["String", "Int64"],
-      "data": [["AAPL"], [10]],
-      "rowCount": 1,
-      "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 }
-    },
-    {
-      "code": "NAMED_QUERY_NOT_FOUND",
-      "error": "Named query 'equity.unknown' was not found."
-    }
-  ]
+ "results": [
+ {
+ "columns": ["ticker", "qty"],
+ "types": ["String", "Int64"],
+ "data": [["AAPL"], [10]],
+ "rowCount": 1,
+ "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 }
+ },
+ {
+ "code": "NAMED_QUERY_NOT_FOUND",
+ "error": "Named query 'equity.unknown' was not found."
+ }
+ ]
 }
 ```
 
@@ -1548,7 +1542,7 @@ Empty `queries`:
 POST /api/databases/trading/named-queries/batch
 Content-Type: application/json
 
-{ "queries": [] }
+{ "queries": }
 ```
 
 ```json
@@ -1614,9 +1608,9 @@ The object shape is reserved for those two one-key forms, because `{ "param": �
 
 (**BL-035, 0.9.0**) **A parameter or a literal bound to an [array column](../guides/array-columns.md)** takes the column's JSON
 form: an array (`"Rates": { "param": "rates" }` with `"rates": [0.0412, 0.0398]`, or the literal `"Tenors": [30, 90, 180]`), a base64
-string for a `Byte[]`, `null` for a null cell. A bad value is refused `400 NAMED_QUERY_BIND_FAILED` for a parameter and
-`NAMED_MUTATION_BIND_FAILED` for a literal, naming the parameter, the column and the element (*"Parameter 'd' (Double[] column 'D'):
-Element 0 of the Double[] value is NaN; array elements must be finite numbers (NaN and ±Infinity are refused)."*). `upsert` and
+string for a `Byte`, `null` for a null cell. A bad value is refused `400 NAMED_QUERY_BIND_FAILED` for a parameter and
+`NAMED_MUTATION_BIND_FAILED` for a literal, naming the parameter, the column and the element (*"Parameter 'd' (Double column 'D'):
+Element 0 of the Double value is NaN; array elements must be finite numbers (NaN and ±Infinity are refused)."*). `upsert` and
 `update … set` write the whole array. Refused when the definition is applied (that entry is `Failed`, reason starting
 `ARRAY_COLUMN_UNSUPPORTED:`): a `setExpr` that targets or reads an array column, an `orderBy` on one, and a `min` / `max` /
 `maxLength` / `enum` constraint on a parameter written to one. A `batchParam` row's array is one JSON array in the parameter's slot
@@ -1630,18 +1624,18 @@ Definition:
 
 ```json
 {
-  "op": "insert",
-  "table": "PriceTick",
-  "values": {
-    "ticker": { "param": "ticker" },
-    "px": { "param": "px" }
-  },
-  "batchParam": "rows",
-  "params": {
-    "ticker": { "maxLength": 8 },
-    "px": {},
-    "rows": { "maxItems": 20000 }
-  }
+ "op": "insert",
+ "table": "PriceTick",
+ "values": {
+ "ticker": { "param": "ticker" },
+ "px": { "param": "px" }
+ },
+ "batchParam": "rows",
+ "params": {
+ "ticker": { "maxLength": 8 },
+ "px": {},
+ "rows": { "maxItems": 20000 }
+ }
 }
 ```
 
@@ -1649,12 +1643,12 @@ Execute:
 
 ```json
 {
-  "args": {
-    "rows": {
-      "columns": ["ticker", "px"],
-      "data": [["AAPL", "MSFT"], [189.2, 402.1]]
-    }
-  }
+ "args": {
+ "rows": {
+ "columns": ["ticker", "px"],
+ "data": [["AAPL", "MSFT"], [189.2, 402.1]]
+ }
+ }
 }
 ```
 
@@ -1681,7 +1675,7 @@ except an upsert row that replaces a key a read returns: it is logged and buffer
 flush (the key disappears from reads), and counted in `rowsUpdated` **and** in `expiredRows`. The two counts overlap only for such a
 row, so `rowsInserted + rowsUpdated + expiredRows` can exceed the rows sent.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget now, nothing changed; **BL-817, 0.3.0**), `STATEMENT_TOO_LARGE` (400, no `Retry-After` — a DELETE / UPDATE whose matches alone exceed the read path's ceiling, which no retry can satisfy; nothing changed; narrow the statement; **BL-1033, next train**), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending row index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget now, nothing changed; **BL-817, 0.3.0**), `STATEMENT_TOO_LARGE` (400, no `Retry-After` — a DELETE / UPDATE whose matches alone exceed the read path's ceiling, which no retry can satisfy; nothing changed; narrow the statement;), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending row index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Explain a formula cell
 
@@ -1705,25 +1699,25 @@ It needs read access to the table.
 
 ```json
 {
-  "table": "pnl",
-  "key": { "dept": "Online", "line": "Margin", "year": 2028 },
-  "column": "amount",
-  "expressionColumn": "formula",
-  "kind": "formula",
-  "formula": { "type": "call", "fn": "round", "args": [ … ] },
-  "references": [
-    { "table": "pnl", "key": { "dept": "Online", "line": "Revenue", "year": 2028 }, "column": "amount",
-      "readable": true, "value": 0.00, "isFormulaCell": false, "error": null },
-    { "table": "pnl", "key": { "dept": "Online", "line": "EBIT", "year": 2028 }, "column": "amount",
-      "readable": true, "value": -830.00, "isFormulaCell": true, "error": null }
-  ],
-  "value": null,
-  "reason": "division by zero.",
-  "storedValue": null,
-  "readBy": [
-    { "table": "pnl", "key": { "dept": "Online", "line": "MarginGap", "year": 2028 }, "column": "amount" },
-    { "table": "pnl", "key": { "dept": "Online", "line": "Tax", "year": 2028 }, "column": "amount" }
-  ]
+ "table": "pnl",
+ "key": { "dept": "Online", "line": "Margin", "year": 2028 },
+ "column": "amount",
+ "expressionColumn": "formula",
+ "kind": "formula",
+ "formula": { "type": "call", "fn": "round", "args": [ … ] },
+ "references": [
+ { "table": "pnl", "key": { "dept": "Online", "line": "Revenue", "year": 2028 }, "column": "amount",
+ "readable": true, "value": 0.00, "isFormulaCell": false, "error": null },
+ { "table": "pnl", "key": { "dept": "Online", "line": "EBIT", "year": 2028 }, "column": "amount",
+ "readable": true, "value": -830.00, "isFormulaCell": true, "error": null }
+ ],
+ "value": null,
+ "reason": "division by zero.",
+ "storedValue": null,
+ "readBy": [
+ { "table": "pnl", "key": { "dept": "Online", "line": "MarginGap", "year": 2028 }, "column": "amount" },
+ { "table": "pnl", "key": { "dept": "Online", "line": "Tax", "year": 2028 }, "column": "amount" }
+ ]
 }
 ```
 
@@ -1763,7 +1757,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | GET | `/{name}` | Read | Status for one query; `404` if missing. |
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. (**BL-884, 0.3.0**) A create whose first build is refused for capacity (memory, or a full WAL) still answers `204`: the definition is durable, the query exists **behind** (`current: false`) and is built once there is room. It used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists". |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
-| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). (**BL-035, 0.9.0**) A result that carries an [array column](../guides/array-columns.md) adds **`columnTypes`** to the body, a map from each array column's name to its type (`{"Tenors":"Int32[]","Rates":"Double[]"}`); it is absent when the result has none, and the body has no `types`. (**BL-1402, 0.11.0**) It also names each `Timestamp` column (`"Timestamp"`, .NET ticks) and each `Date` column (`"Date"`, days since the Unix epoch), spelled as a snapshot's `column_types`, and is absent only when the result has none of the three kinds; every `latestPerKey` result carries its ordering `Timestamp`, so it is present on those. A body with no rows (a denied read, an unresolved source chain) names the result table's types as well. A client treats a column that is not named there as a scalar. |
+| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). (**BL-035, 0.9.0**) A result that carries an [array column](../guides/array-columns.md) adds **`columnTypes`** to the body, a map from each array column's name to its type (`{"Tenors":"Int32","Rates":"Double"}`); it is absent when the result has none, and the body has no `types`. (**BL-1402, 0.11.0**) It also names each `Timestamp` column (`"Timestamp"`,.NET ticks) and each `Date` column (`"Date"`, days since the Unix epoch), spelled as a snapshot's `column_types`, and is absent only when the result has none of the three kinds; every `latestPerKey` result carries its ordering `Timestamp`, so it is present on those. A body with no rows (a denied read, an unresolved source chain) names the result table's types as well. A client treats a column that is not named there as a scalar. |
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
@@ -1798,7 +1792,7 @@ Queries over one source table are built from a **single traversal** of it, so th
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `sourceTable` | string? | one of | Refresh every materialized query over this table. |
-| `names` | string[]? | one of | Explicit list. An unknown name is a `404`. |
+| `names` | string? | one of | Explicit list. An unknown name is a `404`. |
 | `staleOnly` | bool? | no | With `sourceTable`: restrict to queries a `postLoadMqBehavior: "skip"` load (or anything else) left stale. `400` without `sourceTable`. |
 | `await` | bool? | no | Same semantics, same window and the same BL-419 guarantees as `{name}:refresh`. Default `false`. |
 
@@ -1808,12 +1802,12 @@ Supplying both `names` and `sourceTable`, or neither, is a `400` naming the conf
 
 ```json
 {
-  "status": "complete",
-  "sourceGroups": 1,
-  "results": [
-    { "name": "EquityTradeOhlc1H", "state": 1 },
-    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
-  ]
+ "status": "complete",
+ "sourceGroups": 1,
+ "results": [
+ { "name": "EquityTradeOhlc1H", "state": 1 },
+ { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
+ ]
 }
 ```
 
@@ -1821,8 +1815,8 @@ Supplying both `names` and `sourceTable`, or neither, is a `400` naming the conf
 |-------|-------------|
 | `status` | `complete` (200) or `scheduled` (202), same vocabulary as `{name}:refresh`. On `scheduled`, `results` lists what was scheduled, not outcomes. |
 | `sourceGroups` | Source tables traversed. `results.length / sourceGroups` is what the pooled call saved over calling `{name}:refresh` per query. |
-| `results[].state` | Raw `MaterializedQueryState`: `0` Building, `1` Ready, `2` Rebuilding, `3` Error — the same encoding `GET /{name}` uses. |
-| `results[].error` | Why that query is not `Ready`; absent when it is. |
+| `results.state` | Raw `MaterializedQueryState`: `0` Building, `1` Ready, `2` Rebuilding, `3` Error — the same encoding `GET /{name}` uses. |
+| `results.error` | Why that query is not `Ready`; absent when it is. |
 
 **A per-query failure is reported, not thrown.** One query that exceeded its memory budget appears as
 `state: 3` with its message while its siblings appear as `state: 1`, and the response is still
@@ -1846,20 +1840,20 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 
 `configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000). AggregateConfig's `groupByColumns` entries are objects — `{ "column": "region" }`, or `{ "column": "time", "function": "TruncateToHour" }` for a time bucket. (**BL-980, 0.4.0**) The v1 plain-string form (`"groupByColumns": ["region"]`) is `400 INVALID_REQUEST`, and a stored definition in that form is refused when it is read; up to 0.3.x both were read.
 
-**Query response** (`POST .../query`) — column arrays (**Lead S12, 0.6.0; breaking**: it was `"rows": [{…}]`, one object per
+**Query response** (`POST.../query`) — column arrays (**Lead S12, 0.6.0; breaking**: it was `"rows": [{…}]`, one object per
 row):
 
 ```json
 {
-  "columns": ["col1", "col2"],
-  "data": [[1, 2], ["a", "b"]],
-  "rowCount": 2,
-  "stats": {
-    "rowsScanned": 2,
-    "rowsReturned": 2,
-    "executionMs": 0.42
-  },
-  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
+ "columns": ["col1", "col2"],
+ "data": [[1, 2], ["a", "b"]],
+ "rowCount": 2,
+ "stats": {
+ "rowsScanned": 2,
+ "rowsReturned": 2,
+ "executionMs": 0.42
+ },
+ "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
 
@@ -1878,36 +1872,36 @@ The list route returns an array of the same object.
 
 ```json
 {
-  "name": "EquityTradeOhlc1M",
-  "sourceTable": "EquityTrade",
-  "type": 1,
-  "state": 1,
-  "rowCount": 41200,
-  "createdUtc": "2026-09-19T08:14:02.0000000Z",
-  "lastUpdatedUtc": "2026-09-19T09:41:55.0000000Z",
-  "currentLag": "00:00:00.2500000",
-  "rebuildProgress": null,
-  "errorMessage": null,
-  "isStale": false,
-  "staleReason": null,
-  "current": true,
-  "amplification": {
-    "sourceRowsIngested": 1000000,
-    "keysPlanned": 1000000,
-    "priorRowsRead": 958800,
-    "applies": 512,
-    "resultRowsUpserted": 1000000,
-    "resultRowsDeleted": 0,
-    "rebuildSourceRowsScanned": 0,
-    "rebuildResultRowsWritten": 0,
-    "sourceColumnsDecoded": 12000000,
-    "sourceColumnsDeclared": 3000000,
-    "resultRowsWritten": 1000000,
-    "writeAmplification": 1.0,
-    "readAmplification": 4.0,
-    "isEmpty": false
-  },
-  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
+ "name": "EquityTradeOhlc1M",
+ "sourceTable": "EquityTrade",
+ "type": 1,
+ "state": 1,
+ "rowCount": 41200,
+ "createdUtc": "2026-09-19T08:14:02.0000000Z",
+ "lastUpdatedUtc": "2026-09-19T09:41:55.0000000Z",
+ "currentLag": "00:00:00.2500000",
+ "rebuildProgress": null,
+ "errorMessage": null,
+ "isStale": false,
+ "staleReason": null,
+ "current": true,
+ "amplification": {
+ "sourceRowsIngested": 1000000,
+ "keysPlanned": 1000000,
+ "priorRowsRead": 958800,
+ "applies": 512,
+ "resultRowsUpserted": 1000000,
+ "resultRowsDeleted": 0,
+ "rebuildSourceRowsScanned": 0,
+ "rebuildResultRowsWritten": 0,
+ "sourceColumnsDecoded": 12000000,
+ "sourceColumnsDeclared": 3000000,
+ "resultRowsWritten": 1000000,
+ "writeAmplification": 1.0,
+ "readAmplification": 4.0,
+ "isEmpty": false
+ },
+ "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
 
@@ -1916,7 +1910,7 @@ The list route returns an array of the same object.
 | `type` | integer | Raw `MaterializedQueryType` enum value. **No `JsonStringEnumConverter` is registered anywhere in the server**, so this is an integer on every enum on every route. |
 | `state` | integer | Raw `MaterializedQueryState` enum value (`Building`, `Ready`, `Rebuilding`, `Error`). |
 | `rowCount` | integer | Rows currently in the result table. |
-| `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
+| `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in.NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
 | `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (an `"auto"` load folded by the pass — held while its table goes on loading, **LoadSpeed M.3, 0.4.0**; **WorkloadCore S10, 0.3.0**: every load but a `"skip"` one; until the 0.4.0 also a `"deferred"` load). `0` when none; absent on older servers. While it is above zero the query is also `isStale` (behind) and not `current`, with a `staleReason` like "2 bulk load(s) into its source are pending the table's pass…"; it is owed work, not holed, so `staleOnly` does not select it and `currentLag` counts from the oldest owed load's commit (**WorkloadCore S10**). `:refresh` of the query runs the table's pass at once. |
@@ -1974,8 +1968,8 @@ read stale data as current. A client that polls `state` and nothing else will st
 // readable, but behind — act on this (WorkloadCore S10, 0.3.0: a load's queries are owed the table's pass;
 // before, this read "3 bulk-load publish(es) for this query have been queued and have not finished. …")
 { "state": 1, "isStale": true, "pendingDeferredJobs": 3, "current": false,
-  "staleReason": "3 bulk load(s) into its source are pending the table's pass. The result is readable but is not current; refresh the query, or update the table, to bring it current now.",
-  "currentLag": "00:00:12.4310000", "stalenessMs": 4120 }
+ "staleReason": "3 bulk load(s) into its source are pending the table's pass. The result is readable but is not current; refresh the query, or update the table, to bring it current now.",
+ "currentLag": "00:00:12.4310000", "stalenessMs": 4120 }
 ```
 
 > **Removed: `workingSetTruncated` (BL-583, 0.1.38).** It was hard-wired `false` from the train
@@ -2040,7 +2034,7 @@ query's name). They do not survive a destructive schema replace.
 This page previously said `POST /api/databases/{db}/materialized-queries` accepted it too. It does
 not: `MaterializedQueryCreateBody` has no such property, so a `storage` key posted to that route is
 deserialized away in silence and the result table is created with the engine default. Create the
-query through `POST .../schema/apply`, or set the result table's policy afterwards with
+query through `POST.../schema/apply`, or set the result table's policy afterwards with
 `PUT /api/databases/{db}/tables/{name}/policy`.
 
 ---
@@ -2058,12 +2052,12 @@ hot segment or a cold one — is skipped and counted as `skipped` (**BL-1489, 0.
 
 ```json
 {
-  "tables": {
-    "orders": {
-      "columns": ["id", "status"],
-      "data": [[1, 2], ["pending", "shipped"]]
-    }
-  }
+ "tables": {
+ "orders": {
+ "columns": ["id", "status"],
+ "data": [[1, 2], ["pending", "shipped"]]
+ }
+ }
 }
 ```
 
@@ -2085,12 +2079,7 @@ not stamp identity, so a stamp column is not filled before that check. A refusal
 
 ### Tables Endpoints
 
-🔒 **A table that schema apply created refuses HTTP DDL in every `InferenceMode`** (**BL-1177, 0.7.1**; before, only in
-`Extend`). `DELETE` and `PATCH` of the table, `PUT …/options`, add, alter, reorder or drop of a column, and a `PUT …/policy` that
-changes `storageTemperature` or `retention` answer `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN`. A `PUT …/policy` that restates the current
-temperature and changes only `memoryRowCap`, `targetMemoryBytes`, `memoryFilter` or `hotOnlyBackstop` is served, because the schema file
-declares no residency. A table created by `POST …/tables` is not affected. `InferenceMode` decides only what an insert into a
-missing table does: `Off` and `On` answer `404`, and `Extend` creates the table. Creating the table needs an unconditional `write` on it: a `write` with a `where` is `403 AUTH_POLICY_DENIED` and nothing is created (**BL-1578, next train**).
+🔒 **A table that schema apply created refuses HTTP DDL in every `InferenceMode`**.
 
 #### `GET /api/tables`
 
@@ -2106,20 +2095,20 @@ List all tables with statistics.
 
 ```json
 {
-  "tables": [
-    {
-      "name": "orders",
-      "columnCount": 5,
-      "rowCount": 12500,
-      "createdAt": "2026-02-04T10:30:00.0000000Z",
-      "lastModifiedAt": "2026-02-04T14:25:30.0000000Z",
-      "sizeBytes": 1048576,
-      "policy": {
-        "storageTemperature": "Auto"
-      }
-    }
-  ],
-  "count": 1
+ "tables": [
+ {
+ "name": "orders",
+ "columnCount": 5,
+ "rowCount": 12500,
+ "createdAt": "2026-02-04T10:30:00.0000000Z",
+ "lastModifiedAt": "2026-02-04T14:25:30.0000000Z",
+ "sizeBytes": 1048576,
+ "policy": {
+ "storageTemperature": "Auto"
+ }
+ }
+ ],
+ "count": 1
 }
 ```
 
@@ -2142,41 +2131,41 @@ Get table detail with columns.
 
 ```json
 {
-  "name": "orders",
-  "columns": [
-    {
-      "name": "id",
-      "type": "Int64",
-      "isNullable": false,
-      "isAutoIncrement": true,
-      "primaryKeyOrder": 1
-    },
-    {
-      "name": "customer_id",
-      "type": "Int64",
-      "isNullable": false,
-      "reference": {
-        "targetTable": "customers",
-        "targetColumn": "id",
-        "source": "declared"
-      }
-    },
-    {
-      "name": "total",
-      "type": "Double",
-      "isNullable": true
-    }
-  ],
-  "policy": {
-    "storageTemperature": "Auto",
-    "residency": {
-      "hotOnlyBackstop": "RefuseWrites"
-    }
-  },
-  "durability": {
-    "level": "strict",
-    "source": "database"
-  }
+ "name": "orders",
+ "columns": [
+ {
+ "name": "id",
+ "type": "Int64",
+ "isNullable": false,
+ "isAutoIncrement": true,
+ "primaryKeyOrder": 1
+ },
+ {
+ "name": "customer_id",
+ "type": "Int64",
+ "isNullable": false,
+ "reference": {
+ "targetTable": "customers",
+ "targetColumn": "id",
+ "source": "declared"
+ }
+ },
+ {
+ "name": "total",
+ "type": "Double",
+ "isNullable": true
+ }
+ ],
+ "policy": {
+ "storageTemperature": "Auto",
+ "residency": {
+ "hotOnlyBackstop": "RefuseWrites"
+ }
+ },
+ "durability": {
+ "level": "strict",
+ "source": "database"
+ }
 }
 ```
 
@@ -2221,48 +2210,48 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
 
 ```json
 {
-  "name": "orders",
-  "columns": [
-    {
-      "name": "id",
-      "id": 1,
-      "type": "Int64",
-      "isNullable": false,
-      "isAutoIncrement": true,
-      "primaryKeyOrder": 1
-    },
-    {
-      "name": "customer_id",
-      "id": 2,
-      "type": "Int64",
-      "isNullable": false,
-      "partitionKeyOrder": 1,
-      "reference": {
-        "targetTable": "customers",
-        "targetColumn": "id",
-        "source": "declared"
-      }
-    },
-    {
-      "name": "order_date",
-      "id": 3,
-      "type": "Timestamp",
-      "isNullable": false,
-      "clusterOrder": 1
-    }
-  ],
-  "primaryKey": ["id"],
-  "partitionKey": ["customer_id"],
-  "clusterColumns": ["order_date"],
-  "indexes": [],
-  "relationships": [
-    {
-      "from": { "column": "customer_id" },
-      "to": { "table": "customers", "column": "id" },
-      "source": "declared",
-      "cardinality": "many-to-one"
-    }
-  ]
+ "name": "orders",
+ "columns": [
+ {
+ "name": "id",
+ "id": 1,
+ "type": "Int64",
+ "isNullable": false,
+ "isAutoIncrement": true,
+ "primaryKeyOrder": 1
+ },
+ {
+ "name": "customer_id",
+ "id": 2,
+ "type": "Int64",
+ "isNullable": false,
+ "partitionKeyOrder": 1,
+ "reference": {
+ "targetTable": "customers",
+ "targetColumn": "id",
+ "source": "declared"
+ }
+ },
+ {
+ "name": "order_date",
+ "id": 3,
+ "type": "Timestamp",
+ "isNullable": false,
+ "clusterOrder": 1
+ }
+ ],
+ "primaryKey": ["id"],
+ "partitionKey": ["customer_id"],
+ "clusterColumns": ["order_date"],
+ "indexes":,
+ "relationships": [
+ {
+ "from": { "column": "customer_id" },
+ "to": { "table": "customers", "column": "id" },
+ "source": "declared",
+ "cardinality": "many-to-one"
+ }
+ ]
 }
 ```
 
@@ -2270,9 +2259,9 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
 |-------|------|-------------|
 | `name` | string | Table name |
 | `columns` | array | Column definitions with full metadata |
-| `primaryKey` | string[] | Column names forming the primary key, in order |
-| `partitionKey` | string[] | Column names forming the partition key, in order |
-| `clusterColumns` | string[] | Column names for cluster ordering, in order |
+| `primaryKey` | string | Column names forming the primary key, in order |
+| `partitionKey` | string | Column names forming the partition key, in order |
+| `clusterColumns` | string | Column names for cluster ordering, in order |
 | `indexes` | array | Secondary indexes (placeholder for future) |
 | `relationships` | array? | Relationships to other tables (both declared and inferred) |
 
@@ -2306,31 +2295,31 @@ Get all tables and relationships for ERD visualization.
 
 ```json
 {
-  "tables": [
-    {
-      "name": "orders",
-      "columns": [
-        { "name": "id", "type": "Int64", "isPrimaryKey": true },
-        { "name": "customer_id", "type": "Int64", "isReference": true },
-        { "name": "total", "type": "Double" }
-      ]
-    },
-    {
-      "name": "customers",
-      "columns": [
-        { "name": "id", "type": "Int64", "isPrimaryKey": true },
-        { "name": "name", "type": "String" }
-      ]
-    }
-  ],
-  "relationships": [
-    {
-      "from": { "table": "orders", "column": "customer_id" },
-      "to": { "table": "customers", "column": "id" },
-      "source": "declared",
-      "cardinality": "many-to-one"
-    }
-  ]
+ "tables": [
+ {
+ "name": "orders",
+ "columns": [
+ { "name": "id", "type": "Int64", "isPrimaryKey": true },
+ { "name": "customer_id", "type": "Int64", "isReference": true },
+ { "name": "total", "type": "Double" }
+ ]
+ },
+ {
+ "name": "customers",
+ "columns": [
+ { "name": "id", "type": "Int64", "isPrimaryKey": true },
+ { "name": "name", "type": "String" }
+ ]
+ }
+ ],
+ "relationships": [
+ {
+ "from": { "table": "orders", "column": "customer_id" },
+ "to": { "table": "customers", "column": "id" },
+ "source": "declared",
+ "cardinality": "many-to-one"
+ }
+ ]
 }
 ```
 
@@ -2357,9 +2346,9 @@ which the server never served — it answers `401` without a database in the pat
 | `namespace` | - | Optional namespace wrapper for generated types |
 
 **Response:** `text/plain` with TypeScript code. (**BL-035, 0.9.0**) An [array column](../guides/array-columns.md) is typed
-`Float64Array` (`Double[]`), `Float32Array`, `Int32Array`, `BigInt64Array` (`Int64[]`), `Uint8Array` (`Byte[]`) or `string[]` in a table
-interface and a named query's row, and a named mutation's argument takes `Float64Array | number[]`, `Float32Array | number[]`,
-`Int32Array | number[]`, `BigInt64Array | bigint[] | number[]`, `Uint8Array` or `string[]`. (**BL-1496, 0.15.0**) A row type is the union of
+`Float64Array` (`Double`), `Float32Array`, `Int32Array`, `BigInt64Array` (`Int64`), `Uint8Array` (`Byte`) or `string` in a table
+interface and a named query's row, and a named mutation's argument takes `Float64Array | number`, `Float32Array | number`,
+`Int32Array | number`, `BigInt64Array | bigint | number`, `Uint8Array` or `string`. (**BL-1496, 0.15.0**) A row type is the union of
 what every path that reads or writes a row gives, so no read needs a cast it cannot make: a `Timestamp` column is `string | Date` (ISO text
 in a query result, a `Date` in a subscription row), a `Date` column `number | Date` (its day number in a query result), a decimal
 `string | number` (a number in a query result). A named query's argument keeps the one value it takes: `Date` for a `Timestamp` or a `Date` column.
@@ -2374,28 +2363,28 @@ in a query result, a `Date` in a subscription row), a `Date` column `number | Da
 
 /** orders table */
 export interface Orders {
-  /** Primary key (auto-increment) */
-  id: number;
-  /** References customers.id */
-  customer_id: number;
-  total: number;
-  created_at: string | Date;
+ /** Primary key (auto-increment) */
+ id: number;
+ /** References customers.id */
+ customer_id: number;
+ total: number;
+ created_at: string | Date;
 }
 
 /** customers table */
 export interface Customers {
-  /** Primary key (auto-increment) */
-  id: number;
-  name: string;
-  email: string;
+ /** Primary key (auto-increment) */
+ id: number;
+ name: string;
+ email: string;
 }
 
 /** Type-safe table schemas for AoudaClient */
 export interface Schema {
-  tables: {
-    orders: Orders;
-    customers: Customers;
-  };
+ tables: {
+ orders: Orders;
+ customers: Customers;
+ };
 }
 
 /** Table names as a union type */
@@ -2410,31 +2399,31 @@ Create a new table.
 
 ```json
 {
-  "database": "mydb",
-  "name": "orders",
-  "columns": [
-    {
-      "name": "id",
-      "type": "Int64",
-      "primaryKeyOrder": 1,
-      "isAutoIncrement": true
-    },
-    {
-      "name": "customer_id",
-      "type": "Int64",
-      "reference": {
-        "targetTable": "customers",
-        "targetColumn": "id"
-      }
-    },
-    {
-      "name": "total",
-      "type": "Double"
-    }
-  ],
-  "policy": {
-    "storageTemperature": "Auto"
-  }
+ "database": "mydb",
+ "name": "orders",
+ "columns": [
+ {
+ "name": "id",
+ "type": "Int64",
+ "primaryKeyOrder": 1,
+ "isAutoIncrement": true
+ },
+ {
+ "name": "customer_id",
+ "type": "Int64",
+ "reference": {
+ "targetTable": "customers",
+ "targetColumn": "id"
+ }
+ },
+ {
+ "name": "total",
+ "type": "Double"
+ }
+ ],
+ "policy": {
+ "storageTemperature": "Auto"
+ }
 }
 ```
 
@@ -2468,16 +2457,16 @@ not a duration, an edge table, a table with a vector column — is `400` naming 
 
 ```json
 {
-  "database": "markets",
-  "name": "SpotQuote",
-  "columns": [
-    { "name": "SecurityId", "type": "String", "primaryKeyOrder": 1, "partitionKeyOrder": 1 },
-    { "name": "Source", "type": "String", "primaryKeyOrder": 2, "partitionKeyOrder": 2 },
-    { "name": "Bid", "type": "Double", "isNullable": true }
-  ],
+ "database": "markets",
+ "name": "SpotQuote",
+ "columns": [
+ { "name": "SecurityId", "type": "String", "primaryKeyOrder": 1, "partitionKeyOrder": 1 },
+ { "name": "Source", "type": "String", "primaryKeyOrder": 2, "partitionKeyOrder": 2 },
+ { "name": "Bid", "type": "Double", "isNullable": true }
+ ],
 A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-  "an attribute": "fx_source",
-  "the column in the `where`": "Source"
+ "an attribute": "fx_source",
+ "the column in the `where`": "Source"
 }
 ```
 
@@ -2510,15 +2499,14 @@ where row conditions applies. statements `drop` is still required and is not eno
 
 #### `PATCH /api/databases/{db}/tables/{name}`
 
-Rename a table. `newName` follows the [table-name rule](#table-names): breaking it is `400 INVALID_REQUEST` (**BL-1468, next
-train**). A `__mqbuild_*` `{name}` is `404 TABLE_NOT_FOUND`.
+Rename a table. `newName` follows the [table-name rule](#table-names): breaking it is `400 INVALID_REQUEST`. A `__mqbuild_*` `{name}` is `404 TABLE_NOT_FOUND`.
 
 **Request:**
 
 ```json
 {
-  "database": "mydb",
-  "newName": "orders_archive"
+ "database": "mydb",
+ "newName": "orders_archive"
 }
 ```
 
@@ -2535,12 +2523,12 @@ schema file owns both. Restate them and change only the residency fields, or cha
 
 ```json
 {
-  "database": "mydb",
-  "storageTemperature": "Auto",
-  "memoryRowCap": 50000,
-  "targetMemoryBytes": 536870912,
-  "memoryFilter": "{\"and\":[{\"column\":\"status\",\"op\":\"eq\",\"value\":\"open\"}]}",
-  "hotOnlyBackstop": "RefuseWrites"
+ "database": "mydb",
+ "storageTemperature": "Auto",
+ "memoryRowCap": 50000,
+ "targetMemoryBytes": 536870912,
+ "memoryFilter": "{\"and\":[{\"column\":\"status\",\"op\":\"eq\",\"value\":\"open\"}]}",
+ "hotOnlyBackstop": "RefuseWrites"
 }
 ```
 
@@ -2582,9 +2570,9 @@ Add a column to a table.
 
 ```json
 {
-  "database": "mydb",
-  "name": "total",
-  "type": "Double"
+ "database": "mydb",
+ "name": "total",
+ "type": "Double"
 }
 ```
 
@@ -2617,8 +2605,8 @@ and which JWT claim, partition-level security filters on).
 
 ```json
 {
-  "database": "mydb",
-  "newName": "total_amount"
+ "database": "mydb",
+ "newName": "total_amount"
 }
 ```
 
@@ -2657,75 +2645,73 @@ fields beside these three:
 
 ```json
 {
-  "columns": ["id", "ts", "price"],
-  "data": [
-    [1, 2, null],
-    ["2026-10-18T09:00:00Z", "2026-10-18T09:00:01Z", "2026-10-18T09:00:02Z"],
-    [1.5, 2.5, 3.5]
-  ],
-  "absent": { "id": [2] }
+ "columns": ["id", "ts", "price"],
+ "data": [
+ [1, 2, null],
+ ["2026-10-18T09:00:00Z", "2026-10-18T09:00:01Z", "2026-10-18T09:00:02Z"],
+ [1.5, 2.5, 3.5]
+ ],
+ "absent": { "id": [2] }
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `columns` | string[] | Yes | The column names: distinct, non-empty. |
-| `data` | array[] | Yes | **One array per column**, in the order of `columns`, all the same length — that length is the row count. Row *i* is index *i* of every array. |
+| `columns` | string | Yes | The column names: distinct, non-empty. |
+| `data` | array | Yes | **One array per column**, in the order of `columns`, all the same length — that length is the row count. Row *i* is index *i* of every array. |
 | `absent` | object? | No | Per column, the row indexes whose cell is **not given**: `{"<column>": [rowIndex, …]}`. The `data` slot of an absent cell must be `null`. |
 
 **Absent is not null.** An absent cell is what a key left out of a row object used to be: an absent `autoIncrement` cell is
 generated, and an absent column that has a default takes its default. An explicit `null` is a null — an `autoIncrement` cell sent as `null` is not generated. In the example,
 rows 0 and 1 give their ids and row 2's is generated. A column absent in **every** row can simply be left out of `columns`; `absent`
-is only needed when some rows give a column and others do not. (**BL-1104, next train**) **A bulk-load `:append` applies defaults
+is only needed when some rows give a column and others do not. **A bulk-load `:append` applies defaults
 too**, for a JSON body as for a frame and at either `validation` level: an absent cell takes its column's default, and an absent
 `autoIncrement` cell is generated. Until then a bulk load stored an absent cell as null (a NOT NULL column: the type's default, `""`
 or `0`).
 
 **Values** are read as before: an integer is an integer, a fraction keeps the scale it is written with, a string is a string, and an
 array (a vector, an array column's value) is converted the way the column's type takes it. A value is judged exactly as the same
-cell sent in a [column-batch frame](#the-column-batch-frame-acb2) — the same conversions, the same errors.
-
-(**BL-1108, BL-1250, BL-1220, next train**) **One rule per value, on every write surface** — `POST …/rows`, a branch insert, the
+cell sent in a [column-batch frame](#the-column-batch-frame-acb2) — the same conversions, the same errors. **One rule per value, on every write surface** — `POST …/rows`, a branch insert, the
 `set` of `PATCH …/rows` and `rows/batch`, `stream_rows`, `:append`, a named mutation's parameter, literal and `batchParam` rows, a
 seed, and the embedded engine:
 
 - **A number written to a `String` column is stored as its text as sent**: `2.50` is `"2.50"`, `1E+17` is `"1E+17"`, and `1`
-  beside `2.5` in one column is `"1"`. Until then the text was rebuilt from the number's value (`"1.0"`, `"100000000000000000"`,
-  `"2.5"`, depending on the surface). A seed keeps refusing a number for a `String` column (*"expected string for type String, got
-  number"*).
+ beside `2.5` in one column is `"1"`. Until then the text was rebuilt from the number's value (`"1.0"`, `"100000000000000000"`,
+ `"2.5"`, depending on the surface). A seed keeps refusing a number for a `String` column (*"expected string for type String, got
+ number"*).
 - **A JSON array or object written to a scalar column is refused** — a `String` column included; an array column and a vector take
-  an array. It is `400 INVALID_REQUEST` naming the column (and the row, where the body has rows): *"Column 'note': a JSON array is
-  not a String value — send text as a JSON string (an array goes in an array column)."*; on a named mutation it is
-  `400 NAMED_QUERY_BIND_FAILED` naming the parameter (*"Parameter 'v' expected a scalar value for its String column, got Array
-  …"*); on `stream_rows`, an `error` naming the row and the column. Until then a `String` column stored the value's JSON text or a
-  type name (`System.Collections.Generic.List`1[System.Object]`), and `PATCH` of an array into a number column answered
-  `500 INTERNAL_ERROR`. A read filter follows the same rule: a JSON array as the operand of `eq`, `ne` or a range operator on a
-  `String` column is `400 INVALID_REQUEST` naming the column (it was compared with that type name, so `ne` matched every row);
-  `in` / `nin` take their list as before. (A JSON object there is still compared as its JSON text, BL-1643.)
+ an array. It is `400 INVALID_REQUEST` naming the column (and the row, where the body has rows): *"Column 'note': a JSON array is
+ not a String value — send text as a JSON string (an array goes in an array column)."*; on a named mutation it is
+ `400 NAMED_QUERY_BIND_FAILED` naming the parameter (*"Parameter 'v' expected a scalar value for its String column, got Array
+ …"*); on `stream_rows`, an `error` naming the row and the column. Until then a `String` column stored the value's JSON text or a
+ type name (`System.Collections.Generic.List`1[System.Object]`), and `PATCH` of an array into a number column answered
+ `500 INTERNAL_ERROR`. A read filter follows the same rule: a JSON array as the operand of `eq`, `ne` or a range operator on a
+ `String` column is `400 INVALID_REQUEST` naming the column (it was compared with that type name, so `ne` matched every row);
+ `in` / `nin` take their list as before. (A JSON object there is still compared as its JSON text, BL-1643.)
 - **A scalar `-0` is stored as `0`** in a `Double` and a `Float32` column, whatever carried it: a JSON body always stored `0`; a
-  frame's cell, a named mutation's parameter, literal or `setExpr`, a seed and the embedded engine kept the sign. An
-  [array column](../guides/array-columns.md)'s element keeps its `-0`.
+ frame's cell, a named mutation's parameter, literal or `setExpr`, a seed and the embedded engine kept the sign. An
+ [array column](../guides/array-columns.md)'s element keeps its `-0`.
 - **A numeric string written to an integer column stays accepted** (`"0012"` is `12`), except for a named mutation's integer
-  parameter, which refuses a string (*"Parameter 'id' expected integer, got String"*).
+ parameter, which refuses a string (*"Parameter 'id' expected integer, got String"*).
 
 (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md)'s slot holds one JSON array per row** (the data is nested
-twice), `null` for a null cell, `[]` for an empty one, and a `Byte[]` cell is a base64 string. Numbers are read from their text
-(`-0` is kept; a `Float32` is rounded to a float once); an `Int32[]` / `Int64[]` element is an integral number in any notation
+twice), `null` for a null cell, `` for an empty one, and a `Byte` cell is a base64 string. Numbers are read from their text
+(`-0` is kept; a `Float32` is rounded to a float once); an `Int32` / `Int64` element is an integral number in any notation
 (`2.0`, `1e3`), never a fraction or a string; NaN, ±Infinity and the strings `"NaN"` / `"Infinity"` are refused, and so are a null
 element, a nested array and a number out of the type's range. At most 65,536 elements and 1,048,576 bytes of elements a value. A
-bad value is `400 INVALID_REQUEST` naming the column (`Column 'D': Element 0 of the Double[] value is NaN; …`), or on a named
+bad value is `400 INVALID_REQUEST` naming the column (`Column 'D': Element 0 of the Double value is NaN; …`), or on a named
 mutation `NAMED_QUERY_BIND_FAILED` naming the parameter:
 
 ```json
 {
-  "database": "acdocs",
-  "columns": ["Id", "D", "B", "S"],
-  "data": [
-    [100, 101],
-    [[1.5, 2.5], null],
-    ["AQID", ""],
-    [["x", "y"], []]
-  ]
+ "database": "acdocs",
+ "columns": ["Id", "D", "B", "S"],
+ "data": [
+ [100, 101],
+ [[1.5, 2.5], null],
+ ["AQID", ""],
+ [["x", "y"], ]
+ ]
 }
 ```
 
@@ -2749,12 +2735,12 @@ Insert one or more rows into a table.
 
 ```json
 {
-  "database": "mydb",
-  "table": "orders",
-  "columns": ["status", "price"],
-  "data": [["pending", "shipped"], [100.50, 200.00]],
-  "writeConcern": "majority",
-  "identityInsert": false
+ "database": "mydb",
+ "table": "orders",
+ "columns": ["status", "price"],
+ "data": [["pending", "shipped"], [100.50, 200.00]],
+ "writeConcern": "majority",
+ "identityInsert": false
 }
 ```
 
@@ -2764,8 +2750,8 @@ The `id` column (an `autoIncrement` key) is left out of `columns`, so both rows'
 |-------|------|----------|-------------|
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
-| `columns` | string[] | Yes | (**Lead S12, 0.6.0**) The column names. See [column arrays](#column-arrays-the-write-body). |
-| `data` | array[] | Yes | (**Lead S12, 0.6.0**) One array of values per column, all the same length. |
+| `columns` | string | Yes | (**Lead S12, 0.6.0**) The column names. See [column arrays](#column-arrays-the-write-body). |
+| `data` | array | Yes | (**Lead S12, 0.6.0**) One array of values per column, all the same length. |
 | `absent` | object? | No | (**Lead S12, 0.6.0**) Per column, the rows whose cell is not given (not null). |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
 | `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be given (not absent) and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column (leaving it out of `columns`, or listing the row in `absent`) means the same as `0`. An explicit non-zero id without the flag is stored, and the counter moves past it before the insert commits, so a later generated id cannot repeat it (**ColumnarMerge S02, 0.2.0**) — as a JSON integer, a numeric string (`"300"`) or an integral number (`5.0`, `1e2`) alike, each stored as that integer (**BL-703, 0.2.0**; a string id used to be stored without moving the counter, and a fractional form failed with a `500`). |
@@ -2774,19 +2760,19 @@ The `id` column (an `autoIncrement` key) is left out of `columns`, so both rows'
 
 ```json
 {
-  "rowsInserted": 2,
-  "executionMs": 5,
-  "generatedValues": {
-    "columns": ["id"],
-    "data": [[42, 43]]
-  },
-  "writeConcernStatus": {
-    "requested": "majority",
-    "achieved": "majority",
-    "acksReceived": 2,
-    "acksRequired": 2,
-    "wasDegraded": false
-  }
+ "rowsInserted": 2,
+ "executionMs": 5,
+ "generatedValues": {
+ "columns": ["id"],
+ "data": [[42, 43]]
+ },
+ "writeConcernStatus": {
+ "requested": "majority",
+ "achieved": "majority",
+ "acksReceived": 2,
+ "acksRequired": 2,
+ "wasDegraded": false
+ }
 }
 ```
 
@@ -2809,11 +2795,11 @@ S11**) an insert wrote its table's aggregate and latest / first-per-key queries 
 
 ```json
 {
-  "database": "mydb",
-  "table": "orders",
-  "identityInsert": true,
-  "columns": ["id", "status"],
-  "data": [[1000, 0], ["seeded", "zero-is-literal"]]
+ "database": "mydb",
+ "table": "orders",
+ "identityInsert": true,
+ "columns": ["id", "status"],
+ "data": [[1000, 0], ["seeded", "zero-is-literal"]]
 }
 ```
 
@@ -2835,18 +2821,18 @@ into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50
 (**LoadSpeed S13, 0.4.0**) A frame's decimal column has one scale, its largest, so such a number is stored at that
 scale: `3` sent beside `2.50` is stored as `3.00`. A client
 that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
-cannot say which text it had. A JSON body keeps each number's text as sent (**BL-1108, next train**): `3` beside `2.50` is
+cannot say which text it had. A JSON body keeps each number's text as sent: `3` beside `2.50` is
 stored `"3"` there (see [values](#column-arrays-the-write-body)).
 
 - (**BL-035, 0.9.0**) **An array column's frame column (kind 9) must carry the column's own element kind**: nothing is widened
-  (an `Int32` run for a `Double[]` column, or an array column sent to a scalar column, is `400 INVALID_REQUEST` naming the column —
-  *"Column 'D' is Double[]; the frame sends Int32 elements (an array column's frame carries its own element kind, Double; nothing is
-  widened)."*). The JSON body is more forgiving: an integral number is accepted in a `Double[]` column.
+ (an `Int32` run for a `Double` column, or an array column sent to a scalar column, is `400 INVALID_REQUEST` naming the column —
+ *"Column 'D' is Double; the frame sends Int32 elements (an array column's frame carries its own element kind, Double; nothing is
+ widened)."*). The JSON body is more forgiving: an integral number is accepted in a `Double` column.
 - A frame has no envelope: the **database and table are the URL's**, and `identityInsert` / `writeConcern` are query
-  parameters — `POST /api/databases/mydb/tables/orders/rows?identityInsert=true&writeConcern=majority`. (On a JSON body
-  those query parameters are ignored; the body's own fields apply.)
+ parameters — `POST /api/databases/mydb/tables/orders/rows?identityInsert=true&writeConcern=majority`. (On a JSON body
+ those query parameters are ignored; the body's own fields apply.)
 - **One data frame per request.** A body holding two is `400 INVALID_REQUEST`; so is a body that is not a valid `ACB2` body
-  (no end frame, a frame out of sequence, an end frame that counts other rows).
+ (no end frame, a frame out of sequence, an end frame that counts other rows).
 - The response is the JSON above.
 
 **How a client knows.** Every response the endpoint itself returns — success or error — carries
@@ -2882,7 +2868,7 @@ like every other error of this endpoint, and an empty body is `400 MISSING_DATAB
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `ROW_OBJECTS_UNSUPPORTED` | 400 | (**Lead S12, 0.6.0**) A JSON body with `rows` (row objects). Send [column arrays](#column-arrays-the-write-body). Nothing is inserted |
-| `INVALID_REQUEST` | 400 | Missing `columns` / `data`, column arrays that do not match (see [column arrays](#column-arrays-the-write-body)), invalid column name, schema mismatch, `identityInsert: true` with a missing, absent or `null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), a JSON array or object for a scalar column (**BL-1250, next train**; see [values](#column-arrays-the-write-body)), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
+| `INVALID_REQUEST` | 400 | Missing `columns` / `data`, column arrays that do not match (see [column arrays](#column-arrays-the-write-body)), invalid column name, schema mismatch, `identityInsert: true` with a missing, absent or `null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), a JSON array or object for a scalar column (see [values](#column-arrays-the-write-body)), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
 | — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch-v2` |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) An `ACB1` frame body, or the retired `application/vnd.aouda.column-batch` type. The message names the version found and the one expected. Nothing is inserted |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
@@ -2895,18 +2881,18 @@ Update rows matching a WHERE filter.
 
 ```json
 {
-  "database": "mydb",
-  "where": {
-    "and": [
-      { "column": "status", "op": "eq", "value": "pending" },
-      { "column": "price", "op": "gt", "value": 100 }
-    ]
-  },
-  "set": {
-    "status": "shipped",
-    "updated_at": "2026-02-06T12:00:00Z"
-  },
-  "writeConcern": "majority"
+ "database": "mydb",
+ "where": {
+ "and": [
+ { "column": "status", "op": "eq", "value": "pending" },
+ { "column": "price", "op": "gt", "value": 100 }
+ ]
+ },
+ "set": {
+ "status": "shipped",
+ "updated_at": "2026-02-06T12:00:00Z"
+ },
+ "writeConcern": "majority"
 }
 ```
 
@@ -2921,9 +2907,9 @@ Update rows matching a WHERE filter.
 
 ```json
 {
-  "rowsUpdated": 3,
-  "executionMs": 12,
-  "writeConcernStatus": null
+ "rowsUpdated": 3,
+ "executionMs": 12,
+ "writeConcernStatus": null
 }
 ```
 
@@ -2940,10 +2926,10 @@ Update rows matching a WHERE filter.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing/empty WHERE, or a group inside it with no condition (**BL-1036, next train**), missing/empty SET, or invalid column name in SET; a JSON array or object in SET for a scalar column (**BL-1250, next train** — for a number column it was `500 INTERNAL_ERROR`, a `String` column stored it as a type name) |
+| `INVALID_REQUEST` | 400 | Missing/empty WHERE, or a group inside it with no condition, missing/empty SET, or invalid column name in SET; a JSON array or object in SET for a scalar column — for a number column it was `500 INTERNAL_ERROR`, a `String` column stored it as a type name) |
 | `AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget now, as the same `SELECT` would not (**BL-817, 0.3.0**) — other work holds the memory they need. Nothing is changed; `Retry-After` is set. |
-| `STATEMENT_TOO_LARGE` | 400 | (**BL-1033, next train**) The rows the WHERE matches alone exceed the most the read path may hold on this database, so no retry can satisfy it (it was this `503` with a `Retry-After`, every time). Nothing is changed; no `Retry-After`. Narrow the predicate and mutate in pieces. |
+| `STATEMENT_TOO_LARGE` | 400 | The rows the WHERE matches alone exceed the most the read path may hold on this database, so no retry can satisfy it (it was this `503` with a `Retry-After`, every time). Nothing is changed; no `Retry-After`. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
 #### `DELETE /api/databases/{db}/tables/{name}/rows`
@@ -2954,14 +2940,14 @@ Delete rows matching a WHERE filter.
 
 ```json
 {
-  "database": "mydb",
-  "where": {
-    "and": [
-      { "column": "status", "op": "eq", "value": "cancelled" },
-      { "column": "created_at", "op": "lt", "value": "2025-01-01" }
-    ]
-  },
-  "writeConcern": "majority"
+ "database": "mydb",
+ "where": {
+ "and": [
+ { "column": "status", "op": "eq", "value": "cancelled" },
+ { "column": "created_at", "op": "lt", "value": "2025-01-01" }
+ ]
+ },
+ "writeConcern": "majority"
 }
 ```
 
@@ -2975,9 +2961,9 @@ Delete rows matching a WHERE filter.
 
 ```json
 {
-  "rowsDeleted": 5,
-  "executionMs": 8,
-  "writeConcernStatus": null
+ "rowsDeleted": 5,
+ "executionMs": 8,
+ "writeConcernStatus": null
 }
 ```
 
@@ -2994,9 +2980,9 @@ Delete rows matching a WHERE filter.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing or empty WHERE clause, or a group inside it with no condition (**BL-1036, next train**) |
+| `INVALID_REQUEST` | 400 | Missing or empty WHERE clause, or a group inside it with no condition |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget now, as the same `SELECT` would not (**BL-817, 0.3.0**) — other work holds the memory they need. Nothing is changed; `Retry-After` is set. |
-| `STATEMENT_TOO_LARGE` | 400 | (**BL-1033, next train**) The rows the WHERE matches alone exceed the most the read path may hold on this database, so no retry can satisfy it (it was this `503` with a `Retry-After`, every time). Nothing is changed; no `Retry-After`. Narrow the predicate and mutate in pieces. |
+| `STATEMENT_TOO_LARGE` | 400 | The rows the WHERE matches alone exceed the most the read path may hold on this database, so no retry can satisfy it (it was this `503` with a `Retry-After`, every time). Nothing is changed; no `Retry-After`. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts. Nothing is deleted; retry with backoff. |
 
 **Concurrent writers (**BL-881, 0.3.0**).** A DELETE or UPDATE that overlaps another write to the same rows commits as if the
@@ -3010,19 +2996,19 @@ edge table takes the row path) with no vector column that no foreign key referen
 
 ```json
 {
-  "database": "market",
-  "where": { "and": [ { "column": "Ts", "op": "lt", "value": "2026-07-01T00:00:00Z" } ] }
+ "database": "market",
+ "where": { "and": [ { "column": "Ts", "op": "lt", "value": "2026-07-01T00:00:00Z" } ] }
 }
 ```
 
 - On a table **with retention** it is an *early expiry*: the table's horizon rises to the cutoff and the segments wholly below it are
-  retired; one catalog record (`AdvanceTableHorizon`: the table and the cutoff, a few dozen bytes) is logged for replicas and
-  point-in-time restore, no data byte is written, and a later write below the cutoff is counted as `expiredRows`. A cutoff past the
-  server's clock takes the row path. While a rebuild of a materialized query over the table holds its horizon, the statement waits,
-  and answers `409 WRITE_CONFLICT` after 30 s (BL-1072); retry it.
+ retired; one catalog record (`AdvanceTableHorizon`: the table and the cutoff, a few dozen bytes) is logged for replicas and
+ point-in-time restore, no data byte is written, and a later write below the cutoff is counted as `expiredRows`. A cutoff past the
+ server's clock takes the row path. While a rebuild of a materialized query over the table holds its horizon, the statement waits,
+ and answers `409 WRITE_CONFLICT` after 30 s (BL-1072); retry it.
 - On **any other table** it is a delete of the rows that exist when it runs: one log record, the segments wholly below the cutoff
-  retired whole, mask bits for the matching rows of the segments that straddle it, the table's materialized queries rebuilt. It
-  installs no horizon — a row written later with an older time is visible. A null time is not deleted.
+ retired whole, mask bits for the matching rows of the segments that straddle it, the table's materialized queries rebuilt. It
+ installs no horizon — a row written later with an older time is visible. A null time is not deleted.
 
 For `lte` the cutoff is the successor of `value` (one tick for a `Timestamp`, one day for a `Date`). `rowsDeleted` is exact. Any other
 shape — a second condition, a `limit` — runs as before. Subscribers receive one `horizon` or `range_delete` message, not a `change`
@@ -3035,7 +3021,7 @@ The following optional fields extend the standard update request:
 | Field | Type | Description |
 |-------|------|-------------|
 | `setExpr` | `object?` | Expression-based SET values. Keys are column names; values are expression nodes. Evaluated server-side per row. Can be combined with `set` — literal `set` wins on collision. |
-| `returning` | `string[]?` | List of column names (or `["*"]` for all) to return after update. Returns post-update values in columnar format under `rows`. |
+| `returning` | `string?` | List of column names (or `["*"]` for all) to return after update. Returns post-update values in columnar format under `rows`. |
 
 An expression whose 64-bit integer or 18-digit decimal arithmetic overflows for any matched row refuses the whole update with
 `EXPRESSION_OVERFLOW` (**BL-1481, 0.15.0**); `POST …/rows/batch` answers it, and `TRANSFORM_DERIVED_READONLY`, as a 400 (it
@@ -3049,10 +3035,10 @@ Each value in `setExpr` is an expression node:
 { "type": "arithmetic", "op": "+|-|*|/", "left": <node>, "right": <node> }
 { "type": "colRef", "col": "columnName" }
 { "type": "literal", "value": <any> }
-{ "type": "coalesce", "args": [<node>, ...] }
+{ "type": "coalesce", "args": [<node>,...] }
 { "type": "conditional", "when": <predicate>, "then": <node>, "else": <node> }
-{ "type": "call", "fn": "<name>", "args": [<node>, ...] }
-{ "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> }, ... }, "column": "c" }
+{ "type": "call", "fn": "<name>", "args": [<node>,...] }
+{ "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> },... }, "column": "c" }
 ```
 
 (**ADR 0072, 0.14.0**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not; in a formula, a malformed one is `400 FORMULA_REFERENCE_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, 0.14.0**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
@@ -3060,14 +3046,14 @@ Each value in `setExpr` is an expression node:
 
 ```json
 {
-  "rowsUpdated": 3,
-  "executionMs": 9,
-  "rows": {
-    "columns": ["id", "status"],
-    "types":   ["Int64", "String"],
-    "data":    [[1, 2, 3], ["shipped", "shipped", "shipped"]],
-    "rowCount": 3
-  }
+ "rowsUpdated": 3,
+ "executionMs": 9,
+ "rows": {
+ "columns": ["id", "status"],
+ "types": ["Int64", "String"],
+ "data": [[1, 2, 3], ["shipped", "shipped", "shipped"]],
+ "rowCount": 3
+ }
 }
 ```
 
@@ -3086,20 +3072,20 @@ The following optional fields extend the standard delete request:
 | Field | Type | Description |
 |-------|------|-------------|
 | `limit` | `number?` | Maximum number of rows to delete. When set, engine selects the bounded row set first. |
-| `orderBy` | `object[]?` | Same format as query `orderBy`. Controls which rows are selected for deletion when `limit` is set. Omitting `orderBy` with a `limit` selects an arbitrary subset and emits a warning. |
-| `returning` | `string[]?` | List of column names (or `["*"]` for all) to return. Returns **pre-delete** values in columnar format under `rows`. |
+| `orderBy` | `object?` | Same format as query `orderBy`. Controls which rows are selected for deletion when `limit` is set. Omitting `orderBy` with a `limit` selects an arbitrary subset and emits a warning. |
+| `returning` | `string?` | List of column names (or `["*"]` for all) to return. Returns **pre-delete** values in columnar format under `rows`. |
 
 **Extended request with limit, orderBy, and returning:**
 
 ```json
 {
-  "database": "appdb",
-  "where": {
-    "and": [{ "column": "createdAt", "op": "lt", "value": "2026-01-01T00:00:00Z" }]
-  },
-  "orderBy": [{ "column": "createdAt", "descending": false }],
-  "limit": 1000,
-  "returning": ["id", "userId"]
+ "database": "appdb",
+ "where": {
+ "and": [{ "column": "createdAt", "op": "lt", "value": "2026-01-01T00:00:00Z" }]
+ },
+ "orderBy": [{ "column": "createdAt", "descending": false }],
+ "limit": 1000,
+ "returning": ["id", "userId"]
 }
 ```
 
@@ -3107,15 +3093,15 @@ The following optional fields extend the standard delete request:
 
 ```json
 {
-  "rowsDeleted": 1000,
-  "hasMore": true,
-  "executionMs": 18,
-  "rows": {
-    "columns": ["id", "userId"],
-    "types":   ["Int64", "String"],
-    "data":    [[...], [...]],
-    "rowCount": 1000
-  }
+ "rowsDeleted": 1000,
+ "hasMore": true,
+ "executionMs": 18,
+ "rows": {
+ "columns": ["id", "userId"],
+ "types": ["Int64", "String"],
+ "data": [[...], [...]],
+ "rowCount": 1000
+ }
 }
 ```
 
@@ -3142,8 +3128,8 @@ row per grant (operation `truncate`) before the table is emptied. See [Authoriza
 
 ```json
 {
-  "database": "appdb",
-  "writeConcern": "majority"
+ "database": "appdb",
+ "writeConcern": "majority"
 }
 ```
 
@@ -3156,8 +3142,8 @@ row per grant (operation `truncate`) before the table is emptied. See [Authoriza
 
 ```json
 {
-  "rowsDeleted": 15000,
-  "executionMs": 3
+ "rowsDeleted": 15000,
+ "executionMs": 3
 }
 ```
 
@@ -3182,66 +3168,66 @@ whole batch applies them again. Make operations that a retry may repeat idempote
 retry from the failed operation. What each answer means for what was applied:
 
 - **`400 INVALID_REQUEST` for the request's shape** (see Errors below), a row conditions `403`, an row conditions deny-all, and an row conditions write-check
-  refusal of operation 0 (`403 AUTH_RLS_UPDATE_SET_VIOLATION`): nothing was applied. Those checks run before the first operation
-  commits. (**BL-1303, 0.9.0**)
+ refusal of operation 0 (`403 AUTH_RLS_UPDATE_SET_VIOLATION`): nothing was applied. Those checks run before the first operation
+ commits. (**BL-1303, 0.9.0**)
 - **`403 BATCH_RLS_PREFIX_APPLIED`**, no `Retry-After`: the row conditions write check refused operation `k` ≥ 1. Operations `0` to `k − 1`
-  were applied, operation `k` and the later ones were not, and the row that check refused was not written. `details` names
-  `appliedOperations` and `totalOperations` (and `refusalCode=AUTH_RLS_UPDATE_SET_VIOLATION`). **Do not re-send the batch as-is.**
-  Each update is checked against the rows the earlier operations of this batch left. (**BL-1303, 0.9.0**)
+ were applied, operation `k` and the later ones were not, and the row that check refused was not written. `details` names
+ `appliedOperations` and `totalOperations` (and `refusalCode=AUTH_RLS_UPDATE_SET_VIOLATION`). **Do not re-send the batch as-is.**
+ Each update is checked against the rows the earlier operations of this batch left. (**BL-1303, 0.9.0**)
 - **`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`**, with `Retry-After`: the **first** operation was refused for capacity
-  and nothing was applied. Retry the whole batch after `Retry-After` (**0.3.0**).
-- **`400 STATEMENT_TOO_LARGE`**, no `Retry-After` (**BL-1033, next train**): the **first** operation's matches alone exceed the read path's ceiling,
-  so no retry can satisfy it; nothing was applied. Narrow that operation's `where` or split it. (Operation `k` ≥ 1 refused this way is
-  `503 BATCH_PARTIALLY_APPLIED` with `refusalCode=STATEMENT_TOO_LARGE` in `details`.)
+ and nothing was applied. Retry the whole batch after `Retry-After` (**0.3.0**).
+- **`400 STATEMENT_TOO_LARGE`**, no `Retry-After`: the **first** operation's matches alone exceed the read path's ceiling,
+ so no retry can satisfy it; nothing was applied. Narrow that operation's `where` or split it. (Operation `k` ≥ 1 refused this way is
+ `503 BATCH_PARTIALLY_APPLIED` with `refusalCode=STATEMENT_TOO_LARGE` in `details`.)
 - **`503 BATCH_PARTIALLY_APPLIED`**, no `Retry-After`: operation `k` ≥ 1 was refused for capacity. Operations `0` to `k − 1` were
-  applied, operation `k` and the later ones were not; `details` names `appliedOperations=k` and `totalOperations=n`. Re-send only
-  `operations[k..]` (**Lead group 3 review, 0.6.0**; it was the plain capacity refusal, which re-sent the whole batch).
+ applied, operation `k` and the later ones were not; `details` names `appliedOperations=k` and `totalOperations=n`. Re-send only
+ `operations[k..]` (**Lead group 3 review, 0.6.0**; it was the plain capacity refusal, which re-sent the whole batch).
 - **`409 WRITE_CONFLICT`** (**BL-881, 0.3.0**) and **`409 DUPLICATE_PRIMARY_KEY`**: the refused operation applied nothing, the
-  operations before it stand and the ones after it did not run. `details` names `failedOperation`, `appliedOperations` and `totalOperations` (**Durability-1 S11, next train**): retry from
-  the failed operation, or read the data first.
+ operations before it stand and the ones after it did not run. `details` names `failedOperation`, `appliedOperations` and `totalOperations`: retry from
+ the failed operation, or read the data first.
 - **`500 WRITE_APPLIED_RESPONSE_FAILED`**: every operation was applied and the server failed while answering. Do not re-send the
-  batch (**Lead group 3 review, 0.6.0**). A `504 WRITE_CONCERN_TIMEOUT` likewise comes after every operation was applied.
-- **`507 DISK_FULL` and `503 WAL_FAILED`** (**BL-1658, BL-1703, next train**) follow the capacity rule: for operation 0 they are
-  the plain refusal, nothing applied; for operation `k` ≥ 1 the answer is `503 BATCH_PARTIALLY_APPLIED` with `refusalCode=DISK_FULL` or `WAL_FAILED`.
+ batch (**Lead group 3 review, 0.6.0**). A `504 WRITE_CONCERN_TIMEOUT` likewise comes after every operation was applied.
+- **`507 DISK_FULL` and `503 WAL_FAILED`** follow the capacity rule: for operation 0 they are
+ the plain refusal, nothing applied; for operation `k` ≥ 1 the answer is `503 BATCH_PARTIALLY_APPLIED` with `refusalCode=DISK_FULL` or `WAL_FAILED`.
 
-**Which operation failed** (**Durability-1 S11, next train**). Every `400`, `409` and `500` an operation of the batch answers while the batch runs carries
+**Which operation failed**. Every `400`, `409` and `500` an operation of the batch answers while the batch runs carries
 `failedOperation=k; appliedOperations=k; totalOperations=n` at the end of `details`, where `k` is the zero-based index of the
 operation that failed: operations `0` to `k − 1` were applied and stay applied, status and code unchanged. (A request refused before any operation runs — an empty or over-long list, a malformed operation — carries no such line: nothing was applied.) A `400` or `409` refused
-operation `k` before it applied; on a `500` that is not `WRITE_APPLIED_RESPONSE_FAILED` the line ends `; failedOperationOutcome=applied` when the engine knows operation `k` committed before the failure (a durable update whose deletion-mask write failed, **BL-1729, next train**: do not re-send it) and `; failedOperationOutcome=unknown` when it cannot say (read the row
+operation `k` before it applied; on a `500` that is not `WRITE_APPLIED_RESPONSE_FAILED` the line ends `; failedOperationOutcome=applied` when the engine knows operation `k` committed before the failure (a durable update whose deletion-mask write failed,: do not re-send it) and `; failedOperationOutcome=unknown` when it cannot say (read the row
 before re-sending it). **A batch is still not one transaction.**
 
 **Request Body:**
 
 ```json
 {
-  "database": "appdb",
-  "operations": [
-    {
-      "where": { "and": [{ "column": "status", "op": "eq", "value": "pending" }] },
-      "set":   { "status": "processing" }
-    },
-    {
-      "where": { "and": [{ "column": "status", "op": "eq", "value": "cancelled" }] },
-      "delete": true
-    },
-    {
-      "where": { "and": [{ "column": "attempts", "op": "gte", "value": 5 }] },
-      "setExpr": {
-        "attempts": { "type": "arithmetic", "op": "+", "left": { "type": "colRef", "col": "attempts" }, "right": { "type": "literal", "value": 1 } }
-      }
-    }
-  ]
+ "database": "appdb",
+ "operations": [
+ {
+ "where": { "and": [{ "column": "status", "op": "eq", "value": "pending" }] },
+ "set": { "status": "processing" }
+ },
+ {
+ "where": { "and": [{ "column": "status", "op": "eq", "value": "cancelled" }] },
+ "delete": true
+ },
+ {
+ "where": { "and": [{ "column": "attempts", "op": "gte", "value": 5 }] },
+ "setExpr": {
+ "attempts": { "type": "arithmetic", "op": "+", "left": { "type": "colRef", "col": "attempts" }, "right": { "type": "literal", "value": 1 } }
+ }
+ }
+ ]
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
-| `operations` | object[] | Yes | Ordered list of mutation operations |
-| `operations[].where` | object | Yes | WHERE clause for this operation |
-| `operations[].set` | object? | No | Literal SET values (UPDATE operation) |
-| `operations[].setExpr` | object? | No | Expression SET values (UPDATE operation) |
-| `operations[].delete` | bool? | No | `true` for a DELETE operation |
+| `operations` | object | Yes | Ordered list of mutation operations |
+| `operations.where` | object | Yes | WHERE clause for this operation |
+| `operations.set` | object? | No | Literal SET values (UPDATE operation) |
+| `operations.setExpr` | object? | No | Expression SET values (UPDATE operation) |
+| `operations.delete` | bool? | No | `true` for a DELETE operation |
 
 Each operation must specify either (`set` or `setExpr`) or `delete: true`, not both.
 
@@ -3249,12 +3235,12 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 
 ```json
 {
-  "operationResults": [
-    { "rowsAffected": 12 },
-    { "rowsAffected": 3 },
-    { "rowsAffected": 2 }
-  ],
-  "executionMs": 18
+ "operationResults": [
+ { "rowsAffected": 12 },
+ { "rowsAffected": 3 },
+ { "rowsAffected": 2 }
+ ],
+ "executionMs": 18
 }
 ```
 
@@ -3262,12 +3248,12 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 
 | Code | Status | When |
 |------|--------|------|
-| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE, or a group inside one with no condition (**BL-1036, next train**); a JSON array or object in a `set` for a scalar column (**BL-1250, next train**) |
+| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE, or a group inside one with no condition; a JSON array or object in a `set` for a scalar column |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
-| `STATEMENT_TOO_LARGE` | 400 | (**BL-1033, next train**) The first operation's matches alone exceed the read path's ceiling; nothing was applied. No `Retry-After`: narrow or split the operation. See [`STATEMENT_TOO_LARGE`](#request-validation-errors-4xx) |
+| `STATEMENT_TOO_LARGE` | 400 | The first operation's matches alone exceed the read path's ceiling; nothing was applied. No `Retry-After`: narrow or split the operation. See [`STATEMENT_TOO_LARGE`](#request-validation-errors-4xx) |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `DISK_FULL`, `WAL_FAILED`); operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
 | `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
-| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were. `details` ends `failedOperation=k; appliedOperations=k; totalOperations=n` (**Durability-1 S11, next train**), as does every `400`, `409` and `500` an operation answers while the batch runs |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were. `details` ends `failedOperation=k; appliedOperations=k; totalOperations=n`, as does every `400`, `409` and `500` an operation answers while the batch runs |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The batch was applied; the answer failed. Do not re-send |
 
 ---
@@ -3276,23 +3262,23 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 
 The query endpoint accepts an optional `selectExpr` field alongside (or instead of) the
 standard `select` field. Computed columns are evaluated server-side and appended to the
-result — they are never stored. Not with `joins` (**Correctness-Hardening S08, next train**): the query is refused `400 INVALID_REQUEST`.
+result — they are never stored. Not with `joins`: the query is refused `400 INVALID_REQUEST`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `selectExpr` | `ComputedColumnDef[]?` | List of computed column definitions. Each entry has `alias` (string) and `expr` (expression node). Max 20 entries. |
+| `selectExpr` | `ComputedColumnDef?` | List of computed column definitions. Each entry has `alias` (string) and `expr` (expression node). Max 20 entries. |
 
 **`ComputedColumnDef` format:**
 
 ```json
 {
-  "alias": "discountedPrice",
-  "expr": {
-    "type": "arithmetic",
-    "op": "*",
-    "left":  { "type": "colRef", "col": "price" },
-    "right": { "type": "literal", "value": 0.9 }
-  }
+ "alias": "discountedPrice",
+ "expr": {
+ "type": "arithmetic",
+ "op": "*",
+ "left": { "type": "colRef", "col": "price" },
+ "right": { "type": "literal", "value": 0.9 }
+ }
 }
 ```
 
@@ -3300,16 +3286,16 @@ result — they are never stored. Not with `joins` (**Correctness-Hardening S08,
 
 ```json
 {
-  "database": "shop",
-  "table":    "products",
-  "select":   ["id", "name", "price"],
-  "selectExpr": [
-    {
-      "alias": "discountedPrice",
-      "expr": { "type": "arithmetic", "op": "*", "left": { "type": "colRef", "col": "price" }, "right": { "type": "literal", "value": 0.9 } }
-    }
-  ],
-  "limit": 100
+ "database": "shop",
+ "table": "products",
+ "select": ["id", "name", "price"],
+ "selectExpr": [
+ {
+ "alias": "discountedPrice",
+ "expr": { "type": "arithmetic", "op": "*", "left": { "type": "colRef", "col": "price" }, "right": { "type": "literal", "value": 0.9 } }
+ }
+ ],
+ "limit": 100
 }
 ```
 
@@ -3321,11 +3307,11 @@ A `colRef` names its column exactly as the table does — case-sensitively, as `
 
 ```json
 {
-  "columns": ["id", "name", "price", "discountedPrice"],
-  "types":   ["Int64", "String", "Decimal", "Decimal"],
-  "data":    [[1], ["Widget"], [99.00], [89.100]],
-  "rowCount": 1,
-  "stats": { "executionMs": 4 }
+ "columns": ["id", "name", "price", "discountedPrice"],
+ "types": ["Int64", "String", "Decimal", "Decimal"],
+ "data": [[1], ["Widget"], [99.00], [89.100]],
+ "rowCount": 1,
+ "stats": { "executionMs": 4 }
 }
 ```
 
@@ -3346,7 +3332,7 @@ Computed column types are inferred where the expression permits (`"Unknown"` oth
 **Common Notes for All Mutation Endpoints:**
 
 - All mutation endpoints require write permissions (`[RequireWritePermission]` on the server). Requests to non-primary replicas return `WRITE_NOT_ALLOWED` (403) or `NOT_PRIMARY` (421).
-- All mutation endpoints use `encodeURIComponent()` for the table name in the URL path.
+- All mutation endpoints use `encodeURIComponent` for the table name in the URL path.
 - Standard error codes (`INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`, etc.) apply as described in the Error Codes section above.
 - For the full user guide with SDK examples and patterns, see [guides/bulk-mutations.md](../guides/bulk-mutations.md).
 
@@ -3372,8 +3358,7 @@ admin-listener routes: on the data-plane listener they are `404`. A write needs 
 #### `POST /api/databases/{db}/edge-tables`
 
 Create an edge table: two `Int64` columns, the source and the destination node ids (and the `rlsColumn`, when given). An edge
-table stores every column it has (ADR 0027): add **property** columns with `POST …/tables/{name}/columns` — a scalar or, (**BL-1249,
-next train**), an array — and write them with the [bulk load](../guides/bulk-load.md) or `POST …/tables/{name}/rows`. What each
+table stores every column it has (ADR 0027): add **property** columns with `POST …/tables/{name}/columns` — a scalar or, an array — and write them with the [bulk load](../guides/bulk-load.md) or `POST …/tables/{name}/rows`. What each
 write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtablesnameedges) below.
 
 | Field | Type | Required | Description |
@@ -3398,7 +3383,7 @@ A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's
 Insert edges: `srcs[i]` → `dsts[i]`. The two arrays must be non-empty and the same length (`400 INVALID_REQUEST` otherwise);
 `edgeLabels`, when given, holds one label per edge. The answer carries the write's consistency `token`.
 
-This route carries the source, the destination and the label, and nothing else. (**BL-1249, next train**) A **property** column — any
+This route carries the source, the destination and the label, and nothing else. A **property** column — any
 other column of the table — reads **`null`** in an edge inserted here, buffered and after the flush. A property that cannot read
 `null` — `NOT NULL`, with a `default`, or computed on write (`derived`, an identity, a server-time stamp, `autoIncrement`) — makes
 the route refuse the whole call before anything is written: `400 INVALID_REQUEST`, the message naming the columns:
@@ -3450,7 +3435,7 @@ A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's
 
 #### `POST /api/databases/{db}/tables/{name}/edges:shortest-path`
 
-The shortest path from node `a` to node `b`: the node ids along it, both ends included, or `[]` when there is none. A table
+The shortest path from node `a` to node `b`: the node ids along it, both ends included, or `` when there is none. A table
 A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
 only the bound claim's partition. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`.
 A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
@@ -3526,10 +3511,10 @@ Service information.
 
 ```json
 {
-  "service": "Aouda Server",
-  "version": "0.1.0",
-  "status": "running",
-  "tables": 5
+ "service": "Aouda Server",
+ "version": "0.1.0",
+ "status": "running",
+ "tables": 5
 }
 ```
 
@@ -3554,9 +3539,9 @@ What each answers, by state:
 | State | `/health` | `/startup` | `/ready` |
 |---|---|---|---|
 | Opening databases (WAL replay) | `200` `{"status":"healthy"}` | `503` `{"status":"starting","reason":"The engine has not finished opening its databases."}` | `503`, `not_initialized` |
-| Start sequence running (auth, declared schema files, roles, grants, keys) | `200` | `503` `{"status":"starting","reason":"The start sequence has not finished ..."}` | `503`, `server_starting`; during the schema apply also `schema_applying` (with `progress`) and `schema_pending` |
+| Start sequence running (auth, declared schema files, roles, grants, keys) | `200` | `503` `{"status":"starting","reason":"The start sequence has not finished..."}` | `503`, `server_starting`; during the schema apply also `schema_applying` (with `progress`) and `schema_pending` |
 | Setup mode (a data directory never set up, nothing declared) | `200` | `200` `{"status":"started","reason":null}` | `503`, `setup_required` |
-| Serving | `200` | `200` | `200` `{"ready":true,"reasons":[]}` |
+| Serving | `200` | `200` | `200` `{"ready":true,"reasons":}` |
 | Serving, a critical component unhealthy | `200` | `200` | `503`, `component_unhealthy` |
 | Shutting down | The listener closes first: new connections are refused and requests already in flight finish. There is no "draining" answer. | | |
 
@@ -3581,7 +3566,7 @@ This is **not** “ready for schema apply or traffic”. A database can be `Drop
 
 ```json
 {
-  "status": "healthy"
+ "status": "healthy"
 }
 ```
 
@@ -3591,11 +3576,11 @@ Readiness probe: 200 when nothing is missing, 503 with **everything** that is st
 
 ```json
 {
-  "ready": false,
-  "reasons": [
-    { "code": "setup_required", "message": "The server is in setup mode: nothing is declared and no admin account exists. ..." },
-    { "code": "database_pending", "message": "Declared database 'ledger' (declaration file) does not exist yet.", "subject": "ledger" }
-  ]
+ "ready": false,
+ "reasons": [
+ { "code": "setup_required", "message": "The server is in setup mode: nothing is declared and no admin account exists...." },
+ { "code": "database_pending", "message": "Declared database 'ledger' (declaration file) does not exist yet.", "subject": "ledger" }
+ ]
 }
 ```
 
@@ -3603,12 +3588,12 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
 
 ```json
 {
-  "ready": false,
-  "reasons": [
-    { "code": "server_starting", "message": "The server is still starting: the auth bootstrap has not completed." },
-    { "code": "schema_applying", "message": "Applying the schema file of declared database 'orders' (declaration file): 4 of 11 done.", "subject": "orders", "progress": { "done": 4, "total": 11 } },
-    { "code": "schema_pending", "message": "Declared database 'reports' (declaration file) has a schema file that has not been applied yet.", "subject": "reports" }
-  ]
+ "ready": false,
+ "reasons": [
+ { "code": "server_starting", "message": "The server is still starting: the auth bootstrap has not completed." },
+ { "code": "schema_applying", "message": "Applying the schema file of declared database 'orders' (declaration file): 4 of 11 done.", "subject": "orders", "progress": { "done": 4, "total": 11 } },
+ { "code": "schema_pending", "message": "Declared database 'reports' (declaration file) has a schema file that has not been applied yet.", "subject": "reports" }
+ ]
 }
 ```
 
@@ -3624,13 +3609,13 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
 | `database_pending` | A database in the declaration file (`aouda.json`) does not exist yet. | the database |
 | `database_not_open` | A database in the declaration file is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
 | `database_reconcile_failed` | The reconcile of the declared databases after a restore was refused; the server keeps running. | the database, when one is named |
-| `access_converge_failed` | (**BL-1596, next train**) The declared access section could not be converged after the last restore. Where the node writes, what the declaration file removed (a principal, a role, a credential) is removed and the rest waits. Cleared by the next converge that completes (a reload or a restore). | the auth database |
+| `access_converge_failed` | The declared access section could not be converged after the last restore. Where the node writes, what the declaration file removed (a principal, a role, a credential) is removed and the rest waits. Cleared by the next converge that completes (a reload or a restore). | the auth database |
 | `reload_failed` | (**BL-1427, 0.14.0**) The last `POST /api/admin/reload` stopped part-way; the steps before it are applied. Cleared by the next reload that completes; a refused reload adds none. | the entry (a database, role or key name), when one is named |
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
 | `schema_applying` | (**BL-1462, 0.14.0**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
 | `schema_drift` | The start-time apply of a declared `SchemaFile` refused a change (a destructive one without `SchemaAllowDestructive`, or one the engine does not apply), so the catalog is not what the file says; the start went on. `503` until you allow the change or update the file, and restart. A failed apply fails the start instead, so there is no `/ready` to ask (**BL-1406, 0.11.0**). | the database |
 | `configured_key_inactive` | Not produced (**BL-1464, 0.16.0**). | none |
-| `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
+| `component_unhealthy` | A critical component (catalog, WAL, memory,...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
 
 A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up. `aouda status` prints every reason.
 
@@ -3824,12 +3809,12 @@ is taken first from the database furthest over its share — and no longer a lim
 Two fields **changed meaning**:
 
 - `managedHeapBytes` is the **live heap after the last gen-2 collection** — what that collection traced live, never more than
-  the heap less its free space — the one reading memory decisions take, as of the last reconciliation (every 10 s). It used to
-  be the heap after the most recent collection of any kind, which counted every object that died since the last gen-2 as
-  live. A **background** gen-2's heap less free space also counts everything allocated while it ran, untraced; the traced
-  figure leaves that out (**WorkloadCore, 0.3.0**). For a blocking gen-2 the two are equal.
+ the heap less its free space — the one reading memory decisions take, as of the last reconciliation (every 10 s). It used to
+ be the heap after the most recent collection of any kind, which counted every object that died since the last gen-2 as
+ live. A **background** gen-2's heap less free space also counts everything allocated while it ran, untraced; the traced
+ figure leaves that out (**WorkloadCore, 0.3.0**). For a blocking gen-2 the two are equal.
 - `untrackedHeadroomBytes` is `managedHeapBytes − ledgerBytes` (never negative): the live heap the ledger does not account
-  for. It used to subtract `reservedBytes` only.
+ for. It used to subtract `reservedBytes` only.
 
 🔎 **The completeness of the ledger** is `untrackedAtLastGen2Bytes / liveHeapAtLastGen2Bytes`, taken at the collections with
 the largest live heap. A large share is worth reporting: it is memory held outside anything the engine can release or refuse.
@@ -3867,8 +3852,7 @@ those details with the resource mode.
 
 ### Backup and restore admin routes
 
-All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
-A backup is one **set**: every database of the server, the auth database first, committed by a set record written last (**BL-1637, next train**). Every example below is a response captured from a running server, trimmed where an array repeats (a `pitr` entry per member).
+All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database. Every example below is a response captured from a running server, trimmed where an array repeats (a `pitr` entry per member).
 
 #### Summary
 
@@ -3876,18 +3860,18 @@ A backup is one **set**: every database of the server, the auth database first, 
 |--------|------|-------------|
 | `POST` | `/admin/backup/trigger` | Back up every database as one set |
 | `GET` | `/admin/backup/list` | List the sets |
-| `GET` | `/admin/backup/{id}` | One set, with each member's cut and branches (**BL-1637, BL-335, next train**) |
+| `GET` | `/admin/backup/{id}` | One set, with each member's cut and branches |
 | `POST` | `/admin/backup/restore/{id}` | Restore a set: exactly, or with a `targetTime` in the body |
 | `POST` | `/admin/backup/restore` | Restore by `backupId` and/or `targetTime` |
-| `POST` | `/admin/backup/prune` | Apply the retention policy; a dry run unless `execute` is `true` (**BL-1635, next train**) |
+| `POST` | `/admin/backup/prune` | Apply the retention policy; a dry run unless `execute` is `true` |
 | `GET` | `/admin/backup/retention` | The saved retention policy |
-| `PUT` | `/admin/backup/retention` | Save the retention policy (**BL-1635, next train**) |
+| `PUT` | `/admin/backup/retention` | Save the retention policy |
 | `GET` | `/admin/backup/schedule` | The backup schedule |
 | `PUT` | `/admin/backup/schedule` | Update the schedule |
 
 #### The error envelope
 
-Every error the backup controller raises is a JSON body with `error` (the message), a `code` from the list below, `details` (or `null`) and **`remedy`, a string that says what to do** (**BL-1637, next train**; `remedy` on these routes is a string, not the object other routes use). Two kinds of error on these routes do not come from it: a refused key (401 / 403) has the authentication envelope (`error` is the code, `remedy` an object), and a capacity refusal (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, 503) has the server's general one. A message that carries a database name or a path is redacted where it names a key-shaped value (**BL-1607, next train**).
+Every error the backup controller raises is a JSON body with `error` (the message), a `code` from the list below, `details` (or `null`) and **`remedy`, a string that says what to do**.
 
 ```json
 {"error":"Backup 'nope' not found.","code":"BACKUP_NOT_FOUND","details":null,"requestId":null,"remedy":"List the backups (GET /admin/backup/list) and name a set that is listed, or a target time after a complete set's cut."}
@@ -3904,18 +3888,18 @@ Every error the backup controller raises is a JSON body with `error` (the messag
 | `BACKUP_ENGINE_NOT_READY` | 503 | the engine is not initialised yet |
 | `BACKUP_REQUEST_INVALID` | 400 | restore with neither `backupId` nor `targetTime` |
 | `BACKUP_TARGET_TIME_INVALID` | 400 | `targetTime` in the future, or at or before the set's cut; or the set is exact-restore-only (a member recorded no WAL root) |
-| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window; every member's window is checked before any engine stops, so nothing was changed (**BL-1740, next train**) |
+| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window; every member's window is checked before any engine stops, so nothing was changed |
 | `PITR_BULK_LOAD_UNAVAILABLE` | 409 | a bulk load committed before the target has no files in the store or the archive |
-| `PITR_KEYLESS_DELETE_UNRESOLVED` | 409 | a delete of a keyless table's row that the restore cannot apply (**BL-1624, next train**) |
+| `PITR_KEYLESS_DELETE_UNRESOLVED` | 409 | a delete of a keyless table's row that the restore cannot apply |
 | `PITR_FAILED` | 500 | staging or replay failed; the database is quarantined (`POST /api/databases/{db}/unquarantine` after the cause is fixed) |
 | `BACKUP_RESTORE_FAILED` | 500 | any other failure in a restore |
-| `BACKUP_BLOB_DAMAGED` | 409 | restore: a blob of the set or the WAL archive does not match its key (its SHA-256 or its length); the message names the file, the database and the set, and the members already restored. Nothing was written under that file's name; the database the restore stopped in, if the restore had started changing it, is quarantined with `RESTORE_INCOMPLETE` until a restore of it completes — the message says which (**BL-1739, next train**) |
+| `BACKUP_BLOB_DAMAGED` | 409 | restore: a blob of the set or the WAL archive does not match its key (its SHA-256 or its length); the message names the file, the database and the set, and the members already restored. Nothing was written under that file's name; the database the restore stopped in, if the restore had started changing it, is quarantined with `RESTORE_INCOMPLETE` until a restore of it completes — the message says which |
 | `BACKUP_FAILED` | 500 | a backup or prune failed for another reason; no set was committed |
 | `BACKUP_SCHEDULE_INVALID` | 400 | `PUT schedule` with a cron expression that is not five fields |
 | `BACKUP_RETENTION_INVALID` | 400 | `PUT retention` out of range, or `prune` with no policy saved |
-| `BACKUP_FENCE_TIMEOUT` | 503 | the backup could not take its fence within 5 seconds (**BL-337, next train**) |
+| `BACKUP_FENCE_TIMEOUT` | 503 | the backup could not take its fence within 5 seconds |
 | `BACKUP_BUFFERS_UNSEALED` | 503 | a write buffer could not be sealed for the backup |
-| `BACKUP_BRANCH_UNAVAILABLE` | 409 | a branch could not be captured (**BL-335, next train**) |
+| `BACKUP_BRANCH_UNAVAILABLE` | 409 | a branch could not be captured |
 
 #### `POST /admin/backup/trigger`
 
@@ -3924,9 +3908,9 @@ Back up every database of the server as one set. Returns when the set is committ
 **Request body** (optional):
 ```json
 {
-  "destination": "./backups",
-  "incremental": true,
-  "baseBackupId": null
+ "destination": "./backups",
+ "incremental": true,
+ "baseBackupId": null
 }
 ```
 
@@ -3939,16 +3923,16 @@ Back up every database of the server as one set. Returns when the set is committ
 **Response** (`202 Accepted`):
 ```json
 {
-  "backupId": "backup-2026-11-21-150259-e1638d21",
-  "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
-  "basedOn": null,
-  "totalBytes": 87871,
-  "newBytes": 87871,
-  "fileCount": 53,
-  "newFileCount": 53,
-  "blobsUploaded": 53,
-  "blobsSkipped": 0,
-  "durationSeconds": 0.367
+ "backupId": "backup-2026-11-21-150259-e1638d21",
+ "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
+ "basedOn": null,
+ "totalBytes": 87871,
+ "newBytes": 87871,
+ "fileCount": 53,
+ "newFileCount": 53,
+ "blobsUploaded": 53,
+ "blobsSkipped": 0,
+ "durationSeconds": 0.367
 }
 ```
 
@@ -3970,70 +3954,70 @@ List the sets at the configured destination, newest first.
 **Response** (`200 OK`):
 ```json
 {
-  "backups": [
-    {
-      "backupId": "backup-2026-11-21-150259-e1638d21",
-      "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
-      "basedOn": null,
-      "totalBytes": 87871,
-      "newBytes": 87871,
-      "fileCount": 53,
-      "newFileCount": 53,
-      "databases": ["_serverauth", "_settings", "shop"],
-      "pitrEligible": true,
-      "complete": true,
-      "members": [
-        { "database": "_serverauth", "pitrEligible": true },
-        { "database": "_settings", "pitrEligible": true },
-        { "database": "shop", "pitrEligible": true }
-      ]
-    }
-  ],
-  "warning": null
+ "backups": [
+ {
+ "backupId": "backup-2026-11-21-150259-e1638d21",
+ "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
+ "basedOn": null,
+ "totalBytes": 87871,
+ "newBytes": 87871,
+ "fileCount": 53,
+ "newFileCount": 53,
+ "databases": ["_serverauth", "_settings", "shop"],
+ "pitrEligible": true,
+ "complete": true,
+ "members": [
+ { "database": "_serverauth", "pitrEligible": true },
+ { "database": "_settings", "pitrEligible": true },
+ { "database": "shop", "pitrEligible": true }
+ ]
+ }
+ ],
+ "warning": null
 }
 ```
 
-- `complete` is `true` when the set's record is present, reads whole, and every database it names has its manifest. An incomplete set is listed and is never restored (`BACKUP_SET_INCOMPLETE`); its `pitrEligible` is `false`. A set taken before this release has no record and lists incomplete (**BL-1637, next train**).
+- `complete` is `true` when the set's record is present, reads whole, and every database it names has its manifest. An incomplete set is listed and is never restored (`BACKUP_SET_INCOMPLETE`); its `pitrEligible` is `false`. A set taken before this release has no record and lists incomplete.
 - `refused` appears (a string) when the set's record could not be read: another version, or damaged.
-- `members[].pitrEligible` is `true` when that database's manifest recorded the WAL-root incarnation a point-in-time restore needs. `pitrEligible` on the set is `true` only when every member is. A database without a WAL (`unlogged`, `memory`) has no incarnation, and its backups are exact-restore-only; a backup of a database that has one is eligible even at WAL position `0` (**BL-1010, next train**). A version-3 backup lists with `pitrEligible: false` and cannot be restored (below).
+- `members.pitrEligible` is `true` when that database's manifest recorded the WAL-root incarnation a point-in-time restore needs. `pitrEligible` on the set is `true` only when every member is. A database without a WAL (`unlogged`, `memory`) has no incarnation, and its backups are exact-restore-only; a backup of a database that has one is eligible even at WAL position `0`. A version-3 backup lists with `pitrEligible: false` and cannot be restored (below).
 - `warning` is non-null when the destination is unavailable or some listing failed.
 
 #### `GET /admin/backup/{id}`
 
-One set: its record, and per member the manifest's cut, redo-start position and branches (**BL-1637, BL-335, next train**).
+One set: its record, and per member the manifest's cut, redo-start position and branches.
 
 **Response** (`200 OK`), abridged to one member:
 ```json
 {
-  "backupId": "backup-2026-11-21-150259-e1638d21",
-  "complete": true,
-  "createdUtc": "2026-11-21T15:02:59.2808837+00:00",
-  "completedUtc": "2026-11-21T15:02:59.7414278+00:00",
-  "pitrEligible": true,
-  "members": [
-    {
-      "database": "shop",
-      "isAuthDatabase": false,
-      "authDatabaseKind": "None",
-      "linkedAuthDatabaseName": null,
-      "isInternal": false,
-      "manifestVersion": 4,
-      "createdUtc": "2026-11-21T15:02:59.7246936+00:00",
-      "walPosition": 406,
-      "redoStartPosition": 225,
-      "basedOn": null,
-      "pitrEligible": true,
-      "fileCount": 4,
-      "totalBytes": 2054,
-      "branches": []
-    }
-  ],
-  "missing": [],
-  "unrecorded": []
+ "backupId": "backup-2026-11-21-150259-e1638d21",
+ "complete": true,
+ "createdUtc": "2026-11-21T15:02:59.2808837+00:00",
+ "completedUtc": "2026-11-21T15:02:59.7414278+00:00",
+ "pitrEligible": true,
+ "members": [
+ {
+ "database": "shop",
+ "isAuthDatabase": false,
+ "authDatabaseKind": "None",
+ "linkedAuthDatabaseName": null,
+ "isInternal": false,
+ "manifestVersion": 4,
+ "createdUtc": "2026-11-21T15:02:59.7246936+00:00",
+ "walPosition": 406,
+ "redoStartPosition": 225,
+ "basedOn": null,
+ "pitrEligible": true,
+ "fileCount": 4,
+ "totalBytes": 2054,
+ "branches":
+ }
+ ],
+ "missing":,
+ "unrecorded":
 }
 ```
 
-`walPosition` is the WAL position at the backup's fence; `redoStartPosition` is the position a point-in-time restore replays from — earlier, so rows that were in a write buffer at the fence come back (**BL-1440, next train**). `branches[]` lists the branches the member's backup holds: `name`, `from`, `createdUtc`, `durabilityLevel`, `cutUtc`, `fileCount`, `bytes`. `missing` names members the record lists whose manifest is absent; `unrecorded` names manifests under the id that the record does not list. `404 BACKUP_NOT_FOUND` when there is no such set.
+`walPosition` is the WAL position at the backup's fence; `redoStartPosition` is the position a point-in-time restore replays from — earlier, so rows that were in a write buffer at the fence come back. `branches` lists the branches the member's backup holds: `name`, `from`, `createdUtc`, `durabilityLevel`, `cutUtc`, `fileCount`, `bytes`. `missing` names members the record lists whose manifest is absent; `unrecorded` names manifests under the id that the record does not list. `404 BACKUP_NOT_FOUND` when there is no such set.
 
 #### `POST /admin/backup/restore/{id}`
 
@@ -4044,7 +4028,7 @@ An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). 
 **Request body** (optional):
 ```json
 {
-  "targetTime": "2026-11-21T15:10:34Z"
+ "targetTime": "2026-11-21T15:10:34Z"
 }
 ```
 
@@ -4059,8 +4043,8 @@ Same operation, with both fields in the body. Omitting `backupId` while supplyin
 **Request body**:
 ```json
 {
-  "backupId": "backup-2026-11-21-151032-22d0e575",
-  "targetTime": "2026-11-21T15:10:34Z"
+ "backupId": "backup-2026-11-21-151032-22d0e575",
+ "targetTime": "2026-11-21T15:10:34Z"
 }
 ```
 
@@ -4074,40 +4058,40 @@ At least one of `backupId` or `targetTime` is required.
 **Response** (`200 OK`) — exact restore (`targetTime` / `pitr` omitted):
 ```json
 {
-  "backupId": "backup-2026-11-21-150449-d1090a91",
-  "restoredUtc": "2026-11-21T15:04:56.1835586+00:00",
-  "filesRestored": 62,
-  "bytesDownloaded": 105587,
-  "integrityVerified": true,
-  "durationSeconds": 0.3148055,
-  "notInSet": [],
-  "branches": []
+ "backupId": "backup-2026-11-21-150449-d1090a91",
+ "restoredUtc": "2026-11-21T15:04:56.1835586+00:00",
+ "filesRestored": 62,
+ "bytesDownloaded": 105587,
+ "integrityVerified": true,
+ "durationSeconds": 0.3148055,
+ "notInSet":,
+ "branches":
 }
 ```
 
 **Response** (`200 OK`) — point-in-time restore:
 ```json
 {
-  "backupId": "backup-2026-11-21-151032-22d0e575",
-  "restoredUtc": "2026-11-21T15:10:36.7220017+00:00",
-  "filesRestored": 64,
-  "bytesDownloaded": 107857,
-  "integrityVerified": true,
-  "durationSeconds": 0.2210697,
-  "targetTime": "2026-11-21T15:10:34+00:00",
-  "pitr": [
-    { "database": "_serverauth", "replayed": true, "transactionsReplayed": 0, "rowsReplayed": 0, "lastAppliedCommitUtc": null, "stoppedAtTarget": false },
-    { "database": "shop", "replayed": true, "transactionsReplayed": 2, "rowsReplayed": 2, "lastAppliedCommitUtc": "2026-11-21T15:10:32.4254192+00:00", "stoppedAtTarget": true }
-  ],
-  "notInSet": [],
-  "branches": []
+ "backupId": "backup-2026-11-21-151032-22d0e575",
+ "restoredUtc": "2026-11-21T15:10:36.7220017+00:00",
+ "filesRestored": 64,
+ "bytesDownloaded": 107857,
+ "integrityVerified": true,
+ "durationSeconds": 0.2210697,
+ "targetTime": "2026-11-21T15:10:34+00:00",
+ "pitr": [
+ { "database": "_serverauth", "replayed": true, "transactionsReplayed": 0, "rowsReplayed": 0, "lastAppliedCommitUtc": null, "stoppedAtTarget": false },
+ { "database": "shop", "replayed": true, "transactionsReplayed": 2, "rowsReplayed": 2, "lastAppliedCommitUtc": "2026-11-21T15:10:32.4254192+00:00", "stoppedAtTarget": true }
+ ],
+ "notInSet":,
+ "branches":
 }
 ```
 
-- `notInSet` lists registered databases that are not members of the restored set; they are left as they were (**BL-1637, next train**).
-- `branches[]` has one entry per member that has branches: `database`, `restored` (the branches an **exact** restore brought back) and `droppedBranches` (the branches a **point-in-time** restore dropped — a branch's history is not on its parent's timeline) (**BL-335, next train**).
+- `notInSet` lists registered databases that are not members of the restored set; they are left as they were.
+- `branches` has one entry per member that has branches: `database`, `restored` (the branches an **exact** restore brought back) and `droppedBranches` (the branches a **point-in-time** restore dropped — a branch's history is not on its parent's timeline).
 - `declarationConflict` (**BL-1379, 0.11.0**) is present only when the restored catalog conflicts with the databases declared in `aouda.json`: the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
-- A restore keeps each database's durability level: the level travels with the backup (**BL-1168, next train**). The first open after an exact restore flushes the restored write buffers and takes longer (**BL-1625, next train**).
+- A restore keeps each database's durability level: the level travels with the backup. The first open after an exact restore flushes the restored write buffers and takes longer.
 
 PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6) — a commit boundary, nothing finer. `lastAppliedCommitUtc` is that commit, in UTC.
 
@@ -4117,32 +4101,32 @@ PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044
 |--------|------|
 | 400 Bad Request | `BACKUP_REQUEST_INVALID` (neither field); `BACKUP_TARGET_TIME_INVALID` (`targetTime` in the future, or at or before the set's cut — the message names both instants — or the set is exact-restore-only); `BACKUP_MANIFEST_REFUSED` or `BACKUP_SET_REFUSED` (another format); `BACKUP_DESTINATION_UNAVAILABLE` (a member's backup cannot be read) |
 | 404 Not Found | `BACKUP_NOT_FOUND`: the set does not exist at the destination, or no complete set lies at or before `targetTime` |
-| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `BACKUP_BLOB_DAMAGED` (**BL-1739, next train**); `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
-| 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine` — except an auth database's, which runs on its staged copy before the swap: a refusal there leaves the auth database in place, unquarantined (**BL-1766, next train**). `BACKUP_RESTORE_FAILED` for any other failure, among them a member whose files were restored and that did not open — the message names it, its quarantine and its cause, and `Restored and open: <names>` (a point-in-time restore answers this as `PITR_FAILED`) (**Durability-1 S26, next train**) |
+| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `BACKUP_BLOB_DAMAGED`; `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
+| 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine` — except an auth database's, which runs on its staged copy before the swap: a refusal there leaves the auth database in place, unquarantined. `BACKUP_RESTORE_FAILED` for any other failure, among them a member whose files were restored and that did not open — the message names it, its quarantine and its cause, and `Restored and open: <names>` (a point-in-time restore answers this as `PITR_FAILED`) |
 | 503 Service Unavailable | `BACKUP_ENGINE_NOT_READY`; `BACKUP_DESTINATION_UNAVAILABLE` |
-| 507 Insufficient Storage | `DISK_FULL` (**BL-1761, next train**): the data directory's volume cannot hold the restore — what it writes (every member's backed-up files, the copy each auth database is restored into, the WAL a point-in-time restore stages) and a margin of 16 MiB and 5 %. The message names the bytes needed and the bytes free; `Retry-After: 30`; the body has `error` and `code` (no `remedy`: the middleware answers it, as for every `507`). What an in-place restore deletes first is not credited |
+| 507 Insufficient Storage | `DISK_FULL`: the data directory's volume cannot hold the restore — what it writes (every member's backed-up files, the copy each auth database is restored into, the WAL a point-in-time restore stages) and a margin of 16 MiB and 5 %. The message names the bytes needed and the bytes free; `Retry-After: 30`; the body has `error` and `code` (no `remedy`: the middleware answers it, as for every `507`). What an in-place restore deletes first is not credited |
 
-The 400s, the 404, the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE`, `PITR_WINDOW_UNAVAILABLE` (**BL-1740, next train**) and the 507 `DISK_FULL` (**BL-1761, next train**) are decided before any engine stops: nothing was changed. `BACKUP_BLOB_DAMAGED` says in its message which it was: a damaged catalog root, or a damaged first WAL segment a point-in-time restore checks before it starts, changed nothing (`Nothing of '<db>' was changed.` / `Nothing was changed.`); any other damaged blob, the other `PITR_*` codes and the 500s come after a member's files were changed. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on holds `restore.incomplete` and is quarantined with `RESTORE_INCOMPLETE` — it is not opened on a mixture of its old files and the backup's — until a restore of it completes, which clears the quarantine; `POST /api/databases/{db}/unquarantine` on it answers `503 RESTORE_INCOMPLETE` and leaves it quarantined (**BL-1739, BL-1740, next train**). **The auth databases are the exception** (**BL-1761, next train**): `_serverauth` and every other auth database of the set are restored last, each into a copy beside it, and swapped in by rename only once every member has restored — so a restore that fails anywhere, the auth database included, leaves them as they were (the message says so), and the operator's key still signs in to run the restore again. A crash during the swap is finished by the next start: the old auth database before the swap's commit, the restored one from it. Fix the cause the `remedy` names, then restore again.
+The 400s, the 404, the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE`, `PITR_WINDOW_UNAVAILABLE` and the 507 `DISK_FULL` are decided before any engine stops: nothing was changed. `BACKUP_BLOB_DAMAGED` says in its message which it was: a damaged catalog root, or a damaged first WAL segment a point-in-time restore checks before it starts, changed nothing (`Nothing of '<db>' was changed.` / `Nothing was changed.`); any other damaged blob, the other `PITR_*` codes and the 500s come after a member's files were changed. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on holds `restore.incomplete` and is quarantined with `RESTORE_INCOMPLETE` — it is not opened on a mixture of its old files and the backup's — until a restore of it completes, which clears the quarantine; `POST /api/databases/{db}/unquarantine` on it answers `503 RESTORE_INCOMPLETE` and leaves it quarantined. **The auth databases are the exception**: `_serverauth` and every other auth database of the set are restored last, each into a copy beside it, and swapped in by rename only once every member has restored — so a restore that fails anywhere, the auth database included, leaves them as they were (the message says so), and the operator's key still signs in to run the restore again. A crash during the swap is finished by the next start: the old auth database before the swap's commit, the restored one from it. Fix the cause the `remedy` names, then restore again.
 
-**`integrityVerified` is always `true` in a 200** (**BL-1739, next train**): every blob is checked against its SHA-256 and length as it is read, before the file gets its name, and a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`. The field stays for now and will be removed.
+**`integrityVerified` is always `true` in a 200**: every blob is checked against its SHA-256 and length as it is read, before the file gets its name, and a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`. The field stays for now and will be removed.
 
 #### `POST /admin/backup/prune`
 
-Apply the saved retention policy (**BL-1635, next train**). The body `{ "execute": false }` (the default) is a **dry run**: it returns the plan and deletes nothing. `{ "execute": true }` deletes exactly the plan it returns. With no policy saved the answer is `400 BACKUP_RETENTION_INVALID`.
+Apply the saved retention policy. The body `{ "execute": false }` (the default) is a **dry run**: it returns the plan and deletes nothing. `{ "execute": true }` deletes exactly the plan it returns. With no policy saved the answer is `400 BACKUP_RETENTION_INVALID`.
 
 **Response** (`200 OK`), a dry run with policy `keepLast 3, keepDays 14, pitrWindow 7 days`:
 ```json
 {
-  "executed": false,
-  "policy": { "keepLast": 3, "keepDays": 14, "pitrWindow": "7.00:00:00" },
-  "nowUtc": "2026-11-21T15:04:50.2970824+00:00",
-  "sets": [
-    { "backupId": "backup-2026-11-21-150449-d1090a91", "createdUtc": "2026-11-21T15:04:50.0405424+00:00", "complete": true, "keep": true, "rules": ["floor", "keepLast", "keepDays"] },
-    { "backupId": "backup-2026-11-21-150259-e1638d21", "createdUtc": "2026-11-21T15:02:59.7246936+00:00", "complete": true, "keep": true, "rules": ["keepLast", "keepDays", "baseOf:backup-2026-11-21-150449-d1090a91"] }
-  ],
-  "databases": [
-    { "database": "shop", "backupsDeleted": [], "blobsDeleted": 0, "bytesReclaimed": 0 }
-  ]
+ "executed": false,
+ "policy": { "keepLast": 3, "keepDays": 14, "pitrWindow": "7.00:00:00" },
+ "nowUtc": "2026-11-21T15:04:50.2970824+00:00",
+ "sets": [
+ { "backupId": "backup-2026-11-21-150449-d1090a91", "createdUtc": "2026-11-21T15:04:50.0405424+00:00", "complete": true, "keep": true, "rules": ["floor", "keepLast", "keepDays"] },
+ { "backupId": "backup-2026-11-21-150259-e1638d21", "createdUtc": "2026-11-21T15:02:59.7246936+00:00", "complete": true, "keep": true, "rules": ["keepLast", "keepDays", "baseOf:backup-2026-11-21-150449-d1090a91"] }
+ ],
+ "databases": [
+ { "database": "shop", "backupsDeleted":, "blobsDeleted": 0, "bytesReclaimed": 0 }
+ ]
 }
 ```
 
@@ -4150,7 +4134,7 @@ Apply the saved retention policy (**BL-1635, next train**). The body `{ "execute
 
 #### `GET /admin/backup/retention` and `PUT /admin/backup/retention`
 
-The saved policy (**BL-1635, next train**), persisted in the server's settings. **There is no default: with none saved nothing is pruned** (every field `null`).
+The saved policy, persisted in the server's settings. **There is no default: with none saved nothing is pruned** (every field `null`).
 
 ```json
 { "keepLast": 3, "keepDays": 14, "pitrWindow": "7.00:00:00" }
@@ -4171,9 +4155,9 @@ Get the current backup schedule.
 **Response** (`200 OK`):
 ```json
 {
-  "cronExpression": "0 2 * * *",
-  "destination": "/var/aouda/archive",
-  "incremental": true
+ "cronExpression": "0 2 * * *",
+ "destination": "/var/aouda/archive",
+ "incremental": true
 }
 ```
 
@@ -4186,9 +4170,9 @@ Update (or disable) the backup schedule. Saved to the server's `_settings` datab
 **Request body:**
 ```json
 {
-  "cronExpression": "0 2 * * *",
-  "destination": "./backups",
-  "incremental": true
+ "cronExpression": "0 2 * * *",
+ "destination": "./backups",
+ "incremental": true
 }
 ```
 
@@ -4205,7 +4189,7 @@ Set `cronExpression` to null to disable scheduled backups.
 
 #### Branch routes during a backup
 
-While a backup captures (or uploads) a database's branches, creating or deleting a branch of that database answers `409 BRANCH_BUSY` with a `remedy`; retry when the backup is done (**BL-335, next train**).
+While a backup captures (or uploads) a database's branches, creating or deleting a branch of that database answers `409 BRANCH_BUSY` with a `remedy`; retry when the backup is done.
 
 ---
 
@@ -4219,21 +4203,21 @@ Get replication status.
 
 ```json
 {
-  "role": "Secondary",
-  "currentPrimary": "primary:5000",
-  "walPosition": 12345,
-  "lagBytes": 0,
-  "fencingToken": 1,
-  "canAcceptWrites": false,
-  "perDatabaseLag": {
-    "mydb": {
-      "walPosition": 12345,
-      "primaryPosition": 12345,
-      "lagBytes": 0,
-      "tokenCoveredPosition": 9999,
-      "bulkLoadHold": { "jobId": "3f2a…", "position": 10000, "sinceUtc": "2026-10-19T20:01:02Z", "loadsHeld": 1 }
-    }
-  }
+ "role": "Secondary",
+ "currentPrimary": "primary:5000",
+ "walPosition": 12345,
+ "lagBytes": 0,
+ "fencingToken": 1,
+ "canAcceptWrites": false,
+ "perDatabaseLag": {
+ "mydb": {
+ "walPosition": 12345,
+ "primaryPosition": 12345,
+ "lagBytes": 0,
+ "tokenCoveredPosition": 9999,
+ "bulkLoadHold": { "jobId": "3f2a…", "position": 10000, "sinceUtc": "2026-10-19T20:01:02Z", "loadsHeld": 1 }
+ }
+ }
 }
 ```
 
@@ -4272,10 +4256,10 @@ Idempotent: repeating the same call returns 200 without restarting replication.
 
 ```json
 {
-  "replicaSetName": "rs0",
-  "primaryAddress": "primary:5000",
-  "thisNodeAddress": "this:5001",
-  "role": "secondary"
+ "replicaSetName": "rs0",
+ "primaryAddress": "primary:5000",
+ "thisNodeAddress": "this:5001",
+ "role": "secondary"
 }
 ```
 
@@ -4376,15 +4360,15 @@ Get the current cluster configuration.
 
 ```json
 {
-  "mode": "cluster",
-  "replicaSetName": "rs0",
-  "members": [
-    { "address": "node1:5000", "isDraining": false },
-    { "address": "node2:5000", "isDraining": true }
-  ],
-  "thisNode": { "address": "node1:5000", "priority": 5, "arbiter": false },
-  "heartbeatIntervalMs": 2000,
-  "electionTimeoutMs": 10000
+ "mode": "cluster",
+ "replicaSetName": "rs0",
+ "members": [
+ { "address": "node1:5000", "isDraining": false },
+ { "address": "node2:5000", "isDraining": true }
+ ],
+ "thisNode": { "address": "node1:5000", "priority": 5, "arbiter": false },
+ "heartbeatIntervalMs": 2000,
+ "electionTimeoutMs": 10000
 }
 ```
 
@@ -4431,19 +4415,19 @@ Returns current runtime configuration snapshot.
 
 ```json
 {
-  "memory": {
-    "maxTotalRamBytes": 2147483648,
-    "maxHotBytes": 0,
-    "maxPageCacheBytes": 0
-  },
-  "backup": {
-    "cronExpression": "0 2 * * *",
-    "destination": "./backups",
-    "incremental": true
-  },
-  "logging": {
-    "level": "Information"
-  }
+ "memory": {
+ "maxTotalRamBytes": 2147483648,
+ "maxHotBytes": 0,
+ "maxPageCacheBytes": 0
+ },
+ "backup": {
+ "cronExpression": "0 2 * * *",
+ "destination": "./backups",
+ "incremental": true
+ },
+ "logging": {
+ "level": "Information"
+ }
 }
 ```
 
@@ -4460,7 +4444,7 @@ Patch mutable runtime config values.
 - `backup.incremental`
 - `logging.level`
 
-**`memory.maxHotBytes` and `memory.maxPageCacheBytes` govern** (**BL-1099, next train**). They are the same server-wide caps as
+**`memory.maxHotBytes` and `memory.maxPageCacheBytes` govern**. They are the same server-wide caps as
 `Aouda:Memory:MaxHotBytes` (`T10`) and `Aouda:Memory:MaxPageCacheBytes` (`T12`): a PATCH takes effect at once on every database,
 each getting its share of the figure as the configuration keys do (the slices add up to the value you set), and on every database
 opened later. `0` means "derived" (45 % of the governed budget for the hot tier, 10 % of each database's share for the page cache).
@@ -4473,12 +4457,12 @@ caps are put back too. Before, both were validated, saved and echoed by `GET /ad
 
 ```json
 {
-  "memory": {
-    "maxTotalRamBytes": 1073741824
-  },
-  "logging": {
-    "level": "Warning"
-  }
+ "memory": {
+ "maxTotalRamBytes": 1073741824
+ },
+ "logging": {
+ "level": "Warning"
+ }
 }
 ```
 
@@ -4499,24 +4483,24 @@ Returns mutable and immutable config field paths.
 
 ```json
 {
-  "mutableFields": [
-    "memory.maxTotalRamBytes",
-    "memory.maxHotBytes",
-    "memory.maxPageCacheBytes",
-    "backup.cronExpression",
-    "backup.destination",
-    "backup.incremental",
-    "logging.level"
-  ],
-  "immutableFields": [
-    "dataPath",
-    "port",
-    "bind",
-    "replicaSet",
-    "archive",
-    "auth",
-    "databases"
-  ]
+ "mutableFields": [
+ "memory.maxTotalRamBytes",
+ "memory.maxHotBytes",
+ "memory.maxPageCacheBytes",
+ "backup.cronExpression",
+ "backup.destination",
+ "backup.incremental",
+ "logging.level"
+ ],
+ "immutableFields": [
+ "dataPath",
+ "port",
+ "bind",
+ "replicaSet",
+ "archive",
+ "auth",
+ "databases"
+ ]
 }
 ```
 
@@ -4532,20 +4516,20 @@ Returns feature and provider capability metadata for Studio and MCP clients.
 
 ```json
 {
-  "version": "0.1.0",
-  "mode": "standalone",
-  "backupProviders": ["local"],
-  "features": {
-    "clusterLifecycle": true,
-    "backupManagement": true,
-    "runtimeConfig": true,
-    "capabilityDiscovery": true,
-    "nodeInfo": true,
-    "nodeLogs": true,
-    "nodeLogStream": true,
-    "insertColumnBatch": true,
-    "queryColumnBatch": true
-  }
+ "version": "0.1.0",
+ "mode": "standalone",
+ "backupProviders": ["local"],
+ "features": {
+ "clusterLifecycle": true,
+ "backupManagement": true,
+ "runtimeConfig": true,
+ "capabilityDiscovery": true,
+ "nodeInfo": true,
+ "nodeLogs": true,
+ "nodeLogStream": true,
+ "insertColumnBatch": true,
+ "queryColumnBatch": true
+ }
 }
 ```
 
@@ -4574,17 +4558,17 @@ All endpoints are under `/admin/node`.
 
 ```json
 {
-  "nodeId": "MYMACHINE-12345",
-  "address": "localhost:5000",
-  "role": "Standalone",
-  "version": "0.1.0",
-  "uptimeSeconds": 123,
-  "processId": 12345,
-  "machineName": "MYMACHINE",
-  "osDescription": "Microsoft Windows 10.0.26200",
-  "processorCount": 16,
-  "workingSetBytes": 180000000,
-  "gcHeapBytes": 42000000
+ "nodeId": "MYMACHINE-12345",
+ "address": "localhost:5000",
+ "role": "Standalone",
+ "version": "0.1.0",
+ "uptimeSeconds": 123,
+ "processId": 12345,
+ "machineName": "MYMACHINE",
+ "osDescription": "Microsoft Windows 10.0.26200",
+ "processorCount": 16,
+ "workingSetBytes": 180000000,
+ "gcHeapBytes": 42000000
 }
 ```
 
@@ -4602,14 +4586,14 @@ Query parameters:
 
 ```json
 {
-  "entries": [
-    {
-      "timestampUtc": "2026-04-06T18:22:14.123Z",
-      "level": "Warning",
-      "category": "Aouda.Server.Startup.AoudaHostedService",
-      "message": "Server memory budget: 2,147,483,648 bytes"
-    }
-  ]
+ "entries": [
+ {
+ "timestampUtc": "2026-04-06T18:22:14.123Z",
+ "level": "Warning",
+ "category": "Aouda.Server.Startup.AoudaHostedService",
+ "message": "Server memory budget: 2,147,483,648 bytes"
+ }
+ ]
 }
 ```
 
@@ -4647,19 +4631,19 @@ and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replica
 
 ```json
 {
-  "replicaSetName": "my-cluster",
-  "members": [
-    {
-      "address": "node1:5433",
-      "role": "Primary",
-      "isSelf": true,
-      "temperatureProfile": "Balanced",
-      "isHidden": false,
-      "isReadCandidate": true
-    }
-  ],
-  "readCandidates": ["node1:5433"],
-  "primary": "node1:5433"
+ "replicaSetName": "my-cluster",
+ "members": [
+ {
+ "address": "node1:5433",
+ "role": "Primary",
+ "isSelf": true,
+ "temperatureProfile": "Balanced",
+ "isHidden": false,
+ "isReadCandidate": true
+ }
+ ],
+ "readCandidates": ["node1:5433"],
+ "primary": "node1:5433"
 }
 ```
 
@@ -4685,17 +4669,17 @@ and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replica
 | `Timestamp` | UTC instant; text with no offset is UTC (see note below) |
 | `Date` | A calendar day (days since the Unix epoch). The day written is the day stored: an offset or a `Z` on the text is not applied (**BL-1225, 0.9.0**) |
 | `Guid` | UUID/GUID |
-| `Double[]` (**BL-035, 0.9.0**) | An [array column](../guides/array-columns.md): one whole array of finite 64-bit floats per row. JSON: an array of numbers; C# `double[]`, TypeScript `Float64Array` |
-| `Float32[]` (**BL-035, 0.9.0**) | One array of finite 32-bit floats per row. JSON: an array of numbers (written as the value widened to `double`); `float[]`, `Float32Array` |
-| `Int32[]` (**BL-035, 0.9.0**) | One array of 32-bit integers per row. JSON: an array of integers; `int[]`, `Int32Array` |
-| `Int64[]` (**BL-035, 0.9.0**) | One array of 64-bit integers per row. JSON: an array of integers; `long[]`, `BigInt64Array` |
-| `Byte[]` (**BL-035, 0.9.0**) | One byte string per row. JSON: **one base64 string**, not an array of numbers; `byte[]`, `Uint8Array` |
-| `String[]` (**BL-035, 0.9.0**) | One array of strings per row (an element is never null, and must be valid Unicode). JSON: an array of strings; `string[]`, `string[]` |
+| `Double` (**BL-035, 0.9.0**) | An [array column](../guides/array-columns.md): one whole array of finite 64-bit floats per row. JSON: an array of numbers; C# `double`, TypeScript `Float64Array` |
+| `Float32` (**BL-035, 0.9.0**) | One array of finite 32-bit floats per row. JSON: an array of numbers (written as the value widened to `double`); `float`, `Float32Array` |
+| `Int32` (**BL-035, 0.9.0**) | One array of 32-bit integers per row. JSON: an array of integers; `int`, `Int32Array` |
+| `Int64` (**BL-035, 0.9.0**) | One array of 64-bit integers per row. JSON: an array of integers; `long`, `BigInt64Array` |
+| `Byte` (**BL-035, 0.9.0**) | One byte string per row. JSON: **one base64 string**, not an array of numbers; `byte`, `Uint8Array` |
+| `String` (**BL-035, 0.9.0**) | One array of strings per row (an element is never null, and must be valid Unicode). JSON: an array of strings; `string`, `string` |
 | `Expression` with `drives` (**ADR 0072, 0.14.0**) | A [formula](../guides/formulas.md) per row, driving another column of the same table; stored as the formula's text. JSON: the formula's object (`null` for an input row); in a column-batch frame, its canonical text. The SDKs write a `Formula` and read either form (`Formula.FromValue` / `Formula.fromValue`). See [create table](#post-apidatabasesdbtables) |
 
-(**BL-035, 0.9.0**) The six array names are matched exactly (`"double[]"`, `"Double []"`, `"Double[][]"`, `"DoubleArray"` and the
-type's number are refused). An array value holds at most **65,536 elements** and **1,048,576 bytes of elements** (so a `Byte[]` is at
-most 64 KiB, `Float32[]` / `Int32[]` 256 KiB, `Double[]` / `Int64[]` 512 KiB), a nullable column keeps `null` and `[]` apart, and an
+(**BL-035, 0.9.0**) The six array names are matched exactly (`"double"`, `"Double "`, `"Double"`, `"DoubleArray"` and the
+type's number are refused). An array value holds at most **65,536 elements** and **1,048,576 bytes of elements** (so a `Byte` is at
+most 64 KiB, `Float32` / `Int32` 256 KiB, `Double` / `Int64` 512 KiB), a nullable column keeps `null` and `` apart, and an
 element is never null, NaN or infinite. An array column can only be selected: see `ARRAY_COLUMN_UNSUPPORTED`. A non-nullable array
 column is allowed at create; one added with `POST …/columns` is always added nullable. A type change into or out of an array type
 is refused by `PATCH …/columns/{name}` (`400 INVALID_REQUEST`, *"Changing a column to or from an array type is not supported; add a new
@@ -4703,7 +4687,7 @@ column and copy the values."*); a `schema apply` that asks for it answers `200` 
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, 0.9.0)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. **On a JSON read a `Timestamp` is a number, not text** (**IR quote report, 0.10.0**): .NET ticks — 100 ns units since `0001-01-01T00:00:00Z`, always UTC — in a `/query` columnar `data` array, a subscription `snapshot` page or `change` row, a materialized query's body and a named query's rows alike (`639298350326250000` is `2026-11-09T15:30:32.625Z`; subtract `621355968000000000` for Unix ticks, divide by `10000` for Unix milliseconds). A column the schema declares `String` is text, whatever it holds, so two feeds can differ in shape because their tables differ in column type, not because the server formats them differently. The type is named, so no client has to guess: a columnar response's `types`, the `X-Aouda-Column-Types` header, and a subscription `snapshot`'s `column_types` (`{"DateTime":"Timestamp"}`) all say `Timestamp`. The `@aouda/client` TypeScript SDK reads such a subscription column as a `Date`. A `Date` column is named the same way (`"Date"`, **BL-1391, 0.11.0**; its value is a number of days since the Unix epoch, unchanged on the wire), so a client can tell a day from an `Int32`; `Aouda.Client` then hands a UTC `DateTime` at midnight and `@aouda/client` a JavaScript `Date` at 00:00:00 UTC of that day in a subscription (a query result's `Date` column stays the day number in TypeScript). For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, 0.9.0)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. **On a JSON read a `Timestamp` is a number, not text** (**IR quote report, 0.10.0**):.NET ticks — 100 ns units since `0001-01-01T00:00:00Z`, always UTC — in a `/query` columnar `data` array, a subscription `snapshot` page or `change` row, a materialized query's body and a named query's rows alike (`639298350326250000` is `2026-11-09T15:30:32.625Z`; subtract `621355968000000000` for Unix ticks, divide by `10000` for Unix milliseconds). A column the schema declares `String` is text, whatever it holds, so two feeds can differ in shape because their tables differ in column type, not because the server formats them differently. The type is named, so no client has to guess: a columnar response's `types`, the `X-Aouda-Column-Types` header, and a subscription `snapshot`'s `column_types` (`{"DateTime":"Timestamp"}`) all say `Timestamp`. The `@aouda/client` TypeScript SDK reads such a subscription column as a `Date`. A `Date` column is named the same way (`"Date"`, **BL-1391, 0.11.0**; its value is a number of days since the Unix epoch, unchanged on the wire), so a client can tell a day from an `Int32`; `Aouda.Client` then hands a UTC `DateTime` at midnight and `@aouda/client` a JavaScript `Date` at 00:00:00 UTC of that day in a subscription (a query result's `Date` column stays the day number in TypeScript). For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
@@ -4738,7 +4722,7 @@ Aouda provides a full-duplex WebSocket API for real-time table subscriptions and
 
 ```
 ws://{host}/api/databases/{db}/ws
-wss://{host}/api/databases/{db}/ws   (TLS)
+wss://{host}/api/databases/{db}/ws (TLS)
 ```
 
 The database name is in the **path**. The `auth` message still includes `database` and it must match the path (same rule as HTTP v2).
@@ -4782,10 +4766,10 @@ Authenticate the connection and optionally negotiate wire mode.
 **Example:**
 ```json
 {
-  "type": "auth",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "database": "my_db",
-  "wire_mode": "json"
+ "type": "auth",
+ "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+ "database": "my_db",
+ "wire_mode": "json"
 }
 ```
 
@@ -4810,7 +4794,7 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `name` is set. |
 | `name` | string? | Conditional | Named-query unique name. **Required on the data-plane listener.** |
 | `args` | object? | No | Bind arguments for `name` subscribe. Same shape as HTTP execute `args`. |
-| `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin` and `like`, on the column types the query path accepts them for (no ordering on `Bool` or `Guid`; `like` on `String`). `in` / `nin` take a non-empty array of non-null members of the column's type (**BL-1226, 0.9.0**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). The snapshot and the live events select the same rows, a nullable column included: a null never matches `ne`, `nin`, `lt` or `lte` (`eq null` and `ne null` test for null), as in a query. To state that for live events the server adds an `IS NOT NULL` beside each such condition, and an `or` list needs a copy of itself per alternative, so the cost is bounded (**BL-1226, 0.9.0**): one `or` list may hold at most 6 conditions with `ne`, `nin`, `lt` or `lte`, the rewrite may add at most 256 groups and 2048 conditions to one filter, and it may not nest groups past the depth limit of 5. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot. Fold several `ne` on one column that mean "none of these" into one `nin` (`ne` conditions in an `and` list cost one `IS NOT NULL` per column, which no honest filter reaches the bound with), or split the subscription. Up to 0.8.0 a live event with a null matched those four while the snapshot held none, and a `Bool` column's `eq`, `ne`, `in` and `nin` never matched a live event. The user-filter rewrite is unchanged. The same null rule now holds for an row conditions predicate and for a named query's bound clause on the live path, without that rewrite (**BL-1251, 0.9.0**). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). (**BL-1036, next train**) Read as strictly as a query's `where`: an object with an `and`, `or` or `groups` member is the structured form and may hold nothing else — a shorthand column beside them (`{"v": {"gte": 3}, "and": […]}`) or a member a condition does not have is refused `INVALID_SUBSCRIPTION_FILTER` naming it — and a filter with no condition (`{}`, `{"and": []}`, `{"groups": [{}]}`) is refused too: omit `filter` to subscribe to every row. Up to 0.16.0 the member was dropped (the shorthand half of a mixed filter was lost) and `{}` subscribed to every row. |
+| `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin` and `like`, on the column types the query path accepts them for (no ordering on `Bool` or `Guid`; `like` on `String`). `in` / `nin` take a non-empty array of non-null members of the column's type (**BL-1226, 0.9.0**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). The snapshot and the live events select the same rows, a nullable column included: a null never matches `ne`, `nin`, `lt` or `lte` (`eq null` and `ne null` test for null), as in a query. To state that for live events the server adds an `IS NOT NULL` beside each such condition, and an `or` list needs a copy of itself per alternative, so the cost is bounded (**BL-1226, 0.9.0**): one `or` list may hold at most 6 conditions with `ne`, `nin`, `lt` or `lte`, the rewrite may add at most 256 groups and 2048 conditions to one filter, and it may not nest groups past the depth limit of 5. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot. Fold several `ne` on one column that mean "none of these" into one `nin` (`ne` conditions in an `and` list cost one `IS NOT NULL` per column, which no honest filter reaches the bound with), or split the subscription. Up to 0.8.0 a live event with a null matched those four while the snapshot held none, and a `Bool` column's `eq`, `ne`, `in` and `nin` never matched a live event. The user-filter rewrite is unchanged. The same null rule now holds for an row conditions predicate and for a named query's bound clause on the live path, without that rewrite (**BL-1251, 0.9.0**). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). Read as strictly as a query's `where`: an object with an `and`, `or` or `groups` member is the structured form and may hold nothing else — a shorthand column beside them (`{"v": {"gte": 3}, "and": […]}`) or a member a condition does not have is refused `INVALID_SUBSCRIPTION_FILTER` naming it — and a filter with no condition (`{}`, `{"and": }`, `{"groups": [{}]}`) is refused too: omit `filter` to subscribe to every row. Up to 0.16.0 the member was dropped (the shorthand half of a mixed filter was lost) and `{}` subscribed to every row. |
 | `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. |
 | `at_least` | string? | No | Consistency-token pin: snapshot at at least this token. Optional `wait_ms` / `on_exceeded` (same values as HTTP). Omitted `at_least` leaves `resume_from` byte-for-byte today's path. |
 | `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |
@@ -4822,7 +4806,7 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `key` | string[]? | Conditional | Columns that form the conflation key. Default: table primary key. Required when the table has no PK. |
+| `key` | string? | Conditional | Columns that form the conflation key. Default: table primary key. Required when the table has no PK. |
 | `interval_ms` | number | Yes | Flush interval in milliseconds. Valid range 1…60_000. |
 | `collapse_inserts` | bool | No | When true, matching in-scope inserts are held latest-wins per key. Default `false` (omitted on the wire). Delivered `op` stays `"insert"`. |
 
@@ -4833,23 +4817,23 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 **Ad-hoc example (admin listener):**
 ```json
 {
-  "type": "subscribe",
-  "id": "sub-orders-1",
-  "target": "orders",
-  "filter": {
-    "and": [{"column": "status", "op": "eq", "value": "active"}]
-  }
+ "type": "subscribe",
+ "id": "sub-orders-1",
+ "target": "orders",
+ "filter": {
+ "and": [{"column": "status", "op": "eq", "value": "active"}]
+ }
 }
 ```
 
 **Named-query example (required on the data-plane):**
 ```json
 {
-  "type": "subscribe",
-  "id": "sub-quotes-1",
-  "name": "equity.quoteByTicker",
-  "args": { "ticker": "AAPL" },
-  "conflate": { "key": ["ticker"], "interval_ms": 100 }
+ "type": "subscribe",
+ "id": "sub-quotes-1",
+ "name": "equity.quoteByTicker",
+ "args": { "ticker": "AAPL" },
+ "conflate": { "key": ["ticker"], "interval_ms": 100 }
 }
 ```
 
@@ -4857,10 +4841,10 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 
 ```json
 {
-  "type": "subscribe",
-  "id": "retail-2026",
-  "target": "pnl",
-  "filter": { "and": [ {"column": "dept", "op": "eq", "value": "Retail"}, {"column": "year", "op": "eq", "value": 2026} ] }
+ "type": "subscribe",
+ "id": "retail-2026",
+ "target": "pnl",
+ "filter": { "and": [ {"column": "dept", "op": "eq", "value": "Retail"}, {"column": "year", "op": "eq", "value": 2026} ] }
 }
 ```
 
@@ -4878,22 +4862,22 @@ formula maintainer's progress, as on a read. See [Formulas](../guides/formulas.m
 global, and it is not a resource the client has to garbage-collect.
 
 - A `subscribe` naming an `id` the connection **already holds replaces** that subscription
-  (**BL-638, 0.1.37**): the old registration is dropped and the new one answers with its own
-  `snapshot` / `snapshot_complete`. This is the intended way to re-state a subscription after a
-  `gap`, and it is harmless if the client sends one redundantly.
+ (**BL-638, 0.1.37**): the old registration is dropped and the new one answers with its own
+ `snapshot` / `snapshot_complete`. This is the intended way to re-state a subscription after a
+ `gap`, and it is harmless if the client sends one redundantly.
 - The replace happens **after** every other check on the `subscribe` passes. A `subscribe` refused
-  for any other reason — unknown `name`, `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`, `PERMISSION_REVOKED`,
-  a freshness shortfall — leaves the existing subscription of that `id` untouched and delivering.
-  A client can therefore retry a `subscribe` without first proving it will succeed.
+ for any other reason — unknown `name`, `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`, `PERMISSION_REVOKED`,
+ a freshness shortfall — leaves the existing subscription of that `id` untouched and delivering.
+ A client can therefore retry a `subscribe` without first proving it will succeed.
 - Servers **before** BL-638 refused the second `subscribe` with `DUPLICATE_SUBSCRIPTION_ID`
-  instead. That error is informational, not fatal: seeing it means the `id` is registered and
-  delivering, so a client should keep the subscription rather than tearing it down. A client that
-  treats every subscription `error` as fatal will strand a live view on a benign retry.
+ instead. That error is informational, not fatal: seeing it means the `id` is registered and
+ delivering, so a client should keep the subscription rather than tearing it down. A client that
+ treats every subscription `error` as fatal will strand a live view on a benign retry.
 - After a **reconnect** the `id` is free again, because the previous connection's registrations
-  died with it. Reuse the same `id` on the new socket with `resume_from`; there is no need to mint
-  a fresh one, and nothing to clean up on the server.
+ died with it. Reuse the same `id` on the new socket with `resume_from`; there is no need to mint
+ a fresh one, and nothing to clean up on the server.
 - `unsubscribe` frees the `id` on that connection immediately and answers `unsubscribed`;
-  unsubscribing an `id` the connection does not hold answers `SUBSCRIPTION_NOT_FOUND`.
+ unsubscribing an `id` the connection does not hold answers `SUBSCRIPTION_NOT_FOUND`.
 
 > **One connection per client, please.** Subscriptions are multiplexed over a single WebSocket.
 > Opening a socket per subscription gives you one server session per socket, each with its own
@@ -4954,10 +4938,10 @@ Open a write stream to a table for continuous high-throughput inserts without pe
 **Example:**
 ```json
 {
-  "type": "stream_open",
-  "id": "stream-metrics-1",
-  "table": "metrics",
-  "mode": "insert"
+ "type": "stream_open",
+ "id": "stream-metrics-1",
+ "table": "metrics",
+ "mode": "insert"
 }
 ```
 
@@ -4976,8 +4960,8 @@ Send a batch of rows on an open write stream.
 | `type` | string | Yes | Always `"stream_rows"` |
 | `id` | string | Yes | Stream ID (must match a prior `stream_open`). |
 | `seq` | number | Yes | Monotonically increasing sequence number for this batch. Must start at 1 and increment by 1 per batch. The server uses this to detect gaps and for acknowledgement. |
-| `columns` | string[] | Yes | (**Lead S12, 0.6.0**) The column names. |
-| `data` | array[] | Yes | (**Lead S12, 0.6.0**) One array of values per column, all the same length (at least one row). |
+| `columns` | string | Yes | (**Lead S12, 0.6.0**) The column names. |
+| `data` | array | Yes | (**Lead S12, 0.6.0**) One array of values per column, all the same length (at least one row). |
 | `absent` | object? | No | (**Lead S12, 0.6.0**) Per column, the rows whose cell is not given (not null). |
 
 The batch is [column arrays](#column-arrays-the-write-body), the same body the HTTP insert takes (**Lead S12, 0.6.0; breaking**:
@@ -4988,15 +4972,15 @@ one (a `stream_ack` error's `index` is the row's index in the batch).
 **Example:**
 ```json
 {
-  "type": "stream_rows",
-  "id": "stream-metrics-1",
-  "seq": 1,
-  "columns": ["sensor_id", "value", "recorded_at"],
-  "data": [
-    [42, 42],
-    [98.6, 99.1],
-    ["2026-05-22T11:00:00Z", "2026-05-22T11:00:05Z"]
-  ]
+ "type": "stream_rows",
+ "id": "stream-metrics-1",
+ "seq": 1,
+ "columns": ["sensor_id", "value", "recorded_at"],
+ "data": [
+ [42, 42],
+ [98.6, 99.1],
+ ["2026-05-22T11:00:00Z", "2026-05-22T11:00:05Z"]
+ ]
 }
 ```
 
@@ -5053,10 +5037,10 @@ Successful authentication acknowledgement.
 **Example:**
 ```json
 {
-  "type": "auth_ok",
-  "user_id": "usr_abc123",
-  "expires_at": "2026-05-23T11:00:00Z",
-  "wire_mode": "json"
+ "type": "auth_ok",
+ "user_id": "usr_abc123",
+ "expires_at": "2026-05-23T11:00:00Z",
+ "wire_mode": "json"
 }
 ```
 
@@ -5075,9 +5059,9 @@ Authentication failure. The server closes the connection after sending this mess
 **Example:**
 ```json
 {
-  "type": "auth_error",
-  "code": "AUTH_TOKEN_EXPIRED",
-  "message": "Token has expired"
+ "type": "auth_error",
+ "code": "AUTH_TOKEN_EXPIRED",
+ "message": "Token has expired"
 }
 ```
 
@@ -5114,10 +5098,10 @@ General error, optionally scoped to a subscription or stream ID.
 **Example:**
 ```json
 {
-  "type": "error",
-  "id": "sub-orders-1",
-  "code": "TABLE_NOT_FOUND",
-  "message": "Table 'orders' does not exist"
+ "type": "error",
+ "id": "sub-orders-1",
+ "code": "TABLE_NOT_FOUND",
+ "message": "Table 'orders' does not exist"
 }
 ```
 
@@ -5141,24 +5125,24 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 |---|---|---|
 | `type` | string | Always `"snapshot"` |
 | `id` | string | Subscription ID this snapshot belongs to. |
-| `columns` | string[] | (**Lead S12, 0.6.0**) The page's column names. |
-| `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
+| `columns` | string | (**Lead S12, 0.6.0**) The page's column names. |
+| `data` | array | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
-| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. (**BL-1495, 0.15.0**) And each `Expression` column, as `"Expression"` (`{"formula":"Expression"}`): the cell is the formula's JSON object, on every page, a denied subscriber's empty page included. A `change` does not repeat a `Timestamp`, `Date` or `Expression` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
+| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are.NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. (**BL-1495, 0.15.0**) And each `Expression` column, as `"Expression"` (`{"formula":"Expression"}`): the cell is the formula's JSON object, on every page, a denied subscriber's empty page included. A `change` does not repeat a `Timestamp`, `Date` or `Expression` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
 
 **Example:**
 ```json
 {
-  "type": "snapshot",
-  "id": "sub-orders-1",
-  "columns": ["id", "status", "total"],
-  "data": [
-    [1, 2],
-    ["active", "active"],
-    [150.00, 99.99]
-  ],
-  "version": 100040
+ "type": "snapshot",
+ "id": "sub-orders-1",
+ "columns": ["id", "status", "total"],
+ "data": [
+ [1, 2],
+ ["active", "active"],
+ [150.00, 99.99]
+ ],
+ "version": 100040
 }
 ```
 
@@ -5178,7 +5162,7 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 | `version` | number | Same pinned version as every preceding `snapshot` page |
 | `row_count` | number | Total rows delivered across all snapshot pages |
 | `total_matches` | number? | Present when the named query declared `count: true` — total matching rows, ignoring limit/offset |
-| `warnings` | object[]? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe; `CONFLATE_NOOP` when default `conflate` cannot collapse inserts) |
+| `warnings` | object? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe; `CONFLATE_NOOP` when default `conflate` cannot collapse inserts) |
 | `token` | string? | Same C-1 string as every preceding snapshot page |
 | `horizon` | string? | (**Horizon, 0.5.0**) The subscribed table's horizon, ISO-8601 UTC with seven fractional digits (`"2026-10-11T12:34:00.0000000Z"`), when it has one — a windowed materialized query's result or a table with retention. It is read after the snapshot, so for a moment the snapshot can hold a row below it; a `horizon` message then follows. Apply it to the snapshot as to a notice: drop every row whose `horizon_column` lies below it or is null. Omitted for any other table. A windowed result's snapshot (and a named-query subscribe's `total_matches`) is its **stored** part: nothing below the horizon is computed for a subscription. |
 | `horizon_column` | string? | (**Horizon, 0.5.0**) The column `horizon` applies to; present with it. |
@@ -5186,11 +5170,11 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 
 ```json
 {
-  "type": "snapshot_complete",
-  "id": "sub-orders-1",
-  "version": 100040,
-  "row_count": 2,
-  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
+ "type": "snapshot_complete",
+ "id": "sub-orders-1",
+ "version": 100040,
+ "row_count": 2,
+ "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
 
@@ -5211,10 +5195,10 @@ Feed `last_seq` to a new `subscribe` as `resume_from` (existing three-outcome pa
 
 ```json
 {
-  "type": "gap",
-  "id": "sub-orders-1",
-  "last_seq": 100041,
-  "discarded": 17
+ "type": "gap",
+ "id": "sub-orders-1",
+ "last_seq": 100041,
+ "discarded": 17
 }
 ```
 
@@ -5240,34 +5224,34 @@ Incremental row change on an active subscription. Sent whenever a row matching t
 **Example — insert:**
 ```json
 {
-  "type": "change",
-  "id": "sub-orders-1",
-  "op": "insert",
-  "row": {"id": 3, "status": "active", "total": 200.00},
-  "version": 100041
+ "type": "change",
+ "id": "sub-orders-1",
+ "op": "insert",
+ "row": {"id": 3, "status": "active", "total": 200.00},
+ "version": 100041
 }
 ```
 
 **Example — update:**
 ```json
 {
-  "type": "change",
-  "id": "sub-orders-1",
-  "op": "update",
-  "row":  {"id": 1, "status": "shipped", "total": 150.00},
-  "prev": {"id": 1, "status": "active",  "total": 150.00},
-  "version": 100042
+ "type": "change",
+ "id": "sub-orders-1",
+ "op": "update",
+ "row": {"id": 1, "status": "shipped", "total": 150.00},
+ "prev": {"id": 1, "status": "active", "total": 150.00},
+ "version": 100042
 }
 ```
 
 **Example — delete:**
 ```json
 {
-  "type": "change",
-  "id": "sub-orders-1",
-  "op": "delete",
-  "key": {"id": 2},
-  "version": 100043
+ "type": "change",
+ "id": "sub-orders-1",
+ "op": "delete",
+ "key": {"id": 2},
+ "version": 100043
 }
 ```
 
@@ -5320,7 +5304,7 @@ arrive after this message are live whatever their time. No per-row `change` is s
 **Both notices** are ordered in the table's change stream (a `range_delete` is emitted inside the statement's commit, so a row
 inserted after it arrives after it), kept by the resume buffer and replayed on `resume_from`. They go to every subscriber of the table
 that is not denied it: a notice names no row, so `filter`, a named query's bound `where` and row conditions do not apply. A conflated
-subscription sends what it holds first. An embargoed subscription's notice goes through its embargo hold (**BL-1317, next train**):
+subscription sends what it holds first. An embargoed subscription's notice goes through its embargo hold:
 a held change the notice covers is never released after it, the notice's time (`horizon` / `before`) is at most the subscriber's
 cutoff — `now − embargoSeconds` plus one tick, for a `Date` column the next day at midnight UTC — and a subscription whose embargo
 releases nothing gets none. A client that does not know these types ignores them ([Type Discriminator](#type-discriminator))
@@ -5388,12 +5372,12 @@ Acknowledges durable receipt of rows through the given sequence number. May incl
 **Example — partial rejection:**
 ```json
 {
-  "type": "stream_ack",
-  "id": "stream-metrics-1",
-  "through": 3,
-  "errors": [
-    {"index": 1, "code": "INVALID_VALUE", "message": "Column 'value': expected Double, got String"}
-  ]
+ "type": "stream_ack",
+ "id": "stream-metrics-1",
+ "through": 3,
+ "errors": [
+ {"index": 1, "code": "INVALID_VALUE", "message": "Column 'value': expected Double, got String"}
+ ]
 }
 ```
 
@@ -5423,29 +5407,29 @@ Confirms a write stream has been closed.
 
 **Subscription lifecycle:**
 ```
-Client                                  Server
-  ──── auth ──────────────────────────►
-  ◄─── auth_ok ────────────────────────
-  ──── subscribe (id="sub1") ──────────►
-  ◄─── snapshot (id="sub1") ─────────── (current rows)
-  ◄─── change   (id="sub1", op=insert)  (as rows change)
-  ◄─── change   (id="sub1", op=update)
-  ──── unsubscribe (id="sub1") ────────►
-  ◄─── unsubscribed (id="sub1") ────────
+Client Server
+ ──── auth ──────────────────────────►
+ ◄─── auth_ok ────────────────────────
+ ──── subscribe (id="sub1") ──────────►
+ ◄─── snapshot (id="sub1") ─────────── (current rows)
+ ◄─── change (id="sub1", op=insert) (as rows change)
+ ◄─── change (id="sub1", op=update)
+ ──── unsubscribe (id="sub1") ────────►
+ ◄─── unsubscribed (id="sub1") ────────
 ```
 
 **Write stream lifecycle:**
 ```
-Client                                  Server
-  ──── stream_open (id="s1") ──────────►
-  ◄─── stream_ready (id="s1") ─────────
-  ──── stream_rows (id="s1", seq=1) ───►
-  ◄─── stream_ack  (id="s1", through=1)
-  ──── stream_rows (id="s1", seq=2) ───►
-  ──── stream_rows (id="s1", seq=3) ───►
-  ◄─── stream_ack  (id="s1", through=3)
-  ──── stream_close (id="s1") ─────────►
-  ◄─── stream_closed (id="s1") ─────────
+Client Server
+ ──── stream_open (id="s1") ──────────►
+ ◄─── stream_ready (id="s1") ─────────
+ ──── stream_rows (id="s1", seq=1) ───►
+ ◄─── stream_ack (id="s1", through=1)
+ ──── stream_rows (id="s1", seq=2) ───►
+ ──── stream_rows (id="s1", seq=3) ───►
+ ◄─── stream_ack (id="s1", through=3)
+ ──── stream_close (id="s1") ─────────►
+ ◄─── stream_closed (id="s1") ─────────
 ```
 
 ---
@@ -5479,7 +5463,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `database` | string | Yes | Database name (must match `{db}` in path). |
-| `tables` | string[] | Yes | Tables this load writes to. Index 0 is the primary table. Single-element array for single-table loads. When more than one table is listed, each row in `:append` calls must carry a `"_table"` discriminator field naming its destination. Empty array is rejected (400). |
+| `tables` | string | Yes | Tables this load writes to. Index 0 is the primary table. Single-element array for single-table loads. When more than one table is listed, each row in `:append` calls must carry a `"_table"` discriminator field naming its destination. Empty array is rejected (400). |
 | `options` | object? | No | Load options (see below). |
 | `idempotencyKey` | string? | No | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 
@@ -5490,17 +5474,17 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
 | `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness — except a formula table's (a table with an Expression column), whose keys are checked at
-every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way — (**BL-1104, next train**) except an absent cell of a column with a default, which takes the default at either level (only a null is refused there) — and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way — except an absent cell of a column with a default, which takes the default at either level (only a null is refused there) — and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
 | `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
-| `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. **Required** when a table of the job has a vector column: (**BL-1248, next train**) its absence is refused at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS` (`EmbeddingModelVersion is required for vector-bearing tables.`); it was accepted there and failed the job at its first `:append` (`409`) and `:commit` (`500 INTERNAL_ERROR`). |
-| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` (`"deferred"` until 0.3.x; refused `400` from the 0.4.0 — use `"auto"`) | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it runs the table's pass that was starting anyway or, once that has run, re-scans the whole source table. (**WorkloadCore S10, 0.3.0**) `"auto"` records a pending job, as `"deferred"` did, and starts the table's **deferred pass** for each table it wrote right after the commit (multi-table and transform loads included): a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the other queries on the table are not held behind one long rebuild), and the queries built on them caught up. The load does no materialized-query work while its rows stream and is not paced to a drain. Until the pass ends its queries read as behind (`isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false`). Before S10, how `"auto"` did it depended on the table: a table of only `aggregate` and `latestPerKey`/`firstPerKey` queries was folded as the load wrote its segments and written by the table's pass after the commit; on any other table the queries accumulated during the load's own pass and published by shadow-swap after the commit (the ingest-fed path). (**WorkloadCore S09, 0.3.0**) Every `"auto"` load's maintenance runs after the commit point, in the background, and `:commit` waits for it only as long as `mqWaitMs` allows (below): on a table of only aggregates and latest / first per key the load used to write its queries before `:commit` returned, with `mqRebuildStatus: "completed"` (**ColumnarCore S12, 0.2.0**). `"skip"`: no pending job, no pass and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. (**LoadSpeed K31, 0.4.0**) `"deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message saying to use `"auto"`: it was folded into `"auto"`, which since M.3 leaves a loading table's pass to the quiet period as `"deferred"` did, and which with `mqWaitMs` 0 (the default) does not wait at `:commit`. Until then: `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`; **WorkloadCore S10, 0.3.0**: owed the pass, not marked stale as `"skip"` leaves them), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. It was for very large or many back-to-back loads: many loads, one pass (a server before 0.1.40 refused it `400` too). See [Deferred loads](../guides/materialized.md#deferred-loads). |
+| `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. **Required** when a table of the job has a vector column: its absence is refused at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS` (`EmbeddingModelVersion is required for vector-bearing tables.`); it was accepted there and failed the job at its first `:append` (`409`) and `:commit` (`500 INTERNAL_ERROR`). |
+| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` (`"deferred"` until 0.3.x; refused `400` from the 0.4.0 — use `"auto"`) | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST.../materialized-queries/{name}:refresh` for these tables: it runs the table's pass that was starting anyway or, once that has run, re-scans the whole source table. (**WorkloadCore S10, 0.3.0**) `"auto"` records a pending job, as `"deferred"` did, and starts the table's **deferred pass** for each table it wrote right after the commit (multi-table and transform loads included): a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the other queries on the table are not held behind one long rebuild), and the queries built on them caught up. The load does no materialized-query work while its rows stream and is not paced to a drain. Until the pass ends its queries read as behind (`isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false`). Before S10, how `"auto"` did it depended on the table: a table of only `aggregate` and `latestPerKey`/`firstPerKey` queries was folded as the load wrote its segments and written by the table's pass after the commit; on any other table the queries accumulated during the load's own pass and published by shadow-swap after the commit (the ingest-fed path). (**WorkloadCore S09, 0.3.0**) Every `"auto"` load's maintenance runs after the commit point, in the background, and `:commit` waits for it only as long as `mqWaitMs` allows (below): on a table of only aggregates and latest / first per key the load used to write its queries before `:commit` returned, with `mqRebuildStatus: "completed"` (**ColumnarCore S12, 0.2.0**). `"skip"`: no pending job, no pass and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. (**LoadSpeed K31, 0.4.0**) `"deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message saying to use `"auto"`: it was folded into `"auto"`, which since M.3 leaves a loading table's pass to the quiet period as `"deferred"` did, and which with `mqWaitMs` 0 (the default) does not wait at `:commit`. Until then: `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`; **WorkloadCore S10, 0.3.0**: owed the pass, not marked stale as `"skip"` leaves them), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. It was for very large or many back-to-back loads: many loads, one pass (a server before 0.1.40 refused it `400` too). See [Deferred loads](../guides/materialized.md#deferred-loads). |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
 | `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. An identity column is refused `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`, the same as a server-time column: use `applyTransforms` (**BL-1278, BL-1170, 0.9.0**). |
-| `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, 0.6.0**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database must name `"strict"` (**BL-1175, next train**: `"strict"` is allowed in a database at `os`, and the refusal message ends "Name durability 'strict' to load …"; a job whose every table names `strict` defaults to it). See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
+| `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, 0.6.0**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database must name `"strict"` : `"strict"` is allowed in a database at `os`, and the refusal message ends "Name durability 'strict' to load …"; a job whose every table names `strict` defaults to it). See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
 
 **Transform intent is mandatory for a table with write-time compute.**
 
@@ -5541,11 +5525,11 @@ A table with no write-time compute needs neither flag.
 | Field | Type | Description |
 |---|---|---|
 | `jobId` | string | Server-assigned job identifier. Include in all subsequent requests for this load. |
-| `tables` | string[] | Echo of the requested tables. |
+| `tables` | string | Echo of the requested tables. |
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
 | `maxRowsPerAppend` | number | The most rows **one frame** of an `:append` body carries (a JSON column-array body is one frame). A larger frame is refused whole. (**Lead S21a, 0.6.0**) It counted across all the frames of one `:append`; a body may now hold any number of frames under it. |
 | `nextSequence` | number | (**Lead S21a, 0.6.0**) The number of the job's next frame: `0` for a new job; for a reconnect to a live job, the first frame it has not applied. A job's frames are [numbered across all its bodies](#a-jobs-frames-are-numbered-lead-s21a-060). Send from this frame. |
-| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, 0.6.0**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
+| `acceptedAppendFormats` | string? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, 0.6.0**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
 | `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count) and `rowsAppended` (number?). **Resume from `nextSequence`** (above): the frames below it are applied, buffered ones included, and `rowsAppended` is the rows they carry — a client that resumes by frames checks that the frames it skips carry exactly that many, so a client whose framing changed (another source, other body bounds) stops instead of loading rows twice or not at all. `rowsDurablyCommitted` counts only the durable rows and is not a position. (**Lead S21a, 0.6.0; breaking**) This replaces `resumeFromRow`, a row cursor, which is gone. ⚠️ No server rebuilds a cursor after a restart yet (BL-067): an open job does not survive one, and a `:begin` with its key afterwards starts a fresh job (`nextSequence: 0`), so the load is sent from its first frame. Both SDKs resume this way (`@aouda/client` from **Lead S22, 0.6.0**). |
 | `alreadyCompleted` | bool | `true` when the idempotency key matched a job that already **committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`): no session is opened, and `:append` / `:commit` on this `jobId` are refused `409 BULK_LOAD_INVALID_STATE`. Read the job's result from `rowsDurablyCommitted` and `token` below. `false` otherwise. |
 | `rowsDurablyCommitted` | number? | With `alreadyCompleted`: the committed job's rows. |
@@ -5559,19 +5543,19 @@ POST /api/databases/my_db/bulk-load:begin
 Content-Type: application/json
 
 {
-  "database": "my_db",
-  "tables": ["events"],
-  "options": {"replicationMode": "logShipSegments"},
-  "idempotencyKey": "load-2026-05-22-batch-001"
+ "database": "my_db",
+ "tables": ["events"],
+ "options": {"replicationMode": "logShipSegments"},
+ "idempotencyKey": "load-2026-05-22-batch-001"
 }
 
 200 OK
 {
-  "jobId": "blj_abc123",
-  "tables": ["events"],
-  "acquiredAtUtc": "2026-05-22T09:00:00Z",
-  "maxRowsPerAppend": 50000,
-  "resumedFromDurableCursor": null
+ "jobId": "blj_abc123",
+ "tables": ["events"],
+ "acquiredAtUtc": "2026-05-22T09:00:00Z",
+ "maxRowsPerAppend": 50000,
+ "resumedFromDurableCursor": null
 }
 ```
 
@@ -5588,11 +5572,11 @@ Append frames of rows to an in-flight session. The beginning credential only: an
 open — when it carries:
 
 - **a column the table does not have** (**BL-1130**: it used to be dropped without a word). Names are case-sensitive; the message
-  names the column the table does have when only the case differs;
+ names the column the table does have when only the case differs;
 - **no value for a primary-key column** — a null or absent cell, or the column missing (**BL-1129**: it used to be stored as the
-  type's zero, an `Int64` key as `0`). An auto-increment key is exempt: a missing value takes the next id;
+ type's zero, an `Int64` key as `0`). An auto-increment key is exempt: a missing value takes the next id;
 - at `validation: "strict"`, **no value for any NOT NULL column**. At `"coerce"` (the default) such a cell is stored as the type's
-  default (`0`, `""`).
+ default (`0`, `""`).
 
 The message names the column, the frame and the row (`details`: `frame=…, row=…, table=…, column=…`). A JSON column-array body is
 checked the same way. Key uniqueness is checked at the commit, and only at `"strict"` — and, at every level, in a formula table
@@ -5605,11 +5589,11 @@ carries the job's next number, not 0 (a JSON column-array body is one frame and 
 the frame numbered `next`, and:
 
 - **a frame below `next` is acknowledged and not applied again** — so a body sent again after its answer was lost, or after its
-  connection dropped part-way, loads each row once. The response's `framesSkipped` counts them;
+ connection dropped part-way, loads each row once. The response's `framesSkipped` counts them;
 - **a frame above `next` is refused** `409 BULK_LOAD_CURSOR_MISMATCH` (*Frame 5 of bulk-load job '…' arrived where frame 3 is
-  next …*), nothing of the body applied;
+ next …*), nothing of the body applied;
 - **a frame is applied whole or not at all.** A frame over `maxRowsPerAppend` rows, or a multi-table frame with one row that cannot
-  be routed, is refused with none of its rows queued (the frames before it in the body stay applied).
+ be routed, is refused with none of its rows queued (the frames before it in the body stay applied).
 
 So `nextSequence` is always a frame boundary, and it is the resume point: in the `:begin` response (a reconnect with the job's
 idempotency key, which also stops a stale `:append` still reading a cut body), in every `:append` response and refusal (`details:
@@ -5636,23 +5620,23 @@ already sending its next job; only the commit point waits for the jobs before it
 every job: it saves the `:commit` round trip and lets the next job overlap this one's commit. Three rules:
 
 - **The end frame's number is the job's frame count.** If the job holds more frames than the body's end frame names (an older body
-  sent again with `commit`), nothing is committed: `409 BULK_LOAD_CURSOR_MISMATCH`, `details` naming `nextSequence`. A body of only
-  an end frame (`rowCount: 0`, numbered `nextSequence`) commits what the job holds.
+ sent again with `commit`), nothing is committed: `409 BULK_LOAD_CURSOR_MISMATCH`, `details` naming `nextSequence`. A body of only
+ an end frame (`rowCount: 0`, numbered `nextSequence`) commits what the job holds.
 - **A bad option commits nothing**: `400 BULK_LOAD_INVALID_OPTIONS`, the body's frames applied and the job still open.
 - **Sent again after its answer was lost**, the body is safe: a frame below `nextSequence` is skipped, so if the job had not yet
-  read the end frame it commits once with every row once; if it is committing, the body is refused `409 BULK_LOAD_INVALID_STATE`
-  with `details: state=Committing` — wait and ask again; once it has committed, a `:begin` with the job's idempotency key replays it
-  (`alreadyCompleted`, its `token`). A body refused `state=Deferred` (the job committed and its deferred work is running) or
-  `state=Completed` is past its commit point too: its rows are durable — wait, then `:begin` with the key, exactly as for
-  `Committing`; never treat it as a failure, and never `:abort` it (**Lead group 5 review, 0.6.0**). Both SDKs do all of this
-  themselves (`@aouda/client` from **Lead S22, 0.6.0**).
+ read the end frame it commits once with every row once; if it is committing, the body is refused `409 BULK_LOAD_INVALID_STATE`
+ with `details: state=Committing` — wait and ask again; once it has committed, a `:begin` with the job's idempotency key replays it
+ (`alreadyCompleted`, its `token`). A body refused `state=Deferred` (the job committed and its deferred work is running) or
+ `state=Completed` is past its commit point too: its rows are durable — wait, then `:begin` with the key, exactly as for
+ `Committing`; never treat it as a failure, and never `:abort` it (**Lead group 5 review, 0.6.0**). Both SDKs do all of this
+ themselves (`@aouda/client` from **Lead S22, 0.6.0**).
 - **A job still queued behind another load does not commit in its body** (**Lead group 5 review, 0.6.0**): if the job does
-  not hold its tables yet — another job's rows are streaming into them, or it is waiting for the job it follows — the commit is
-  declined `409 BULK_LOAD_COMMIT_QUEUED`, the body's frames applied (`details` name `nextSequence` and `rowsAppended`) and nothing
-  committed. Send [`:commit`](#post-jobidcommit) for the job, and no row again. A commit in a body holds the body's `:append` lane
-  permit until it answers; one that waited for another job's rows held a permit that job's next body needed, and four of them
-  stalled every loader on the server until the lock timeout. A job just begun is given a moment (1 s) to take its tables before it
-  is declined. Both SDKs send `:commit` themselves.
+ not hold its tables yet — another job's rows are streaming into them, or it is waiting for the job it follows — the commit is
+ declined `409 BULK_LOAD_COMMIT_QUEUED`, the body's frames applied (`details` name `nextSequence` and `rowsAppended`) and nothing
+ committed. Send [`:commit`](#post-jobidcommit) for the job, and no row again. A commit in a body holds the body's `:append` lane
+ permit until it answers; one that waited for another job's rows held a permit that job's next body needed, and four of them
+ stalled every loader on the server until the lock timeout. A job just begun is given a moment (1 s) to take its tables before it
+ is declined. Both SDKs send `:commit` themselves.
 
 A JSON column-array body cannot commit its job: one that carries `commit` is refused `400 INVALID_REQUEST`, nothing appended; send
 it, then `:commit`. A body that commits holds its place on the `:append` lane until its commit answers (see
@@ -5689,92 +5673,92 @@ it, without parsing one JSON document per row. **A body is its data frames, then
 little-endian.
 
 ```
-frame   := "ACB2" kind:u8 seq:u64 body
-kind 0  := data   body := rowCount:u32 columnCount:u16 column*
-kind 1  := end    body := length:u32 payload:utf8-json[length]   (at most 1 MiB)
-column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
-flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
-bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
-kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 8 ScaledDecimal · 9 Array   (6: retired, refused)
-values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
-         | Double          : rowCount × f64
-         | Bool            : bitmap
-         | ScaledDecimal   : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
-         | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
-         | Array           : elementKind:u8  offsets:(rowCount + 1) × u32  elements        (BL-035, 0.9.0)
+frame := "ACB2" kind:u8 seq:u64 body
+kind 0 := data body := rowCount:u32 columnCount:u16 column*
+kind 1 := end body := length:u32 payload:utf8-json[length] (at most 1 MiB)
+column := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
+flags := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
+bitmap := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
+kind := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 8 ScaledDecimal · 9 Array (6: retired, refused)
+values := Int64, Timestamp : rowCount × i64 (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
+ | Double : rowCount × f64
+ | Bool : bitmap
+ | ScaledDecimal : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
+ | String : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
+ | Array : elementKind:u8 offsets:(rowCount + 1) × u32 elements (BL-035, 0.9.0)
 ```
 
 (**BL-035, 0.9.0**) **Kind 9, `Array`**, carries an [array column](../guides/array-columns.md): one whole array per row.
 
 ```
-Array   := elementKind:u8  offsets:(rowCount + 1) × u32  elements
-elementKind := 1 Int32 · 2 Int64 · 3 Float32 · 4 Double · 5 Byte · 6 String            (0 and anything above 6: refused, naming the number)
-offsets     := offsets[0] = 0, never decreasing; row i holds offsets[i+1] − offsets[i] elements
-elements    := Int32: total × i32 | Int64: total × i64 | Float32: total × f32 | Double: total × f64 | Byte: total × u8
-             | String: byteOffsets:(total + 1) × u32  utf8[byteOffsets[total]]            (total = offsets[rowCount])
+Array := elementKind:u8 offsets:(rowCount + 1) × u32 elements
+elementKind := 1 Int32 · 2 Int64 · 3 Float32 · 4 Double · 5 Byte · 6 String (0 and anything above 6: refused, naming the number)
+offsets := offsets[0] = 0, never decreasing; row i holds offsets[i+1] − offsets[i] elements
+elements := Int32: total × i32 | Int64: total × i64 | Float32: total × f32 | Double: total × f64 | Byte: total × u8
+ | String: byteOffsets:(total + 1) × u32 utf8[byteOffsets[total]] (total = offsets[rowCount])
 ```
 
 - **Little-endian, not widened, no padding.** `Float32` elements are 4 bytes each and `Int32` elements 4 (they are not widened to 8
-  as the scalar kinds are); `elements` follows `offsets` with no padding. A `String` element `j` is the UTF-8 in
-  `byteOffsets[j]` … `byteOffsets[j+1]`.
+ as the scalar kinds are); `elements` follows `offsets` with no padding. A `String` element `j` is the UTF-8 in
+ `byteOffsets[j]` … `byteOffsets[j+1]`.
 - **Null, absent and empty.** A null or absent row has count 0 (the bitmaps tell it apart from an empty array, as for every kind); a
-  reader refuses a null row whose count is not 0.
+ reader refuses a null row whose count is not 0.
 - **The reader is strict.** It refuses an element kind of 0 or above 6, offsets that do not start at 0 or that decrease, a `String` element that is not valid UTF-8, a value over 65,536 elements or 1,048,576 bytes of elements, and a `Double` or
-  `Float32` element that is NaN or ±Infinity.
+ `Float32` element that is NaN or ±Infinity.
 - **On insert the element kind must be the column's own** (see `POST …/rows`); a query response carries the element kind of the
-  column's type.
+ column's type.
 - **A reader that does not know kind 9** fails: the C# reader with *"Column '…': unknown kind 9."*, the TypeScript reader with
-  *"Malformed column-batch frame: column '…' has unknown kind 9."*.
+ *"Malformed column-batch frame: column '…' has unknown kind 9."*.
 - The decoded size of a column is charged to the reader's 256 MB budget before its elements are read.
 
-A `Double[]` column of two rows `[1.5, 2.5]` and `null`, and a `String[]` column `["x","y"]` and `[]`, as one data frame (an
+A `Double` column of two rows `[1.5, 2.5]` and `null`, and a `String` column `["x","y"]` and ``, as one data frame (an
 excerpt of a real response, kind 9 columns only; the first row's `D` has two elements, the null bitmap `02` marks row 1):
 
 ```
-D:  09 01 02   04   00000000 02000000 02000000   000000000000f83f 0000000000000440
-    kind flags nulls elementKind offsets (0, 2, 2)   1.5   2.5
-S:  09 00      06   00000000 02000000 02000000   00000000 01000000 02000000   78 79
-    kind flags elementKind offsets (0, 2, 2)     byteOffsets (0, 1, 2)       "x" "y"
+D: 09 01 02 04 00000000 02000000 02000000 000000000000f83f 0000000000000440
+ kind flags nulls elementKind offsets (0, 2, 2) 1.5 2.5
+S: 09 00 06 00000000 02000000 02000000 00000000 01000000 02000000 78 79
+ kind flags elementKind offsets (0, 2, 2) byteOffsets (0, 1, 2) "x" "y"
 ```
 
 - **The sequence and the end frame** (**Lead S09, 0.6.0**). Every frame carries `seq`, its number in the body: 0, 1, 2, …
-  with no gap or repeat; the end frame takes the number after the last data frame. (**Lead S21a, 0.6.0**) In a bulk load the
-  numbers run across the job's bodies, so a body starts at the job's next number ([above](#a-jobs-frames-are-numbered-lead-s21a-060));
-  a gap or a repeat *inside* a body is still refused. The end frame's payload is a JSON object:
-  `rowCount` (the data frames' rows, checked), `status` (`"ok"`, or `"error"` with `error: { code, message, status }`), and on a
-  query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`; a bulk load's
-  may add `commit` (**Lead S21b, 0.6.0**: [a body that commits its job](#a-body-that-commits-its-job-lead-s21b-060)). A body that
-  ends without an end frame, has bytes after it, carries a frame out of sequence, counts other rows than its frames, or holds an
-  unknown frame kind is refused `400 INVALID_REQUEST`, naming what was wrong; so is a request body whose end frame reports an error.
-  A body may hold no data frame — one end frame with `rowCount: 0`. ⚠️ **On `:append`, "refused" keeps the frames before the
-  fault** (**Lead group 2 review, 0.6.0**: said so): each data frame is queued as it is read, and the rows queued before the
-  error stay credited, as for every `:append` that ends in an error. The error's `details` name them (`rowsAppended=N,
-  nextSequence=M`). (**Lead S21a, 0.6.0**) Sending the body again is safe — its frames below `nextSequence` are skipped — but
-  a body refused for its own content is refused again: fix the frame first. `/rows` is all or nothing and inserts nothing from a
-  refused body.
+ with no gap or repeat; the end frame takes the number after the last data frame. (**Lead S21a, 0.6.0**) In a bulk load the
+ numbers run across the job's bodies, so a body starts at the job's next number ([above](#a-jobs-frames-are-numbered-lead-s21a-060));
+ a gap or a repeat *inside* a body is still refused. The end frame's payload is a JSON object:
+ `rowCount` (the data frames' rows, checked), `status` (`"ok"`, or `"error"` with `error: { code, message, status }`), and on a
+ query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`; a bulk load's
+ may add `commit` (**Lead S21b, 0.6.0**: [a body that commits its job](#a-body-that-commits-its-job-lead-s21b-060)). A body that
+ ends without an end frame, has bytes after it, carries a frame out of sequence, counts other rows than its frames, or holds an
+ unknown frame kind is refused `400 INVALID_REQUEST`, naming what was wrong; so is a request body whose end frame reports an error.
+ A body may hold no data frame — one end frame with `rowCount: 0`. ⚠️ **On `:append`, "refused" keeps the frames before the
+ fault** (**Lead group 2 review, 0.6.0**: said so): each data frame is queued as it is read, and the rows queued before the
+ error stay credited, as for every `:append` that ends in an error. The error's `details` name them (`rowsAppended=N,
+ nextSequence=M`). (**Lead S21a, 0.6.0**) Sending the body again is safe — its frames below `nextSequence` are skipped — but
+ a body refused for its own content is refused again: fix the frame first. `/rows` is all or nothing and inserts nothing from a
+ refused body.
 - **`ACB1` is refused by name** (**Lead S09, 0.6.0; breaking**). The version before (`"ACB1" rowCount:u32 columnCount:u16
-  column*`, frames back to back, the body ending where the stream ended) and its media type `application/vnd.aouda.column-batch`
-  are answered `415 FRAME_VERSION_UNSUPPORTED`: `ACB1 frames are no longer read; this server reads ACB2
-  (application/vnd.aouda.column-batch-v2).` Nothing of the request is applied. The column layout inside a data frame is
-  unchanged.
+ column*`, frames back to back, the body ending where the stream ended) and its media type `application/vnd.aouda.column-batch`
+ are answered `415 FRAME_VERSION_UNSUPPORTED`: `ACB1 frames are no longer read; this server reads ACB2
+ (application/vnd.aouda.column-batch-v2).` Nothing of the request is applied. The column layout inside a data frame is
+ unchanged.
 - **Absent is not null.** A row whose bit is set in the absent bitmap does not have the column at all,
-  exactly like a row listed in a JSON body's `absent`: an absent auto-increment key is allocated. A row in the
-  null bitmap has the column with a `null` value. Absent and null rows still occupy their slot.
+ exactly like a row listed in a JSON body's `absent`: an absent auto-increment key is allocated. A row in the
+ null bitmap has the column with a `null` value. Absent and null rows still occupy their slot.
 - **Strings are dictionary-encoded per frame**: each distinct value once, then one code per row.
 - **Limits:** 1,000,000 rows and 4,096 columns per frame; a name that is empty or longer than 1,024
-  UTF-8 bytes; a string up to 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would
-  decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, 0.1.40**:
-  the last two, and the C# SDK no longer writes a name or string the reader refuses).
-  `maxRowsPerAppend` is the most rows of one frame (**Lead S21a, 0.6.0**: it applied across all the frames of one `:append`).
+ UTF-8 bytes; a string up to 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would
+ decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, 0.1.40**:
+ the last two, and the C# SDK no longer writes a name or string the reader refuses).
+ `maxRowsPerAppend` is the most rows of one frame (**Lead S21a, 0.6.0**: it applied across all the frames of one `:append`).
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
-  earlier, well-formed frames in the same body are kept and counted, and `nextSequence` names the first frame not applied.
+ earlier, well-formed frames in the same body are kept and counted, and `nextSequence` names the first frame not applied.
 - (**LoadSpeed S13, 0.4.0; breaking**) **Kind 6, the 128-bit `Decimal`, is retired.** It was
-  `rowCount × 4 × i32` in the .NET decimal layout. A frame that carries it — on `:append` or on
-  `POST …/tables/{name}/rows` — is refused `400`: `Column '<name>': kind 6, the 128-bit Decimal, is retired
-  (LoadSpeed S13); send a decimal as ScaledDecimal (kind 8).` Send decimals as `ScaledDecimal`: 64-bit
-  unscaled integers and one scale per column.
+ `rowCount × 4 × i32` in the.NET decimal layout. A frame that carries it — on `:append` or on
+ `POST …/tables/{name}/rows` — is refused `400`: `Column '<name>': kind 6, the 128-bit Decimal, is retired
+ (LoadSpeed S13); send a decimal as ScaledDecimal (kind 8).` Send decimals as `ScaledDecimal`: 64-bit
+ unscaled integers and one scale per column.
 
-**A frame loads the same values as the JSON column-array body of the same rows** (the NDJSON body, until **Lead S12, 0.6.0**). Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a .NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's JSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as JSON (NDJSON before **Lead S12**). A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). (**Lead S12, 0.6.0**) Both SDKs of this train send what a frame cannot carry as a JSON column-array body instead of NDJSON (`@aouda/client` from **Lead S14**); an older client's NDJSON is refused by this server. The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as JSON (NDJSON before **Lead S12**) rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON — from **Lead S14, 0.6.0**, as a JSON column-array body, since a server of **Lead S12** onwards refuses NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
+**A frame loads the same values as the JSON column-array body of the same rows** (the NDJSON body, until **Lead S12, 0.6.0**). Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a.NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's JSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as JSON (NDJSON before **Lead S12**). A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). (**Lead S12, 0.6.0**) Both SDKs of this train send what a frame cannot carry as a JSON column-array body instead of NDJSON (`@aouda/client` from **Lead S14**); an older client's NDJSON is refused by this server. The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as JSON (NDJSON before **Lead S12**) rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON — from **Lead S14, 0.6.0**, as a JSON column-array body, since a server of **Lead S12** onwards refuses NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
 
 **JSON column arrays** are the body for curl and for any client without the frame (**Lead S12, 0.6.0**; NDJSON was, until
 this train). The server decodes them straight into a column batch, as it does a frame. A column whose rows mix integers and
@@ -5787,29 +5771,29 @@ POST /api/databases/my_db/bulk-load/blj_abc123:append
 Content-Type: application/json
 
 {
-  "seq": 0,
-  "columns": ["sensor_id", "value", "recorded_at"],
-  "data": [
-    [1, 2],
-    [98.6, 72.1],
-    ["2026-05-22T09:00:01Z", "2026-05-22T09:00:01Z"]
-  ]
+ "seq": 0,
+ "columns": ["sensor_id", "value", "recorded_at"],
+ "data": [
+ [1, 2],
+ [98.6, 72.1],
+ ["2026-05-22T09:00:01Z", "2026-05-22T09:00:01Z"]
+ ]
 }
 ```
 
 **Example (multi-table, a `_table` column required):** a column only one table has is `absent` in the other table's rows.
 ```
 {
-  "seq": 0,
-  "columns": ["_table", "id", "type", "event_id", "browser"],
-  "data": [
-    ["events", "event_meta"],
-    [1, null],
-    ["click", null],
-    [null, 1],
-    [null, "Chrome"]
-  ],
-  "absent": { "id": [1], "type": [1], "event_id": [0], "browser": [0] }
+ "seq": 0,
+ "columns": ["_table", "id", "type", "event_id", "browser"],
+ "data": [
+ ["events", "event_meta"],
+ [1, null],
+ ["click", null],
+ [null, 1],
+ [null, "Chrome"]
+ ],
+ "absent": { "id": [1], "type": [1], "event_id": [0], "browser": [0] }
 }
 ```
 
@@ -5836,7 +5820,7 @@ Content-Type: application/json
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, 0.6.0**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job; none of its frame's rows is applied (**Lead S21a, 0.6.0**). `details: frame={f}, row={n}, …` (**Lead S12, 0.6.0**: was `lineNumber=N`). |
 | `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, 0.6.0**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
-| `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). (**BL-1110, next train**) A frame `Double` cell that is NaN or ±Infinity, as `POST …/rows` refuses it: *"Column 'px' row 2 of frame 0 is NaN: a Double cell must be finite (JSON cannot carry NaN or Infinity). None of the frame's rows was applied."* — it was stored. (**BL-1250, next train**) A JSON array or object for a scalar column, naming the column and the row. |
+| `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). A frame `Double` cell that is NaN or ±Infinity, as `POST …/rows` refuses it: *"Column 'px' row 2 of frame 0 is NaN: a Double cell must be finite (JSON cannot carry NaN or Infinity). None of the frame's rows was applied."* — it was stored. A JSON array or object for a scalar column, naming the column and the row. |
 | `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, 0.6.0**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) (**Lead S21b, 0.6.0**) Also a body whose end frame commits and names fewer frames than the job holds: nothing committed. |
 | `BULK_LOAD_INVALID_STATE` | 409 | The job is committing, committed, aborted or failed. (**Lead S21b, 0.6.0**) `details` name the state (`state=Committing`, …): a body sent again while its own commit runs reads `Committing` — wait, then `:begin` with the job's key. |
 | `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | (**Lead S21b, 0.6.0**) A body that commits a job begun with `afterJobId`: the job it follows failed or was aborted, so this one is not committed and none of its rows is loaded. `details` name `afterJobId`. Also answered by `:commit`. |
@@ -5859,29 +5843,29 @@ commit then runs on without the caller. That answer says `state: "accepted"`, an
 the server stops before the job's commit point, or its commit fails, nothing of it is kept. `accepted` never means committed:
 
 - The answer carries the job's `rowsLoaded`, `tables` and a `token`. A read presenting that token **waits until the job is visible**
-  (on the primary, for a materialized query over the loading tables, and on a replica), so a client that reads its own load with the
-  token never reads it half there. `committedAtUtc` is `null`, `perTableRowCounts` is empty, `segmentsCreated` is `0`,
-  `writeConcernAchieved` is `"none"` and `mqStatus` is `"behind"`.
+ (on the primary, for a materialized query over the loading tables, and on a replica), so a client that reads its own load with the
+ token never reads it half there. `committedAtUtc` is `null`, `perTableRowCounts` is empty, `segmentsCreated` is `0`,
+ `writeConcernAchieved` is `"none"` and `mqStatus` is `"behind"`.
 - **The outcome comes from [`GET {jobId}`](#get-jobid)**: `state` is `"accepted"` while the commit runs, then `"completed"` (with the
-  job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`) — or, for a `validation: "strict"` job whose commit
-  found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, 0.6.0**: it read `"lost"`). Ask with
-  `waitMs` to be answered when it settles. Both SDKs ask as soon as the accepted answer arrives (**BL-1140, 0.9.0**). After a
-  restart that cut the job off, `GET {jobId}` answers `"lost"` (`200`, `errorCode` `BULK_LOAD_LOST`): load it again. Once the server's
-  log has moved past the job (a checkpoint), it answers `404 BULK_LOAD_JOB_NOT_FOUND`. A `404` before one hour from the accepted answer is
-  still lost: nothing of it is durable, load it again. A `404` at or after that hour is unknown: it cannot tell a lost job from a
-  committed one the server has forgotten, and that tick is the first on which a committed header may be forgotten. Both SDKs reject it
-  as unknown rather than lost (**BL-1140, 0.9.0**). The server keeps a committed job's
-  record for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A `200` `state: "lost"` with
-  `BULK_LOAD_LOST` is unchanged: load it again. A job that passed its commit point is never answered `"lost"`, even when work after it
-  failed (**Lead group 7 review, 0.6.0**). Don't infer the outcome from the token: a lost job's token reads as covered once the log
-  moves past it, and its rows are not there.
+ job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`) — or, for a `validation: "strict"` job whose commit
+ found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, 0.6.0**: it read `"lost"`). Ask with
+ `waitMs` to be answered when it settles. Both SDKs ask as soon as the accepted answer arrives (**BL-1140, 0.9.0**). After a
+ restart that cut the job off, `GET {jobId}` answers `"lost"` (`200`, `errorCode` `BULK_LOAD_LOST`): load it again. Once the server's
+ log has moved past the job (a checkpoint), it answers `404 BULK_LOAD_JOB_NOT_FOUND`. A `404` before one hour from the accepted answer is
+ still lost: nothing of it is durable, load it again. A `404` at or after that hour is unknown: it cannot tell a lost job from a
+ committed one the server has forgotten, and that tick is the first on which a committed header may be forgotten. Both SDKs reject it
+ as unknown rather than lost (**BL-1140, 0.9.0**). The server keeps a committed job's
+ record for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A `200` `state: "lost"` with
+ `BULK_LOAD_LOST` is unchanged: load it again. A job that passed its commit point is never answered `"lost"`, even when work after it
+ failed (**Lead group 7 review, 0.6.0**). Don't infer the outcome from the token: a lost job's token reads as covered once the log
+ moves past it, and its rows are not there.
 - **"Accepted" frees the loader, not the table.** A write into a table the job loads still waits for the job, as it does for any load.
 - A job the server cannot accept — one that writes no closing log frame, or a database without a WAL — is answered when committed,
-  `state: "committed"`: a stronger answer than asked for, never a weaker one.
+ `state: "committed"`: a stronger answer than asked for, never a weaker one.
 - It is not combined with `waitForDeferredWork: true`, `mqWaitMs` above `0` or a `writeConcern` other than `"acknowledged"`, which
-  each wait for the commit: those are refused `400 BULK_LOAD_INVALID_OPTIONS`, nothing committed. Both SDKs expose it
-  (`BulkLoadOptions.CommitWait = Accepted` / `commitWait: "accepted"`): an accepted handle, and an outcome that completes at the
-  job's outcome.
+ each wait for the commit: those are refused `400 BULK_LOAD_INVALID_OPTIONS`, nothing committed. Both SDKs expose it
+ (`BulkLoadOptions.CommitWait = Accepted` / `commitWait: "accepted"`): an accepted handle, and an outcome that completes at the
+ job's outcome.
 
 **Request body:**
 
@@ -5902,7 +5886,7 @@ the server stops before the job's commit point, or its commit fails, nothing of 
 |---|---|---|
 | `jobId` | string | Echo of job ID. |
 | `state` | string | (**Lead S30, 0.6.0**) `"committed"`: the job is committed, and the fields below are its result. `"accepted"` (only with `wait: "accepted"`): its rows have ended and its commit is running — **not durable yet**; its outcome comes from `GET {jobId}`. |
-| `tables` | string[] | Tables involved in the load. |
+| `tables` | string | Tables involved in the load. |
 | `rowsLoaded` | number | Total rows the job loaded across all tables: durably committed when `state` is `"committed"`. When it is `"accepted"` (**Lead S30, 0.6.0**), the rows the job took, **not durable yet**: its outcome (`GET {jobId}`) says whether they are. |
 | `expiredRows` | number? | (**Horizon, 0.5.0**) Rows the load sent that were left out because their time lay below their table's [retention](../guides/retention.md) horizon, or was an explicit `null` — accepted, never written, never visible, not in `rowsLoaded`. **Omitted when 0.** Such a table is loaded one segment per time slice and never spilled ([Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention)). |
 | `perTableRowCounts` | object | Per-table row counts (`{ tableName: count }`). Always present. |
@@ -5937,8 +5921,8 @@ queries current, read with the commit's `token` (which waits for them, as for an
 | `INVALID_REQUEST` | 400 | (**Lead S27a, 0.6.0**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
 | `IDENTITY_STAMP_REQUIRED` and the other insert-transform codes | 400 | (**BL-1277, 0.9.0**) `:commit` of a row the insert transform refuses. The code is the one a REST insert already returns for that row (`IDENTITY_STAMP_REQUIRED`, `TRANSFORM_DERIVED_READONLY`, `CONSTRAINT_CHECK_VIOLATION`, `TRANSFORM_ROUTE_UNMATCHED`, `TRANSFORM_ROUTE_AMBIGUOUS`, and the other codes the exception carries), with `rowErrors`. `GET {jobId}` shows `state: "failed"` and that `errorCode`. Nothing was committed. Fix the row and run the load again from `:begin`. A failure after the commit point is still the 500 below and must not be sent again. |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, 0.3.0**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, 0.3.0**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |
-| `DISK_FULL` | 507 | (**BL-1658, next train**) The disk filled before the job's commit point (segment files, the closing frame or the commit record). Nothing was committed; `Retry-After: 30`. Free space, then `:begin` the load again. `:append` answers it the same way. |
-| `WAL_FAILED` | 503 | (**BL-1703, next train**) The database's WAL stopped after an earlier failed write or sync; nothing was committed, `Retry-After: 60`; it clears at a restart. |
+| `DISK_FULL` | 507 | The disk filled before the job's commit point (segment files, the closing frame or the commit record). Nothing was committed; `Retry-After: 30`. Free space, then `:begin` the load again. `:append` answers it the same way. |
+| `WAL_FAILED` | 503 | The database's WAL stopped after an earlier failed write or sync; nothing was committed, `Retry-After: 60`; it clears at a restart. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, 0.3.0**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. (**BL-956, 0.4.0**) At most **30 s** (half of the 60 s a bulk-load request may be refused in a row), and `10` before any rate is measured — it was the time between periodic checkpoints, 300 s by default. |
 
 The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the
@@ -5972,7 +5956,7 @@ The server keeps a committed job's record for at least an hour after its commit 
 | Field | Type | Description |
 |---|---|---|
 | `jobId` | string | Job identifier. |
-| `tables` | string[] | Tables being loaded. |
+| `tables` | string | Tables being loaded. |
 | `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`; (**Lead S30, 0.6.0**) `"accepted"` — answered `accepted` by `:commit`, its commit running, not durable yet — and `"lost"` — accepted, then lost before its commit point (the server stopped, or its commit failed): nothing of it is durable, `errorCode` is `BULK_LOAD_LOST`. A restart that cut an accepted job off answers `"lost"` for it while the server's log still holds the job. (**Lead S26c, 0.6.0**) `"lost"` is also an `"os"` job dropped at the open after a power loss — its files did not match the length and xxHash128 its commit record names — answered with `durability: "os"`; its idempotency key no longer names a commit, so a `:begin` with the same key loads it again. |
 | `durability` | string? | (**Lead S26c, 0.6.0**) The job's level, `"strict"` or `"os"`. Omitted when unknown — an accepted job lost before its commit point. |
 | `validation` | string? | (**Lead S27a, 0.6.0**) The job's validation, `"coerce"` or `"strict"`. Omitted when the server no longer knows it (after a restart). |
@@ -6041,7 +6025,7 @@ Operator abort of an in-flight session. The beginning credential, or a database 
 | 1.2 | 2026-02-06 | Data mutation endpoints: insert (POST), update (PATCH), delete (DELETE) for /api/tables/{name}/rows |
 | 1.3 | 2026-03-19 | Comprehensive authentication section: credential types, auth enforcement flow, a second header, server and app auth endpoint reference |
 | 2.0 | 2026-05-22 | WebSocket streaming protocol documented; Bulk Load API documented; `crossPartitionAccess`, `joins`, WhereClause `groups`; write concern on mutation messages; Known Limitations updated; Future Extensions corrected |
-| 2.1 | 2026-06-23 | P27: `setExpr` expression SET, `TRUNCATE`, DELETE `limit`/`orderBy`, `RETURNING`, batch mutations (`/rows/batch`), expression SELECT (`selectExpr`). P28: `TruncateToMinute` partition function. P31: `postLoadMqBehavior` on bulk-load `:begin`; `mqRebuildStatus` in `:status` response; `POST .../materialized-queries/{name}:refresh`. P33: password reset endpoints, MFA enroll/challenge/verify/factors/delete, admin password override, invite resend, `requiresPasswordChange`/`mfaRequired`/`mfaFactors`/`aal` in signin response. |
+| 2.1 | 2026-06-23 | P27: `setExpr` expression SET, `TRUNCATE`, DELETE `limit`/`orderBy`, `RETURNING`, batch mutations (`/rows/batch`), expression SELECT (`selectExpr`). P28: `TruncateToMinute` partition function. P31: `postLoadMqBehavior` on bulk-load `:begin`; `mqRebuildStatus` in `:status` response; `POST.../materialized-queries/{name}:refresh`. P33: password reset endpoints, MFA enroll/challenge/verify/factors/delete, admin password override, invite resend, `requiresPasswordChange`/`mfaRequired`/`mfaFactors`/`aal` in signin response. |
 | 2.2 | 2026-07-31 | BL-130: `identityInsert` on `POST …/tables/{name}/rows`. BL-131: `options.identityInsert` on bulk-load `:begin` (commit-only counter floor). |
 | 2.2 | 2026-06-26 | **P17 (breaking):** `GET /api/databases` default response now excludes internal infrastructure databases (`_serverauth`, `_settings`). Use `?include=internal` to retrieve the full catalog. All database responses now include `isInternal` (bool), `isAuthDatabase` (bool), and `authDatabaseKind` (`"none"` \| `"server"` \| `"application"`) metadata fields. Application auth databases (`isInternal: false`) remain in the default list. |
 | 2.3 | 2026-08-19 | **P37 / server 0.1.7:** named-query execute + read-only batch (cap 32, one snapshot, positional errors); named-mutation execute; a key*` + data-plane listener (404 not 403); WebSocket path `/api/databases/{db}/ws`; `subscribe.hash` / `args` / `conflate`; `snapshot_complete`; server `gap` (`last_seq`, `discarded`); `change.values_skipped`; `re_auth`; access-surface `?access=true`. Additive on the wire. |
@@ -6056,7 +6040,7 @@ Operator abort of an in-flight session. The beginning credential, or a database 
 | 2.12 | 0.5.0 (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
 | 2.13 | 0.6.0 (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |
 | 2.14 | 0.6.0 (Lead) | **Lead S12 (breaking on the wire): the REST API as column arrays.** Every JSON write body sends its rows as [column arrays](#column-arrays-the-write-body) — `columns`, `data` (one array per column), optional `absent` (per column, the rows whose cell is not given, which is not null) — on `POST …/tables/{name}/rows`, a branch insert, WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed / `aouda.seed.json`; a body with `rows` (row objects) is refused `400 ROW_OBJECTS_UNSUPPORTED` (new code). Bulk-load `:append` takes frames or one JSON column-array body; NDJSON is refused `415 ROW_OBJECTS_UNSUPPORTED`, `:begin`'s `acceptedAppendFormats` is `["column-batch-v2", "column-arrays"]`, and an unroutable multi-table row is named "Row {n} of this :append" with `details: row={n}`. Reads: the `format` query parameter is removed from `/query` and the named-query execute and batch routes (any `format=` is `400 INVALID_FORMAT`; results are always `{columns, types, data, rowCount, …}`); the materialized-query `POST …/{name}/query` answers `{columns, data, rowCount, stats, token}`; `generatedValues` is `{columns, data}` with one cell per request row; a WebSocket `snapshot` page is `{type, id, columns, data, version, token?}` (`snapshot_complete` and `change` unchanged); vector `:nearest` answers `{rowKeys, distances, executionMs, token}` and graph `:khop` `{nodeIds, hops, executionMs}`; the policy inspector's table and materialized-query `sample` is `{columns, data}`. **Pass-10 (documentation only):** the [graph and vector endpoints](#graph-and-vector-endpoints) are documented. |
-| 2.15 | 0.9.0 (ArrayColumns, BL-035) | **ArrayColumns (BL-035, 0.9.0; additive on the wire):** six [array column](../guides/array-columns.md) types in schema and on every surface — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (JSON: an array, a base64 string for `Byte[]`; `types` and `X-Aouda-Column-Types` name them); one new error code, `ARRAY_COLUMN_UNSUPPORTED` (400), for an array column used where it cannot be; a new frame column kind, **9 `Array`** (an older client reading it fails with its *"unknown kind 9"* error; a query response with an array column is a frame when the client accepts frames; an older TypeScript client reading arrays from JSON — subscriptions, the materialized query endpoint, `returning` — does not fail, and gives plain arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded); `column_types` on subscription `snapshot` and `change` messages and `columnTypes` on the materialized query endpoint's body; the generator route is `GET /api/databases/{db}/schema/typescript`. A server binary from before this train that opens a data directory holding an array column refuses it by the type's number (*"has type 514, which this build does not define"*). `X-Aouda-Protocol-Version` stays `2`. |
+| 2.15 | 0.9.0 (ArrayColumns, BL-035) | **ArrayColumns (BL-035, 0.9.0; additive on the wire):** six [array column](../guides/array-columns.md) types in schema and on every surface — `Double`, `Float32`, `Int32`, `Int64`, `Byte`, `String` (JSON: an array, a base64 string for `Byte`; `types` and `X-Aouda-Column-Types` name them); one new error code, `ARRAY_COLUMN_UNSUPPORTED` (400), for an array column used where it cannot be; a new frame column kind, **9 `Array`** (an older client reading it fails with its *"unknown kind 9"* error; a query response with an array column is a frame when the client accepts frames; an older TypeScript client reading arrays from JSON — subscriptions, the materialized query endpoint, `returning` — does not fail, and gives plain arrays, a `Byte` as base64 text and `Int64` elements past 2^53 rounded); `column_types` on subscription `snapshot` and `change` messages and `columnTypes` on the materialized query endpoint's body; the generator route is `GET /api/databases/{db}/schema/typescript`. A server binary from before this train that opens a data directory holding an array column refuses it by the type's number (*"has type 514, which this build does not define"*). `X-Aouda-Protocol-Version` stays `2`. |
 | 2.16 | 0.9.0 (Grants) | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | 2.17 | 0.9.0 (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal and vector search on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused the same way (**BL-1161, BL-1298, 0.9.0**). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/`whoami`` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
 | 2.18 | 0.9.0 (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |
