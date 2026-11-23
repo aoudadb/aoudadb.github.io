@@ -212,7 +212,7 @@ What exists — databases, schema files, roles, principals and credentials — i
 
 ### Reload or restart: one table {#reload-or-restart}
 
-What `aouda reload` applies, and what takes a restart. A setting a reload cannot apply is listed under `restartRequired` (`setting`, `from`, `to`; a value that could hold a secret is `(changed)`), and the rest of the reload proceeds. The caller needs `manage` on `server`. One reload at a time (`409 RELOAD_IN_PROGRESS`), one per 5 s and one dry run per 1 s (`429 RELOAD_RATE_LIMITED`, `Retry-After`). `POST /api/admin/reload?dryRun=true` and `aouda plan --server` write nothing.
+What `aouda reload` applies, and what takes a restart. A setting a reload cannot apply is listed under `restartRequired` (`setting`, `from`, `to`; a value that could hold a secret is `(changed)`), and the rest of the reload proceeds. The caller needs `manage` on `server`. One reload at a time: a reload or plan that finds another running waits for it (up to 120 s) and then runs, and `409 RELOAD_IN_PROGRESS` with `Retry-After` is the answer only when that wait runs out. There is no rate limit (**next train**). `POST /api/admin/reload?dryRun=true` and `aouda plan --server` write nothing.
 
 | What you change | Where it is set | Takes effect by | Notes |
 |---|---|---|---|
