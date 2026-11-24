@@ -1444,6 +1444,80 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 > and cannot upgrade, the workaround is to bind one subscription per client instance; the real fix
 > is the upgrade.
 
+**A message the client cannot read** (**BL-1833, BL-1835, next train**). A message from the server that is not readable — malformed JSON, undecodable
+MessagePack, a binary frame in the `json` wire mode, a `Blob` (a `wsFactory` socket without `binaryType: "arraybuffer"`), something
+that is not an object with a string `type`, or a long-poll answer without `messages` — ends the connection, and every subscription and
+write stream on it, with an `AoudaServerMessageError` (`code: "SERVER_MESSAGE_UNREADABLE"`, `reason`). It names the size, never the
+content. There is no reconnect, because the same bytes would come again; the next `subscribe` or `openWriteStream` opens a new
+connection. On long-poll the messages before the unreadable one are delivered first. A message of an **unknown `type`** is ignored, as
+the protocol says. Before, the message was dropped and the subscription went on past it. If the unreadable message arrives while the
+connection is being opened, only that attempt fails.
+
+**While the connection is being opened** (**BL-1836, BL-1840, next train**) the client sends nothing but `auth`, and an `error` from the server
+(`CONNECTION_LIMIT_EXCEEDED`: the server is full) fails that attempt only: a first connect rejects with an
+`AoudaConnectionRefusedError` (its `code` is the server's) or falls back to long-poll, and a reconnect goes on with its backoff and then
+resumes the subscriptions. Before, it ended every subscription. A connection that stops answering pings is closed and reconnected
+(**BL-1839, next train**; before, the close threw in a browser and in Node.js, and nothing reconnected).
+
+### Write streams
+
+```typescript
+import { AoudaWriteStreamError, STREAM_INTERRUPTED, STREAM_ROW_REJECTED } from '@aouda/client';
+
+const stream = await client.table('quotes').openWriteStream({ mode: 'upsert' });
+try {
+ await stream.write({ symbol: 'AAPL', price: 191.2 });
+ await stream.write([{ symbol: 'MSFT', price: 402.1 }, { symbol: 'NVDA', price: 875.3 }]);
+ await stream.close(); // resolves only when the server acknowledged every frame
+} catch (err) {
+ if (!(err instanceof AoudaWriteStreamError)) throw err;
+ if (err.code === STREAM_ROW_REJECTED) {
+  console.error(`frame ${err.refusedSeq}: refused rows`, err.rowErrors); // its other rows were written
+ } else if (err.code === STREAM_INTERRUPTED) {
+  // The outcome of `err.unacknowledgedFrames` frames after `err.lastAcknowledgedSeq` is unknown. Read back what is there,
+  // or send the rows again on a stream in `upsert` mode, where the same row twice is one row.
+ } else {
+  console.error(err.code, err.serverMessage, err.rowErrors, err.remedy); // the server's refusal
+ }
+}
+```
+
+(**BL-1776, BL-1834, BL-1627, next train**) What a stream promises:
+
+- **`write()`** sends one frame and resolves when the frame was **sent**, so writes can be pipelined. Frames are sent one at a time, in call
+ order, on the WebSocket and on the long-poll fallback alike (before, the fallback could deliver pipelined frames out of order, and rows were lost).
+- **`close()`** resolves only when the server acknowledged **every** frame. Calling it twice gives both callers the same outcome.
+- **A stream that lost a row, or cannot know, says so.** It ends with an `AoudaWriteStreamError`; the first error is kept, the
+ waiting and the next `write()` and **every** `close()` reject with it, and no frame behind it is sent. Before, a refusal that arrived between two
+ calls was dropped and `close()` resolved.
+- **A frame is never sent again** by the client, in either mode: an insert sent twice is two rows.
+- A `write()` that **did not leave the client** (not connected, or a value that cannot be encoded) rejects alone, and the stream goes on.
+ `AoudaConnectionError.reachedServer === false` says so; an encoding failure is the platform's own error, e.g. a `TypeError`.
+
+| What happened | `code` of the error |
+|---|---|
+| The server refused a frame, the open or the close (`error`) | The server's code, with its `rowErrors` and `remedy`. The refused frame was not acknowledged; none behind it was written. Some rows of the refused frame may have been written when it also held rows a write statement refuses |
+| The server refused **some rows** of a frame (a `stream_ack` with `errors`) | `STREAM_ROW_REJECTED`; `rowErrors` names the rows of frame `refusedSeq`, whose other rows were written |
+| The connection was lost and came back with a frame unacknowledged; the server closed the stream, or `stream_closed` came with one unacknowledged; a send failed that may have reached the server; `client.disconnect()` | `STREAM_INTERRUPTED`: the rows of the unacknowledged frames may or may not have been written |
+| The credential was refused or ended, or a message could not be read | That code, e.g. `AUTH_CREDENTIAL_REVOKED`, `SERVER_MESSAGE_UNREADABLE`; `cause` is the connection's error |
+| The stream could not be opened again after a reconnect | The server's code, or `STREAM_RECONNECT_FAILED` when the request could not be sent |
+
+`AoudaWriteStreamError` extends `AoudaConnectionError`:
+
+| Member | Meaning |
+|---|---|
+| `code`, `serverMessage` | The table above, and the message that goes with it |
+| `rowErrors` | `{ index, code, message }` per refused row; `index` is the row's index in its frame. `undefined` when the server named none |
+| `remedy` | The [remedy](#with-authentication) of an authorization refusal; `undefined` when there is none |
+| `refusedSeq` | `STREAM_ROW_REJECTED` only: the frame `rowErrors` is about |
+| `lastAcknowledgedSeq` | The last frame the server acknowledged. Frames count from 1, and again from 1 when a reconnect re-opened the stream |
+| `unacknowledgedFrames` | Frames sent and not acknowledged |
+| `cause` | The failure below it, if any |
+
+**A reconnect** with every frame acknowledged re-opens the stream, and it goes on: a `write()` waits for the re-open, and the frames
+count from 1 again. A stream whose `stream_close` was already sent is done when the connection is lost with every frame acknowledged, so its `close()`
+resolves. `open`, `write()` and `close()` settle on every end of the connection, `client.disconnect()` included; none waits for ever.
+
 
 ---
 

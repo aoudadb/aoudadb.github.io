@@ -4933,7 +4933,7 @@ Open a write stream to a table for continuous high-throughput inserts without pe
 | `type` | string | Yes | Always `"stream_open"` |
 | `id` | string | Yes | Client-assigned stream ID. Must be unique per connection. |
 | `table` | string | Yes | Target table name. |
-| `mode` | string | Yes | Write mode. Currently only `"insert"` is defined. |
+| `mode` | string | Yes | `"insert"` or `"upsert"`. |
 
 **Example:**
 ```json
@@ -5353,7 +5353,7 @@ Acknowledges durable receipt of rows through the given sequence number. May incl
 |---|---|---|
 | `type` | string | Always `"stream_ack"` |
 | `id` | string | Stream ID. |
-| `through` | number | All rows in batches with `seq ≤ through` have been durably written. |
+| `through` | number | All rows in batches with `seq ≤ through` have been durably written, except the rows of batch `through` that `errors` names. |
 | `errors` | array? | Per-row rejection details. Null or absent when all rows were accepted. |
 
 **Per-row error:**
@@ -5376,12 +5376,12 @@ Acknowledges durable receipt of rows through the given sequence number. May incl
  "id": "stream-metrics-1",
  "through": 3,
  "errors": [
- {"index": 1, "code": "INVALID_VALUE", "message": "Column 'value': expected Double, got String"}
+ {"index": 1, "code": "AUTH_ROW_DENIED", "message": "The row is outside what the caller may write."}
  ]
 }
 ```
 
-`FORBIDDEN_WRITE` at an index is a row row conditions or row conditions refused; the frame's other rows are written. (**BL-1227, 0.9.0**) With
+`AUTH_ROW_DENIED` at an index is a row outside the `where` of every write statement of the caller; the frame's other rows are written. (**BL-1227, 0.9.0**) With
 `mode: "upsert"` that includes a row whose key names a stored row the caller may not write (another partition, another row conditions
 owner): an upsert may replace only a row the caller may write.
 
