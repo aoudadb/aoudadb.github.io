@@ -1459,6 +1459,13 @@ connection is being opened, only that attempt fails.
 resumes the subscriptions. Before, it ended every subscription. A connection that stops answering pings is closed and reconnected
 (**BL-1839, next train**; before, the close threw in a browser and in Node.js, and nothing reconnected).
 
+**When the client switches to long-poll** (**BL-1848, next train**). With `streaming.enableLongPollFallback` (the default), a `subscribe` or
+`openWriteStream` that cannot connect over the WebSocket tries long-poll. If long-poll connects, the client stays on it, and what the
+WebSocket carried moves there as after a reconnect: subscriptions resume, streams follow the rule under [write streams](#write-streams), and
+the WebSocket is closed. If long-poll fails too, the call rejects, and the subscriptions and streams there are stay with the WebSocket's
+reconnect. Before, they were left behind and went silent. A `subscribe` or `openWriteStream` made while a lost WebSocket waits for its
+reconnect connects at once, and that connection is the reconnect (**BL-1849, next train**).
+
 ### Write streams
 
 ```typescript
