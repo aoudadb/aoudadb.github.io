@@ -256,8 +256,16 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
  close is delivered). A write already sent when the connection dropped fails with `AoudaConnectionException` — its rows may
  or may not have been written, so check before re-sending them — and the stream carries on on the new connection. Up to
  0.3.x such a write could race the re-open and fail the stream for good ("No open stream with id …"), or hang.
+ - (TypeScript, **BL-1776, BL-1834, next train**) `@aouda/client` pipelines: `write()` resolves when the frame was sent, and `close()` only when
+ the server acknowledged every frame. A refusal, a refused row (`stream_ack` with `errors`) or a connection lost with a frame
+ unacknowledged **ends the stream** with an `AoudaWriteStreamError`, which the next `write()` and every `close()` reject with; no
+ frame is sent again. With every frame acknowledged the stream re-opens on the new connection and goes on. See
+ [write streams](../clients/typescript.md#write-streams).
 - Transport strategy:
- - primary WebSocket, optional long-poll fallback for restricted environments.
+ - primary WebSocket, optional long-poll fallback for restricted environments. Over the fallback `@aouda/client` sends one stream's
+ frames, and one subscription id's `subscribe` and `unsubscribe`, one after another in the order they were made, so they reach the
+ server in order (**BL-1627, next train**); everything else is sent at once. A client that calls `/send` itself must do the same:
+ the server handles one stream's frames in the order their requests arrive.
 - Bulk loads (**Lead S27b, 0.6.0**: documented; the behaviour is not new):
  - **A bulk load emits no change events on the table it loads.** Its rows become visible at the job's commit, but a
  subscriber to that table receives no `change` event for them, and no other signal: no gap, no notice. A client that
@@ -713,11 +721,12 @@ const sub = client.table("orders").subscribe({
 
 const stream = await client.table("orders").openWriteStream({ mode: "upsert" });
 await stream.write({ id: 1, status: "open" });
-await stream.close;
-await sub.unsubscribe;
+await stream.close();
+await sub.unsubscribe();
 ```
 
-Expected result: callback receives snapshot and subsequent changes; write stream returns ack progression via `lastAcknowledgedSeq`.
+Expected result: callback receives snapshot and subsequent changes; write stream returns ack progression via `lastAcknowledgedSeq`, and
+`close()` resolves once every frame is acknowledged.
 
 Common mistake: expecting exactly-once semantics and not deduping by version after reconnect.
 
