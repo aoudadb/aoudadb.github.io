@@ -179,6 +179,20 @@ reason }) => …)` is called on sign-in, on every refresh (automatic ones too) a
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-040).
 
+**One session at a time** (**BL-1014, BL-1852, next train**). `signIn`, `signUp`, `exchangeCode` and `exchangeOidcToken` replace the session
+the client holds, and a call in flight belongs to the session it was made in:
+
+- A refresh of the earlier session that ends after a sign-in, an exchange or a sign-out changes nothing and reports nothing to
+ `onTokensChanged`; `client.auth.refresh()` rejects with `AoudaSessionReplacedError` (`code` `AUTH_REFRESH_SUPERSEDED`; it is not an
+ `AoudaAuthenticationError`: nothing was refused, so do not answer it by signing the user out). Before, it put the earlier user's tokens back,
+ or cleared the new ones.
+- `signOut()` ends, on the server and here, the session it was called in; one a sign-in stored meanwhile stays.
+- A request answered 401 after its session was replaced or ended is thrown, not sent again, and a `retryPolicy` sends nothing again once the
+ session changed (the last failure is thrown). A call that was waiting for a refresh when another session was stored is rejected with
+ `AUTH_REFRESH_SUPERSEDED`, unsent. Make it again if it is meant for the new session.
+- An open realtime connection is **not** replaced by a sign-in (**BL-1854**): call `signOut()` first, or `client.disconnect()` and make a new
+ client, when the user changes.
+
 **Native sign-in through the browser** (**NativeClients, 0.4.0**): `createPkcePair` (needs `crypto.getRandomValues` — on
 React Native, `react-native-get-random-values`; see [React Native](#react-native-nativeclients-040)), then
 `web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state })` in the signed-in web front and
@@ -868,13 +882,35 @@ await client.table('users')
 .update({ active: false });
 ```
 
+(**BL-1788, next train**) An update acts on **every** row its conditions (`where`, `whereGroup`) match; nothing else of the query travels
+with it. A query that names fewer rows another way is refused before anything is sent: `update() cannot carry the query's limit(): …`. Up to
+0.17.0 the rest was dropped, and `.where(…).limit(1).update(…)` updated every match. What each call carries and refuses (the .NET client's
+rule):
+
+| Call | Carries | Refuses, sending nothing |
+|---|---|---|
+| `update()` | the conditions | `limit`, `offset` > 0, `latestPerKey` / `firstPerKey`, a join, an aggregate, `groupBy`, `distinct` |
+| `delete()` | the conditions, `limit`, `orderBy` | `offset` > 0, `latestPerKey` / `firstPerKey`, a join, an aggregate, `groupBy`, `distinct` |
+| `truncate()` | — (it is the whole table) | any condition, `limit`, `offset` > 0, and the shapes above. Use `delete()` for some of the rows |
+| `batch()` | each operation's conditions, an update's values, a delete's `limit` and `orderBy` **members** | any state on the query it is called on; anything but conditions on a callback's query; `limit` / `orderBy` on an update; `update` beside `delete: true`; a member an operation does not have |
+| `subscribe()` | the conditions and [`options.filter`](#a-subscriptions-filter) | `latestPerKey` / `firstPerKey`, a join, an aggregate, `groupBy`, `distinct` |
+
+`select` and `selectExpr` (they shape an answer), an `orderBy` on an update (without a limit it names no rows), and `limit` / `offset` /
+`orderBy` on a subscription (a stream of changes, not a window) have no effect and are not refused — except in a `batch()`, which refuses
+all of them. `insert`, `insertMany`, `bulkLoad` and `openWriteStream` name their own rows and do not use the query's state.
+
 ### Delete
 
 ```typescript
 await client.table('users')
 .where('id', '=', 123)
-.delete;
+.delete();
+
+// The ten oldest
+await client.table('events').where('level', '=', 'debug').orderBy('at').limit(10).delete();
 ```
+
+`limit` and `orderBy` are carried; the rest is refused as [Update](#update) says (**BL-1788, next train**).
 
 (**Horizon, 0.5.0**) A delete whose only condition is the table's first cluster column (a `Timestamp` or `Date`) `<` or `<=` a
 time — no `limit`, `orderBy` or `returning`, on a tabular table with no vector column that no foreign key references (an edge
@@ -1208,11 +1244,28 @@ const sub = client.table('events')
 
 A filter may use any operator the query builder has, `in` and `notIn` (the wire's `nin`) included
 (`.where('severity', 'in', ['error', 'fatal'])`). (**BL-1226, 0.9.0**) A server up to 0.8.0 refuses a subscription whose filter
-uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct. Give a subscription's filter **one way** — the builder's `where` predicates *or* `subscribe({ filter })`,
-not both. With both, this client merges the two objects member by member: a shorthand `options.filter` (`{ severity: { eq: 'error' } }`)
-beside the builder's `and` list makes a filter of both forms, which the server now refuses with `INVALID_SUBSCRIPTION_FILTER` naming
-the shorthand column (a server up to 0.16.0 dropped the shorthand half without a word), and a structured `options.filter` replaces the
-builder's lists of the same name. The server also refuses a filter with no condition (`{}`): to subscribe to every row, give no filter.
+uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct.
+
+<a id="a-subscriptions-filter"></a>
+**The builder's conditions and `options.filter` together** (**BL-1661, next train**). A row is delivered when **both** select it.
+`options.filter` takes the wire's two forms, with or without conditions on the query:
+
+```typescript
+client.table('events').where('level', '>=', 3)
+.subscribe({ filter: { severity: { eq: 'error' }, region: { in: ['eu', 'us'] } } }); // shorthand: one operator per column, all must hold
+
+client.table('events').where('level', '>=', 3)
+.subscribe({ filter: { or: [                                                          // structured: and / or / groups
+ { column: 'severity', op: 'eq', value: 'error' },
+ { column: 'severity', op: 'eq', value: 'fatal' } ] } });
+```
+
+Beside conditions on the query, the client throws, sending nothing, for an `options.filter` with no condition (`{}`, `{ and: [] }`) and for a
+shorthand column that is not exactly one operator with its value (use `{ and: [...] }` for two on one column). A structured filter's own
+mistake — an unknown member, an empty group — is the server's to refuse, `INVALID_SUBSCRIPTION_FILTER`, by name. The combination adds one
+`groups` level, and a filter nests at most five. Up to `@aouda/client` 0.17.0 the two were merged member by member: a structured
+`options.filter` **replaced** the query's lists of the same name, so the subscription saw rows its `where` excludes, and a shorthand one was
+refused. The server refuses a filter with no condition (`{}`) given alone: to subscribe to every row, give no filter.
 
 **Which listener takes this.** `client.table(t).subscribe(...)` is a **table subscription** (a table and a filter). It works on the
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
