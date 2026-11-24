@@ -179,7 +179,7 @@ reason }) => …)` is called on sign-in, on every refresh (automatic ones too) a
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-040).
 
-**One session at a time** (**BL-1014, BL-1852, next train**). `signIn`, `signUp`, `exchangeCode` and `exchangeOidcToken` replace the session
+**One session at a time** (**BL-1852, next train**; BL-1014). `signIn`, `signUp`, `exchangeCode` and `exchangeOidcToken` replace the session
 the client holds, and a call in flight belongs to the session it was made in:
 
 - A refresh of the earlier session that ends after a sign-in, an exchange or a sign-out changes nothing and reports nothing to
@@ -1247,7 +1247,7 @@ A filter may use any operator the query builder has, `in` and `notIn` (the wire'
 uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct.
 
 <a id="a-subscriptions-filter"></a>
-**The builder's conditions and `options.filter` together** (**BL-1661, next train**). A row is delivered when **both** select it.
+**The builder's conditions and `options.filter` together** (**BL-1788, next train**; BL-1661). A row is delivered when **both** select it.
 `options.filter` takes the wire's two forms, with or without conditions on the query:
 
 ```typescript

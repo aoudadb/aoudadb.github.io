@@ -65,8 +65,6 @@ _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+t
 # Clear an id in the same commit that removes its markers (dev/Release-And-Version-Bump.md section 2).
 _ALLOW = {
     "BL-332",   # Studio Backups page: point-in-time restore / retention / prune UI still pending
-    "BL-1014",  # 0.17.0 shipped the C# half; `@aouda/client`'s is Operability S25c
-    "BL-1661",  # 0.17.0's section names it as left open; fixed in `@aouda/client` by Operability S25c
 }
 
 
