@@ -8,7 +8,7 @@ parent: "Auth and Authorization"
 
 ## whoami
 
-`GET /api/auth/whoami` answers on both listeners. It says who the credential is and what that principal may do. It never returns `403`. A principal with no statements is `200` with `statements: `. Nothing in the body is a secret: a key appears as its public id.
+`GET /api/auth/whoami` answers on both listeners. It says who the credential is and what that principal may do. It never returns `403`. A principal with no statements is `200` with `statements: []`. Nothing in the body is a secret: a key appears as its public id.
 
 Query parameter `database` keeps a statement whose resource is `*`, names that database, or has that database as its first segment. `server` is not filtered that way. With no `database`, the whole policy is returned.
 
@@ -26,29 +26,29 @@ The body, for a stored or derived key (ids and the hash are placeholders):
 
 ```json
 {
- "principal": {
- "name": "rates-feeder",
- "authDatabase": "auth",
- "id": "00000000-0000-0000-0000-000000000000",
- "source": "declared",
- "disabled": false
- },
- "credential": { "type": "derived-key", "id": "aouda_exampleexampleex" },
- "database": null,
- "listener": "admin",
- "policy": {
- "roles": ["rates-feeder"],
- "attributes": {},
- "statements": [
- {
- "actions": ["write"],
- "resources": ["rates/table/DepositQuote"],
- "where": { "column": "source", "op": "in", "value": ["tullett"] },
- "from": "role:rates-feeder"
- }
- ]
- },
- "permissionVersion": 1
+  "principal": {
+    "name": "rates-feeder",
+    "authDatabase": "auth",
+    "id": "00000000-0000-0000-0000-000000000000",
+    "source": "declared",
+    "disabled": false
+  },
+  "credential": { "type": "derived-key", "id": "aouda_exampleexampleex" },
+  "database": null,
+  "listener": "admin",
+  "policy": {
+    "roles": ["rates-feeder"],
+    "attributes": {},
+    "statements": [
+      {
+        "actions": ["write"],
+        "resources": ["rates/table/DepositQuote"],
+        "where": { "column": "source", "op": "in", "value": ["tullett"] },
+        "from": "role:rates-feeder"
+      }
+    ]
+  },
+  "permissionVersion": 1
 }
 ```
 
@@ -62,10 +62,10 @@ Every refusal of this model has one body, whatever the status:
 
 ```json
 {
- "error": "AUTH_POLICY_DENIED",
- "message": "auth/rates-feeder may not write rates/table/DepositQuote.",
- "requestId": "00000000000000000000000000000000",
- "remedy": { "kind": "grant", "principal": "auth/rates-feeder", "statement": { "actions": ["write"], "resources": ["rates/table/DepositQuote"] }, "owner": "declaration" }
+  "error": "AUTH_POLICY_DENIED",
+  "message": "auth/rates-feeder may not write rates/table/DepositQuote.",
+  "requestId": "00000000000000000000000000000000",
+  "remedy": { "kind": "grant", "principal": "auth/rates-feeder", "statement": { "actions": ["write"], "resources": ["rates/table/DepositQuote"] }, "owner": "declaration" }
 }
 ```
 

@@ -33,14 +33,14 @@ For local development, enable archiving in an optional `appsettings.json` or via
 
 ```json
 {
- "Aouda": {
- "DataPath": "./data",
- "Archive": {
- "Enabled": true,
- "Destination": "C:\\aouda\\archive",
- "WalRetentionDays": 7
- }
- }
+  "Aouda": {
+    "DataPath": "./data",
+    "Archive": {
+      "Enabled": true,
+      "Destination": "C:\\aouda\\archive",
+      "WalRetentionDays": 7
+    }
+  }
 }
 ```
 
@@ -58,16 +58,16 @@ write volume since the last backup). Exact restore and PITR over HTTP/SDK both w
 
 ```json
 {
- "Aouda": {
- "Archive": {
- "Enabled": true,
- "Destination": "s3://my-aouda-backups/prod",
- "WalRetentionDays": 30,
- "S3": {
- "Region": "us-east-1"
- }
- }
- }
+  "Aouda": {
+    "Archive": {
+      "Enabled": true,
+      "Destination": "s3://my-aouda-backups/prod",
+      "WalRetentionDays": 30,
+      "S3": {
+        "Region": "us-east-1"
+      }
+    }
+  }
 }
 ```
 
@@ -83,18 +83,18 @@ Credentials are resolved from the standard AWS chain in order:
 
 ```json
 {
- "Aouda": {
- "Archive": {
- "Enabled": true,
- "Destination": "s3://my-bucket/aouda-archive",
- "S3": {
- "ServiceUrl": "http://localhost:9000",
- "ForcePathStyle": true,
- "AccessKeyId": "minioadmin",
- "SecretAccessKey": "minioadmin"
- }
- }
- }
+  "Aouda": {
+    "Archive": {
+      "Enabled": true,
+      "Destination": "s3://my-bucket/aouda-archive",
+      "S3": {
+        "ServiceUrl": "http://localhost:9000",
+        "ForcePathStyle": true,
+        "AccessKeyId": "minioadmin",
+        "SecretAccessKey": "minioadmin"
+      }
+    }
+  }
 }
 ```
 
@@ -131,7 +131,7 @@ s3://bucket-name/optional/key/prefix
 
 ## Triggering backup programmatically (hosted usage)
 
-When you host Aouda inside your own ASP.NET Core application using `AddAoudaServer` (see
+When you host Aouda inside your own ASP.NET Core application using `AddAoudaServer()` (see
 [Getting Started: Option C — hosting in your own app](index.md#option-c-hosting-in-your-own-aspnet-application)),
 you can trigger backups directly through the DI container instead of going over HTTP.
 
@@ -142,30 +142,30 @@ using Aouda.Server.Models;
 using Aouda.Server.Services;
 
 // Resolve the backup service from DI (e.g. from a controller, minimal-API handler, or hosted service)
-var backupService = app.Services.GetRequiredService<IBackupManagementService>;
+var backupService = app.Services.GetRequiredService<IBackupManagementService>();
 
 var result = await backupService.TriggerBackupAsync(
- new TriggerBackupRequest(
- Destination: null, // null = use configured destination from appsettings
- Incremental: true,
- BaseBackupId: null),
- cancellationToken);
+    new TriggerBackupRequest(
+        Destination: null,    // null = use configured destination from appsettings
+        Incremental: true,
+        BaseBackupId: null),
+    cancellationToken);
 
 switch (result)
 {
- case TriggerBackupResult.Success s:
- Console.WriteLine($"Backup {s.Response.BackupId}: {s.Response.NewBytes} new bytes uploaded");
- break;
- case TriggerBackupResult.Conflict c:
- Console.WriteLine($"Backup skipped — already in progress: {c.Message}");
- break;
- case TriggerBackupResult.InvalidDestination e:
- Console.WriteLine($"Destination error: {e.Message}");
- break;
+    case TriggerBackupResult.Success s:
+        Console.WriteLine($"Backup {s.Response.BackupId}: {s.Response.NewBytes} new bytes uploaded");
+        break;
+    case TriggerBackupResult.Conflict c:
+        Console.WriteLine($"Backup skipped — already in progress: {c.Message}");
+        break;
+    case TriggerBackupResult.InvalidDestination e:
+        Console.WriteLine($"Destination error: {e.Message}");
+        break;
 }
 ```
 
-`IBackupManagementService` is registered by `AddAoudaServer`. It handles concurrency control (prevents
+`IBackupManagementService` is registered by `AddAoudaServer()`. It handles concurrency control (prevents
 two simultaneous backups), resolves the configured destination, and calls the underlying engine. The
 result is a discriminated union — handle all cases so your code does not silently swallow errors.
 
@@ -175,17 +175,17 @@ above — you do not need to host Aouda inside your own process.
 To list backups and restore from a specific snapshot, use `ListBackupsAsync` and `RestoreAsync`:
 
 ```csharp
-// List backups — returns { Backups: BackupSummaryDto, Warning?: string }
+// List backups — returns { Backups: BackupSummaryDto[], Warning?: string }
 var list = await backupService.ListBackupsAsync(cancellationToken);
 foreach (var backup in list.Backups)
 {
- Console.WriteLine($"{backup.BackupId} created {backup.CreatedUtc:u} {backup.TotalBytes / 1024 / 1024} MB");
+    Console.WriteLine($"{backup.BackupId}  created {backup.CreatedUtc:u}  {backup.TotalBytes / 1024 / 1024} MB");
 }
 
 // Restore from a specific backup ID
 var restoreResult = await backupService.RestoreAsync(list.Backups[0].BackupId, cancellationToken);
 if (restoreResult is RestoreBackupResult.Success s)
- Console.WriteLine($"Restored {s.Response.FilesRestored} files in {s.Response.DurationSeconds:F1}s");
+    Console.WriteLine($"Restored {s.Response.FilesRestored} files in {s.Response.DurationSeconds:F1}s");
 ```
 
 > **Point-in-time recovery.** Pass `targetTime` on restore (HTTP body, `RestoreBackupRequest`,
@@ -210,56 +210,56 @@ When running in server mode, trigger backups via the REST API:
 ```bash
 # Trigger a backup
 curl -X POST http://localhost:5000/admin/backup/trigger \
- -H "Authorization: Bearer <admin-token>"
+  -H "Authorization: Bearer <admin-token>"
 
 # List backups
 curl http://localhost:5000/admin/backup/list \
- -H "Authorization: Bearer <admin-token>"
+  -H "Authorization: Bearer <admin-token>"
 
 # Restore a specific backup (exact)
 curl -X POST http://localhost:5000/admin/backup/restore/<backup-id> \
- -H "Authorization: Bearer <admin-token>"
+  -H "Authorization: Bearer <admin-token>"
 
 # Point-in-time restore (newest backup at or before the instant)
 curl -X POST http://localhost:5000/admin/backup/restore \
- -H "Authorization: Bearer <admin-token>" \
- -H "Content-Type: application/json" \
- -d '{"targetTime":"2026-05-01T12:00:00Z"}'
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"targetTime":"2026-05-01T12:00:00Z"}'
 
 # One set: each database's cut, redo-start position and branches
 curl http://localhost:5000/admin/backup/<backup-id> \
- -H "Authorization: Bearer <admin-token>"
+  -H "Authorization: Bearer <admin-token>"
 
 # Retention (none by default), then a dry run of what it would delete
 curl -X PUT http://localhost:5000/admin/backup/retention \
- -H "Authorization: Bearer <admin-token>" \
- -H "Content-Type: application/json" \
- -d '{ "keepLast": 5, "pitrWindow": "7.00:00:00" }'
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "keepLast": 5, "pitrWindow": "7.00:00:00" }'
 curl -X POST http://localhost:5000/admin/backup/prune \
- -H "Authorization: Bearer <admin-token>" \
- -H "Content-Type: application/json" \
- -d '{ "execute": false }'
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "execute": false }'
 
 # Get or update backup schedule
 curl http://localhost:5000/admin/backup/schedule \
- -H "Authorization: Bearer <admin-token>"
+  -H "Authorization: Bearer <admin-token>"
 
 curl -X PUT http://localhost:5000/admin/backup/schedule \
- -H "Authorization: Bearer <admin-token>" \
- -H "Content-Type: application/json" \
- -d '{ "cronExpression": "0 2 * * *", "incremental": true }'
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "cronExpression": "0 2 * * *", "incremental": true }'
 ```
 
 ### Command line
 
 ```bash
 export AOUDA_SERVER=http://localhost:5000 AOUDA_TOKEN=<admin-token>
-aouda backup create # one set, every database
+aouda backup create                                   # one set, every database
 aouda backup list
 aouda backup show <backup-id>
-aouda backup restore <backup-id> # exact
-aouda backup restore --target-time 2026-05-01T12:00:00Z # point in time: the newest set at or before it
-aouda backup retention --keep-last 5 --pitr-window 7d # none by default
+aouda backup restore <backup-id>                      # exact
+aouda backup restore --target-time 2026-05-01T12:00:00Z   # point in time: the newest set at or before it
+aouda backup retention --keep-last 5 --pitr-window 7d     # none by default
 aouda backup prune --dry-run
 ```
 
@@ -269,10 +269,10 @@ See the [CLI reference](../reference/cli.md#backup).
 
 ```typescript
 // Trigger
-await client.admin.backup.trigger;
+await client.admin.backup.trigger();
 
-// List — returns { backups: BackupSummary, warning?: string }
-const response = await client.admin.backup.list;
+// List — returns { backups: BackupSummary[], warning?: string }
+const response = await client.admin.backup.list();
 const backups = response.backups;
 
 // Restore — pass backupId (string), not a numeric index
@@ -280,15 +280,15 @@ await client.admin.backup.restore(backups[0].backupId);
 
 // Point-in-time restore
 await client.admin.backup.restore({
- backupId: backups[0].backupId,
- targetTime: "2026-05-01T12:00:00Z",
+  backupId: backups[0].backupId,
+  targetTime: "2026-05-01T12:00:00Z",
 });
 
 // Schedule — uses cronExpression, not cron; incremental is a required boolean
-const schedule = await client.admin.backup.getSchedule;
+const schedule = await client.admin.backup.getSchedule();
 await client.admin.backup.setSchedule({
- cronExpression: "0 2 * * *",
- incremental: true,
+  cronExpression: "0 2 * * *",
+  incremental: true,
 });
 ```
 
@@ -315,8 +315,8 @@ On Linux/macOS:
 
 ```bash
 AOUDA_TEST_S3_URL=http://localhost:4566 \
- dotnet test tests/Aouda.Engine.Storage.Tests \
- --filter "S3ArchiveDestinationIntegrationTests"
+  dotnet test tests/Aouda.Engine.Storage.Tests \
+  --filter "S3ArchiveDestinationIntegrationTests"
 ```
 
 The test suite creates a fresh bucket per test run, exercises the full `IArchiveDestination` contract (write, read, idempotency, delete, list, statistics, manifests), and tears everything down automatically.

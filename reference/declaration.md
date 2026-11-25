@@ -20,13 +20,13 @@ The file holds **what exists**: databases, their schema files, and who may do wh
 ## The file
 
 - **JSON with comments.** UTF-8, an optional byte-order mark, `//` and `/* */` comments and trailing commas allowed. Nothing else
- that is not JSON is read. A duplicate member is `DECLARATION_INVALID_JSON` (the last would win and hide the first). An empty file is
- refused: the smallest file is `{ "version": 1 }`.
+  that is not JSON is read. A duplicate member is `DECLARATION_INVALID_JSON` (the last would win and hide the first). An empty file is
+  refused: the smallest file is `{ "version": 1 }`.
 - **Names are case-sensitive.** A member spelled in another case (`"Kind"`) is `DECLARATION_UNKNOWN_MEMBER` and the message names the right spelling.
 - **Strict.** A member that is not in this page is `DECLARATION_UNKNOWN_MEMBER`, with the JSON pointer of the member. A member of the
- wrong JSON type is `DECLARATION_SHAPE_INVALID`. `null` is not a value: write the member or leave it out.
+  wrong JSON type is `DECLARATION_SHAPE_INVALID`. `null` is not a value: write the member or leave it out.
 - **No finding quotes the file's text** (a password typed without quotes is not echoed back), and a value that looks like a key is
- shown as `<redacted>`.
+  shown as `<redacted>`.
 
 ## The root
 
@@ -41,9 +41,9 @@ The file holds **what exists**: databases, their schema files, and who may do wh
 
 ```json
 {
- "$schema": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
- "version": 1,
- "databases": {}
+  "$schema": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
+  "version": 1,
+  "databases": {}
 }
 ```
 
@@ -83,10 +83,10 @@ operators in `server.roles` and `server.principals`. What they mean — statemen
 `anonymous`, `signup` — is the access model's ([Declared access](../guides/declared-access.md)); this page gives the exact JSON.
 
 - **The file owns what it declares, whole.** Every start and reload converges it: a declared role or principal is created, updated
- member by member, and removed when the file no longer names it. A role or principal made at runtime (Studio, the API) with the same
- name is **refused** (`ROLE_RUNTIME_CONFLICT`, `PRINCIPAL_RUNTIME_CONFLICT`): delete or rename it, then start or reload again.
+  member by member, and removed when the file no longer names it. A role or principal made at runtime (Studio, the API) with the same
+  name is **refused** (`ROLE_RUNTIME_CONFLICT`, `PRINCIPAL_RUNTIME_CONFLICT`): delete or rename it, then start or reload again.
 - For every auth database the file declares access for, the file also owns `anonymous` and `signup`: an `anonymous` that is not
- declared holds nothing, and a `signup` that is not declared is off. An auth database the file declares nothing for is left as it is.
+  declared holds nothing, and a `signup` that is not declared is off. An auth database the file declares nothing for is left as it is.
 - A server with no declaration file converges nothing.
 
 ### `databases.<auth>.signup`
@@ -94,8 +94,8 @@ operators in `server.roles` and `server.principals`. What they mean — statemen
 | Member | JSON type | Default | Meaning |
 |---|---|---|---|
 | `enabled` | boolean | **required** | Whether a person may sign themselves up on this auth database |
-| `roles` | array of strings | `` | The roles a signed-up principal holds: declared, built-in or runtime roles of this auth database |
-| `statements` | array | `` | Statements every signed-up principal holds |
+| `roles` | array of strings | `[]` | The roles a signed-up principal holds: declared, built-in or runtime roles of this auth database |
+| `statements` | array | `[]` | Statements every signed-up principal holds |
 
 `oidc` is refused (`DECLARATION_UNKNOWN_MEMBER`): external identity providers for end users are reserved and not built yet. The
 old signup flag and signup-role members are refused naming `signup`.
@@ -119,8 +119,8 @@ carries a key or a key's hash is refused and never shown (`PRINCIPAL_NAME_INVALI
 | Member | JSON type | Default | Meaning |
 |---|---|---|---|
 | `description` | string | none | Free text |
-| `roles` | array of strings | `` | The roles it holds |
-| `statements` | array | `` | Its own statements (an empty list is allowed) |
+| `roles` | array of strings | `[]` | The roles it holds |
+| `statements` | array | `[]` | Its own statements (an empty list is allowed) |
 | `attributes` | object | `{}` | `name → [values]` (strings, numbers or booleans); a `where` reads them as `principal.<name>`. At most 1 000 values per attribute and 5 000 per principal (`PRINCIPAL_ATTRIBUTE_INVALID`) |
 | `credentials` | object | none | How it authenticates (below); not for `anonymous` |
 | `disabled` | boolean | `false` | `true` refuses every credential of it and ends its open sessions. `false` re-enables only what the file disabled: a principal disabled at runtime stays disabled, and every plan, start and reload warns `DECLARED_OBJECT_OVERRIDDEN` |
@@ -153,34 +153,34 @@ A statement of an application auth database names only what that auth database g
 
 ```json
 {
- "version": 1,
- "server": {
- "principals": { "ops@example.com": { "roles": ["admin"] } }
- },
- "databases": {
- "auth": {
- "kind": "auth",
- "signup": { "enabled": true, "roles": ["customer"], "statements": },
- "roles": {
- "customer": {
- "statements": [
- { "actions": ["read", "write"], "resources": ["shop/table/orders"],
- "where": { "and": [ { "column": "customer_id", "op": "eq", "principal": "id" } ] } }
- ]
- }
- },
- "principals": {
- "checkout": {
- "description": "The checkout service",
- "statements": [ { "actions": ["read", "write"], "resources": ["shop/table/orders"] } ]
- },
- "anonymous": {
- "statements": [ { "actions": ["execute"], "resources": ["shop/query/products.list"] } ]
- }
- }
- },
- "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" }
- }
+  "version": 1,
+  "server": {
+    "principals": { "ops@example.com": { "roles": ["admin"] } }
+  },
+  "databases": {
+    "auth": {
+      "kind": "auth",
+      "signup": { "enabled": true, "roles": ["customer"], "statements": [] },
+      "roles": {
+        "customer": {
+          "statements": [
+            { "actions": ["read", "write"], "resources": ["shop/table/orders"],
+              "where": { "and": [ { "column": "customer_id", "op": "eq", "principal": "id" } ] } }
+          ]
+        }
+      },
+      "principals": {
+        "checkout": {
+          "description": "The checkout service",
+          "statements": [ { "actions": ["read", "write"], "resources": ["shop/table/orders"] } ]
+        },
+        "anonymous": {
+          "statements": [ { "actions": ["execute"], "resources": ["shop/query/products.list"] } ]
+        }
+      }
+    },
+    "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" }
+  }
 }
 ```
 

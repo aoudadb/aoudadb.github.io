@@ -34,11 +34,11 @@ ASPNETCORE_ENVIRONMENT=Development AOUDA_DEV_ADMIN=true aouda start --data-dir "
 ## What it does at every start
 
 - Creates the server auth database and the admin if they are missing, **replaces the admin's password with a new random one** (32 characters)
- and unlocks and activates the user. A kept data directory therefore never holds a password nobody remembers, and the dev admin's
- sessions from the previous run end.
+  and unlocks and activates the user. A kept data directory therefore never holds a password nobody remembers, and the dev admin's
+  sessions from the previous run end.
 - Leaves setup mode, so `/ready` is `200` once the server has started.
 - Gives the admin the built-in role `admin` and a new random `aouda_` key, named `dev-admin`, after deleting the previous run's key of
- that name, so the previous run's key stops working.
+  that name, so the previous run's key stops working.
 - Prints **one line to standard output**, never to a logger, after everything has succeeded:
 
 ```text
@@ -57,7 +57,7 @@ The start fails, naming the setting and never a secret, when the flag is set and
 | Condition | First words of the refusal |
 |---|---|
 | The environment is Production, or unset (Production is the default when `ASPNETCORE_ENVIRONMENT` is not set) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused in the Production environment, which is also the default when ASPNETCORE_ENVIRONMENT is not set.` |
-| The declaration file's `server.principals` declares a credential (a password seed, a key, an OIDC trust) — `SERVER_KEY_DEV_ADMIN_CONFLICT` (**BL-1464, 0.16.0**) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused because server.principals declares a credential ('<name>',...).` |
+| The declaration file's `server.principals` declares a credential (a password seed, a key, an OIDC trust) — `SERVER_KEY_DEV_ADMIN_CONFLICT` (**BL-1464, 0.16.0**) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused because server.principals declares a credential ('<name>', ...).` |
 | The node is configured with `Aouda:Join` or `Aouda:ReplicaSet` | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused on a node that is configured for replication` |
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).

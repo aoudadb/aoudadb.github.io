@@ -4,7 +4,9 @@ nav_order: 8
 parent: "Guides"
 ---
 
-# Dump and load `aouda dump` writes a server's data to a directory in a format that **no data-directory format version
+# Dump and load
+
+`aouda dump` writes a server's data to a directory in a format that **no data-directory format version
 touches**; `aouda load` reads it into a server of this or another version. It is how you keep your data across a release that changes
 the data-directory format (see [Upgrading](upgrading.md)), and how you copy databases to a new server.
 
@@ -14,37 +16,37 @@ databases, no branches. To protect data from a failed disk use [backups](backup.
 ## The procedure
 
 1. **Stop the writers.** A database that is written while it is dumped fails the dump (`DUMP_WRITES_DURING_DUMP`): every table is
- read again at the end and its row count and digest compared with what was written.
+   read again at the end and its row count and digest compared with what was written.
 2. **Dump from the old server**, running its own build, with an operator key. Use the `aouda` of a build that has `dump` (the new one):
 
- ```bash
- export AOUDA_KEY=<an operator key>
- aouda dump --server http://old-host:5000 --key-env AOUDA_KEY --out /srv/dump-2026-11-21
- # dumped shop.orders: 3 rows
- # note EXPORT_PASSWORDS_OMITTED: 1 principal(s) have a password: a password is a person's own and is never exported. …
- # aouda dump: 1 database(s), 1 table(s), 3 rows written to /srv/dump-2026-11-21.
- ```
+   ```bash
+   export AOUDA_KEY=<an operator key>
+   aouda dump --server http://old-host:5000 --key-env AOUDA_KEY --out /srv/dump-2026-11-21
+   # dumped shop.orders: 3 rows
+   # note EXPORT_PASSWORDS_OMITTED: 1 principal(s) have a password: a password is a person's own and is never exported. …
+   # aouda dump: 1 database(s), 1 table(s), 3 rows written to /srv/dump-2026-11-21.
+   ```
 
- The exit status is 0 only for a complete dump; on any refusal no `dump.json` is written and `load` refuses the directory.
+   The exit status is 0 only for a complete dump; on any refusal no `dump.json` is written and `load` refuses the directory.
 3. **Keep the old data directory** until step 5 has passed.
 4. **Start the new build on a new, empty data directory** — with the dump's declaration (`--declaration <dump>/declaration/aouda.json`)
- when a dumped database is linked to an auth database, and with the key root the old server used when it derived keys.
+   when a dumped database is linked to an auth database, and with the key root the old server used when it derived keys.
 5. **Load**, and verify:
 
- ```bash
- aouda load --server http://new-host:5000 --key-env AOUDA_KEY --in /srv/dump-2026-11-21
- # created database shop (strict)
- # applied the schema of shop (1 change(s))
- # loaded and verified shop.orders: 3 rows
- ```
+   ```bash
+   aouda load --server http://new-host:5000 --key-env AOUDA_KEY --in /srv/dump-2026-11-21
+   # created database shop (strict)
+   # applied the schema of shop (1 change(s))
+   # loaded and verified shop.orders: 3 rows
+   ```
 
- Every table is verified by **row count and an order-independent digest** as it is loaded. Exit 0 means done; **exit 2** means the data
- is loaded and the dump's declaration is left for you to adopt: it prints the step (adopt `<dump>/declaration/aouda.json`, then
- `aouda reload`). **Run `load` again to resume** — a table that is already loaded is skipped (`already loaded shop.orders: 3 rows`).
+   Every table is verified by **row count and an order-independent digest** as it is loaded. Exit 0 means done; **exit 2** means the data
+   is loaded and the dump's declaration is left for you to adopt: it prints the step (adopt `<dump>/declaration/aouda.json`, then
+   `aouda reload`). **Run `load` again to resume** — a table that is already loaded is skipped (`already loaded shop.orders: 3 rows`).
 
- A declaration that cannot be planned clean against the target (it prints the findings and `the data is loaded; …`) ends with the plan's
- status — **exit 1**, or 69 / 77 if the plan could not run or its key was refused — after the data is loaded and verified. On a server started with `--dev-admin` that is always so (a development flag may not coexist with a declared credential): pass
- `--no-declaration` there.
+   A declaration that cannot be planned clean against the target (it prints the findings and `the data is loaded; …`) ends with the plan's
+   status — **exit 1**, or 69 / 77 if the plan could not run or its key was refused — after the data is loaded and verified. On a server started with `--dev-admin` that is always so (a development flag may not coexist with a declared credential): pass
+   `--no-declaration` there.
 6. Tell the people who had a password to **set it again**: passwords are not carried.
 
 ## Options
@@ -86,10 +88,10 @@ tabular tables, **edge tables** and **`Vector` columns**. Materialized queries a
 
 - **Passwords** (a person's own; `EXPORT_PASSWORDS_OMITTED`), and **branches** (`DUMP_BRANCH_NOT_DUMPED`).
 - **Runtime principals and roles** of an auth database are in the exported file but are never adopted by a declaration
- (`EXPORT_RUNTIME_NOT_ADOPTED`): start the new server from the dump's files, or delete the runtime objects and reload.
+  (`EXPORT_RUNTIME_NOT_ADOPTED`): start the new server from the dump's files, or delete the runtime objects and reload.
 - **Internal tables**, and the server's own state.
 - An **`MdVector`** column's values: its schema only. A **vector index** (IVF centroids) is trained again at the target's flushes, so with more than
- one cell an approximate search can rank differently on the target while the vectors are equal.
+  one cell an approximate search can rank differently on the target while the vectors are equal.
 - A dump taken from a server **older than this release** refuses its edge tables and vector columns (the route that exports vectors is new).
 
 **Load refusals** that name what to do: `LOAD_TABLE_NOT_EMPTY` (the target table holds rows that are not the dumped ones),
@@ -106,8 +108,8 @@ identity column (refused before the first write; load the others with `--tables`
 ## Memory, time and secrets
 
 - **Memory is bounded and does not grow with the rows**: one export batch and one append body are in flight. In the repository's test
- with real processes, a table of 2 million rows kept the peak resident set of `dump` at about 98 MB and of `load` at about 150 MB (bound: 512 MB).
+  with real processes, a table of 2 million rows kept the peak resident set of `dump` at about 98 MB and of `load` at about 150 MB (bound: 512 MB).
 - **A dump holds secret-class values** — the stored keys' SHA-256 from the declaration export, and every column value. Its files are
- readable by their owner only (`0600`, directories `0700`). Keep it as you keep the server's keys and your backups; Aouda does not encrypt a
- dump ([Backup and restore](backup.md#9-encryption-and-who-can-read-a-backup)).
+  readable by their owner only (`0600`, directories `0700`). Keep it as you keep the server's keys and your backups; Aouda does not encrypt a
+  dump ([Backup and restore](backup.md#9-encryption-and-who-can-read-a-backup)).
 - No key is ever printed.

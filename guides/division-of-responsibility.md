@@ -6,7 +6,7 @@ parent: "Guides"
 
 # What belongs in Aouda vs a service
 
-Document status: Complete (P37)
+Document status: Complete (P37)  
 Last updated: 2026-08-14
 
 This page is the published form of ADR 0040 §5. Adopting teams draw service boundaries against it. The failure mode it exists to prevent is **not** a security bug — it is absorbing domain workflow into a schema that Aouda cannot express and should not own.
@@ -141,15 +141,15 @@ Schema (admin apply) — then call from the **data-plane**:
 
 ```json
 {
- "namedQueries": {
- "equityQuoteByTicker": {
- "table": "EquityQuote",
- "limit": 1,
- "select": ["ticker", "bid", "ask"],
- "where": { "and": [{ "column": "ticker", "op": "eq", "param": "ticker" }] },
- "params": { "ticker": { "maxLength": 8 } }
- }
- }
+  "namedQueries": {
+    "equityQuoteByTicker": {
+      "table": "EquityQuote",
+      "limit": 1,
+      "select": ["ticker", "bid", "ask"],
+      "where": { "and": [{ "column": "ticker", "op": "eq", "param": "ticker" }] },
+      "params": { "ticker": { "maxLength": 8 } }
+    }
+  }
 }
 ```
 
@@ -157,10 +157,10 @@ HTTP (data-plane):
 
 ```bash
 curl -s -X POST \
- -H "Authorization: Bearer $JWT" \
- -H "Content-Type: application/json" \
- http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
- -d '{"args":{"ticker":"AAPL"}}'
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
+  -d '{"args":{"ticker":"AAPL"}}'
 ```
 
 TypeScript:
@@ -173,8 +173,8 @@ C#:
 
 ```csharp
 var quote = await client.NamedQueries.ExecuteAsync(
- "equity.quoteByTicker",
- new Dictionary<string, object?> { ["ticker"] = "AAPL" });
+    "equity.quoteByTicker",
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" });
 ```
 
 The ingest-service deletion (checks + `route`) is the other copy-paste: [Insert-time transforms](insert-transforms.md#worked-example-replace-an-ingest-service).

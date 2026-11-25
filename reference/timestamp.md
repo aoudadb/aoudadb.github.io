@@ -16,21 +16,21 @@ SDKs.
 
 ---
 
-## Canonical storage:.NET ticks (UTC)
+## Canonical storage: .NET ticks (UTC)
 
 - **Storage type:** `Int64`
-- **Meaning:**.NET `DateTime.Ticks` of the UTC instant — 100-nanosecond intervals since `0001-01-01T00:00:00Z`.
- `621355968000000000` is `1970-01-01T00:00:00Z`; one second is `10000000`.
+- **Meaning:** .NET `DateTime.Ticks` of the UTC instant — 100-nanosecond intervals since `0001-01-01T00:00:00Z`.
+  `621355968000000000` is `1970-01-01T00:00:00Z`; one second is `10000000`.
 - **Precision:** 100 ns (one tick). Finer source precision (true nanoseconds) needs its own `Int64` column.
-- **Range:** `0001-01-01` to `9999-12-31`, the range of.NET `DateTime`.
+- **Range:** `0001-01-01` to `9999-12-31`, the range of .NET `DateTime`.
 - **Conversion in the engine:** `Aouda.Engine.Core.Util.TimestampConversion` (`DateTimeToTicks`, `TicksToDateTime`,
- `TryParseToTicks`), so every component reads and writes the same unit.
+  `TryParseToTicks`), so every component reads and writes the same unit.
 
 Converting to and from Unix time, when a client needs it:
 
 ```text
 unixMilliseconds = (ticks - 621355968000000000) / 10000
-ticks = unixMilliseconds * 10000 + 621355968000000000
+ticks            = unixMilliseconds * 10000 + 621355968000000000
 ```
 
 ---
@@ -43,11 +43,11 @@ and stores the **UTC instant**. **Only the instant in time is persisted.** (Text
 
 - **What is preserved:** the universal instant (the same as converting to UTC and storing that moment).
 - **What is not preserved:** the offset, or which local representation was used at insert. That differs from SQL Server
- `datetimeoffset`, which stores the offset as part of the type.
+  `datetimeoffset`, which stores the offset as part of the type.
 - **What callers get back:** UTC values — `DateTime` with `DateTimeKind.Utc` in the C# SDK, an ISO-8601 UTC string in the
- TypeScript SDK's rows. To
- show another zone, convert at display time, or store a separate column (an IANA zone id, or the literal entered) when the
- original offset matters.
+  TypeScript SDK's rows. To
+  show another zone, convert at display time, or store a separate column (an IANA zone id, or the literal entered) when the
+  original offset matters.
 
 API and wire consumers should assume **Timestamp = UTC instant**, not a SQL Server–style `datetimeoffset` round-trip.
 
@@ -74,48 +74,48 @@ as the day before.
 | `"10:30"` (a time of day, no date) | refused | refused |
 
 - **An instant needs an offset to mean anything beyond UTC.** Text with no offset is UTC, not "local to whoever sent it". Aouda
- does not refuse it, because `"2026-03-01"` is the commonest value a person writes and every `Unspecified` `DateTime` would be refused
- with it, but a client in another zone that means *its* midnight must send the offset, or a `DateTime` that carries one (kind `Local` or `Utc`).
+  does not refuse it, because `"2026-03-01"` is the commonest value a person writes and every `Unspecified` `DateTime` would be refused
+  with it, but a client in another zone that means *its* midnight must send the offset, or a `DateTime` that carries one (kind `Local` or `Utc`).
 - **A `Date` is a calendar day.** It has no instant, so no offset or kind is applied: the day on the value is the day stored. Send a
- `DateOnly` or `"yyyy-MM-dd"` when you can. A TypeScript `Date` is an instant, so what a `Date` column stores is the **UTC date of the
- instant**: `new Date(2026, 2, 1)` — local midnight — east of UTC is the previous day's `…23:00:00.000Z` and is stored as the previous day. Send the
- string `"2026-03-01"` for a `Date` column from TypeScript.
-- **Reading back.** A `Timestamp` is returned as UTC (`DateTimeKind.Utc`). To show it in the client's zone call `.ToLocalTime`; printing
- `.Date` of the UTC value shows the previous day for a local midnight east of UTC. A `Date` is returned as midnight UTC of its day,
- and its `.Date` is the day.
+  `DateOnly` or `"yyyy-MM-dd"` when you can. A TypeScript `Date` is an instant, so what a `Date` column stores is the **UTC date of the
+  instant**: `new Date(2026, 2, 1)` — local midnight — east of UTC is the previous day's `…23:00:00.000Z` and is stored as the previous day. Send the
+  string `"2026-03-01"` for a `Date` column from TypeScript.
+- **Reading back.** A `Timestamp` is returned as UTC (`DateTimeKind.Utc`). To show it in the client's zone call `.ToLocalTime()`; printing
+  `.Date` of the UTC value shows the previous day for a local midnight east of UTC. A `Date` is returned as midnight UTC of its day,
+  and its `.Date` is the day.
 - **A column-type change from `Timestamp` to `Date`** stores the **UTC** day of each instant: an instant has no day without a zone, and
- UTC is the stored one.
+  UTC is the stored one.
 - **A time of day alone is refused** (`"10:30"`, `"10:30:15 PM"`, `"10:30+01:00"`): a parser stamps it with today's date, so what was stored depended on
- the day it was written. Send a date with it.
+  the day it was written. Send a date with it.
 - **Data stored before this change is not rewritten, and a key built from it does not match the new reading.** A `Date` stored from a `Local` or offset input
- on a server east of UTC is a day early, and a `Timestamp` stored from offset-less text or an `Unspecified` `DateTime` on a non-UTC server is shifted by that
- server's offset. A re-upsert of the same logical value after the upgrade lands on a different key and **creates a new row** beside the old one. Repair the
- table with an `UPDATE` that shifts the affected values (a day for the `Date` rows; the server's offset for the `Timestamp` rows, over the range written before
- the upgrade), or re-load it. A server in UTC is unaffected.
+  on a server east of UTC is a day early, and a `Timestamp` stored from offset-less text or an `Unspecified` `DateTime` on a non-UTC server is shifted by that
+  server's offset. A re-upsert of the same logical value after the upgrade lands on a different key and **creates a new row** beside the old one. Repair the
+  table with an `UPDATE` that shifts the affected values (a day for the `Date` rows; the server's offset for the `Timestamp` rows, over the range written before
+  the upgrade), or re-load it. A server in UTC is unaffected.
 - **Partitioning.** A table partitioned by a time function on a `Timestamp` column cuts by the UTC instant, whatever kind or offset the value carries; on a
- `Date` column by the day on the value. Rows a bulk load already wrote into the neighbouring day's partition from a `Local` or offset value are not moved, and a
- partition-pruned query keeps missing them until they are re-written.
+  `Date` column by the day on the value. Rows a bulk load already wrote into the neighbouring day's partition from a `Local` or offset value are not moved, and a
+  partition-pruned query keeps missing them until they are re-written.
 - **Dates written with dots.** A `Date` column reads `01.03.2026` with the table's `culture` (`nb-NO`, `de-DE`: 1 March), as it reads a slash date. A table with no
- `culture` refuses a slash or a dotted date (use ISO `2026-03-01`); a `Timestamp` has no table culture, so it refuses a day-first dotted date always. Year-first
- `2026.03.01` is not ambiguous and is accepted. Before this change the invariant culture read `01.03.2026` as 3 January.
+  `culture` refuses a slash or a dotted date (use ISO `2026-03-01`); a `Timestamp` has no table culture, so it refuses a day-first dotted date always. Year-first
+  `2026.03.01` is not ambiguous and is accepted. Before this change the invariant culture read `01.03.2026` as 3 January.
 
 ---
 
 ## On the wire
 
 - **Insert / upsert:** an ISO-8601 string (`"2026-06-23T14:00:00Z"`, with an offset, or without one — which is **UTC**,
- see [time zones](#which-instant-which-day-time-zones-bl-1225-090)) or an `Int64` **ticks**
- number. Both are accepted; a string is converted to UTC ticks before storage. A boolean or a fractional number is refused.
+  see [time zones](#which-instant-which-day-time-zones-bl-1225-090)) or an `Int64` **ticks**
+  number. Both are accepted; a string is converted to UTC ticks before storage. A boolean or a fractional number is refused.
 - **Filter value:** an ISO-8601 string or an `Int64` ticks number, read exactly as on insert (`QueryTranslator.NormalizeFilterValue`
- handles both): `where ts eq "2026-03-01T00:00:00"` is `2026-03-01T00:00:00Z`.
+  handles both): `where ts eq "2026-03-01T00:00:00"` is `2026-03-01T00:00:00Z`.
 - **JSON result:** the `Int64` ticks value. The SDKs convert it: a UTC `DateTime` in C# (`ClientColumnarResult.Data`,
- `GetRow`, `Rows`, `ToObjects<T>`), an ISO-8601 UTC string in the TypeScript SDK's rows; the TypeScript SDK's
- `toColumnar.data` keeps the ticks (see [TypeScript](../clients/typescript.md)).
+  `GetRow`, `Rows`, `ToObjects<T>`), an ISO-8601 UTC string in the TypeScript SDK's rows; the TypeScript SDK's
+  `toColumnar().data` keeps the ticks (see [TypeScript](../clients/typescript.md)).
 - **Column-batch frames:** a `Timestamp` column is 100-ns ticks counted from the **Unix epoch** (`1970-01-01T00:00:00Z`) —
- the JSON value minus `621355968000000000`. Both SDKs read it into the same values as from JSON. See
- [HTTP API — column kinds](http-api.md#post-apidatabasesdbquery).
+  the JSON value minus `621355968000000000`. Both SDKs read it into the same values as from JSON. See
+  [HTTP API — column kinds](http-api.md#post-apidatabasesdbquery).
 - **GROUP BY a time bucket** (`minute` … `year`): the key is the bucket's start, a `Timestamp` — ticks on the wire like any
- other.
+  other.
 
 ---
 
@@ -133,8 +133,8 @@ ticks apart above 2^53. Pruning is the scan's `RowGroupClassifier` over each row
 
 ```json
 {
- "name": "eventTime",
- "type": "Timestamp"
+  "name": "eventTime",
+  "type": "Timestamp"
 }
 ```
 
@@ -149,10 +149,10 @@ clock (full tick precision, one reading per write request) and refuses any calle
 ## References
 
 - [HTTP API reference](./http-api.md) — the wire forms of every type.
-- `src/Aouda.Engine.Core/Schema/Types.cs` — `DataType.Timestamp` (`Int64` =.NET `DateTime.Ticks`, UTC).
+- `src/Aouda.Engine.Core/Schema/Types.cs` — `DataType.Timestamp` (`Int64` = .NET `DateTime.Ticks`, UTC).
 - `src/Aouda.Engine.Core/Util/TimestampConversion.cs` — the shared conversion helpers.
 - `src/Aouda.Engine.Core/Util/DateConversion.cs` — the same for a `Date` (the day on the value, **BL-1225**).
 - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` — exact timestamp range pruning (**ColumnarRead, 0.3.0**;
- `SegmentPruner.cs` is deleted).
+  `SegmentPruner.cs` is deleted).
 - `guides/market-data.md` — stock-quote schema design using `Timestamp` columns.
 - `guides/time-series.md` — time-series clustering and range queries.

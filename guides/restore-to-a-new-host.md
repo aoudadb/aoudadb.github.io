@@ -4,7 +4,9 @@ nav_order: 8
 parent: "Guides"
 ---
 
-# Restore to a new host The host that ran Aouda is gone — a failed disk, a lost virtual machine — and the backups are in a
+# Restore to a new host
+
+The host that ran Aouda is gone — a failed disk, a lost virtual machine — and the backups are in a
 destination you can still reach: a directory or an S3 bucket. This page brings the data back on another host. Run it once, on a
 spare host, **before** you need it: an untested restore is a hope.
 
@@ -12,59 +14,59 @@ What you need:
 
 - **The destination** (the backup destination, and the WAL archive's if it is a different one) readable from the new host.
 - **The same build that took the backup, or a newer one that reads the same backup format.** A backup carries its own format version
- (the current one is 4). A build that reads another version refuses the backup before it writes anything: a set taken before this
- release has no set record (`BACKUP_SET_INCOMPLETE`), and a manifest of another version is `BACKUP_MANIFEST_REFUSED`, naming both
- versions. Restore that backup with the build that took it.
+  (the current one is 4). A build that reads another version refuses the backup before it writes anything: a set taken before this
+  release has no set record (`BACKUP_SET_INCOMPLETE`), and a manifest of another version is `BACKUP_MANIFEST_REFUSED`, naming both
+  versions. Restore that backup with the build that took it.
 - **What is not in a backup**: the declaration file (`aouda.json`) and keys set in the environment. Carry them separately; the data
- directory does not hold them. See [Backup and restore](backup.md#31-what-a-restore-does-not-bring-back).
+  directory does not hold them. See [Backup and restore](backup.md#31-what-a-restore-does-not-bring-back).
 - **An empty data directory** on the new host.
 
 ## Choose: exact or point in time
 
 - **Exact** returns every database as it was at the backup's cut. Use it when the newest backup is good enough.
 - **Point in time** (`--target-time`) returns the last transaction that committed at or before an instant after the backup. It needs the
- WAL archive (`Aouda:Archive`) that the lost host was writing to; the log in the archive is at most about a minute plus one archive check
- behind the lost host (`Aouda:Archive:MaxUnarchivedSeconds`, default 60). Without an archive there is no point in time on a new host.
+  WAL archive (`Aouda:Archive`) that the lost host was writing to; the log in the archive is at most about a minute plus one archive check
+  behind the lost host (`Aouda:Archive:MaxUnarchivedSeconds`, default 60). Without an archive there is no point in time on a new host.
 
 ## Path A — a fresh server pointed at the destination
 
 1. Start a server on an empty data directory, with the archive settings of the lost host (the destination, and for S3 the credential chain
- or `ServiceUrl`). The new server finds the sets in that destination and, once the restore has run, archives to it. **If the lost host
- might still be running, use Path B instead** and start the copy with its own destination (below):
+   or `ServiceUrl`). The new server finds the sets in that destination and, once the restore has run, archives to it. **If the lost host
+   might still be running, use Path B instead** and start the copy with its own destination (below):
 
- ```bash
- export AOUDA_ARCHIVE__ENABLED=true AOUDA_ARCHIVE__DESTINATION=/mnt/backups/aouda
- aouda start --data-path /srv/aouda-new
- ```
+   ```bash
+   export AOUDA_ARCHIVE__ENABLED=true AOUDA_ARCHIVE__DESTINATION=/mnt/backups/aouda
+   aouda start --data-path /srv/aouda-new
+   ```
 
 2. Find the set, then restore it:
 
- ```bash
- export AOUDA_SERVER=http://localhost:5000 AOUDA_TOKEN=<an operator key>
- aouda backup list
- aouda backup restore backup-2026-11-21-150851-4bccdc05 # exact
- aouda backup restore --target-time 2026-11-21T15:09:01Z # point in time: the newest set at or before it
- ```
+   ```bash
+   export AOUDA_SERVER=http://localhost:5000 AOUDA_TOKEN=<an operator key>
+   aouda backup list
+   aouda backup restore backup-2026-11-21-150851-4bccdc05                              # exact
+   aouda backup restore --target-time 2026-11-21T15:09:01Z                             # point in time: the newest set at or before it
+   ```
 
- The server stops its engines for the restore and restarts them; a point-in-time restore replays the log at the restore.
- **The restore replaces the new server's own auth database** with the restored one: the operator key the new server started with
- (a `--dev-admin` key, a bootstrap key) stops working, and the keys and principals of the lost host work. Keep an operator key of the lost
- host ready, or the declaration that creates one.
+   The server stops its engines for the restore and restarts them; a point-in-time restore replays the log at the restore.
+   **The restore replaces the new server's own auth database** with the restored one: the operator key the new server started with
+   (a `--dev-admin` key, a bootstrap key) stops working, and the keys and principals of the lost host work. Keep an operator key of the lost
+   host ready, or the declaration that creates one.
 
 ## Path B — offline, into a directory, with no server running
 
 ```bash
 aouda backup restore backup-2026-11-21-150851-4bccdc05 --to /srv/aouda-new --from /mnt/backups/aouda --target-time 2026-11-21T15:09:01Z
 # restored backup set backup-2026-11-21-150851-4bccdc05 into /srv/aouda-new, staged to 2026-11-21T15:09:01.0000000+00:00 (replayed when the directory is first started)
-# files 53 (87867 bytes read)
-# verified yes
-# database shop (Strict)
+# files        53 (87867 bytes read)
+# verified     yes
+# database     shop (Strict)
 # start it with: aouda start --data-path /srv/aouda-new
 aouda start --data-path /srv/aouda-new
 ```
 
 - `--from` is the backup destination (a path, or `s3://bucket/prefix` with the AWS credential chain; `--s3-endpoint` and `--s3-region` for
- an S3-compatible service). `--archive` names the WAL archive's destination when it is not `--from`.
+  an S3-compatible service). `--archive` names the WAL archive's destination when it is not `--from`.
 - The target directory must be new or empty. A directory that is not empty is refused and nothing is written (exit 78).
 - A point-in-time restore is staged and **replays when the directory is first started**.
 - Leave out `--target-time` for an exact restore.
@@ -72,9 +74,9 @@ aouda start --data-path /srv/aouda-new
 ## Check it
 
 ```bash
-aouda backup list # the sets the new server can see
+aouda backup list                                  # the sets the new server can see
 curl -s -X POST http://localhost:5000/api/databases/shop/query -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
- -d '{"database":"shop","table":"orders","columns":["id","item"]}' # a row count you know
+     -d '{"database":"shop","table":"orders","columns":["id","item"]}'       # a row count you know
 aouda db inspect --name shop
 ```
 
@@ -102,8 +104,8 @@ refuses to open (`RESTORE_INCOMPLETE`) whatever opens it. Delete it and restore 
 
 - **Do not restore over a running server's data directory.** Use `aouda backup restore <id>` against the server, or an empty directory.
 - **Do not let two servers archive to one destination at the same time.** A restored copy that runs while its source is still up must use
- its **own** destination: two databases archiving to one destination lose each other's archive-manifest entries, and retention compares
- positions across them.
+  its **own** destination: two databases archiving to one destination lose each other's archive-manifest entries, and retention compares
+  positions across them.
 - **Do not expect branches back from a point-in-time restore.** An exact restore brings them back; a point-in-time restore drops them and names each
- ([Backup and restore](backup.md#42-branches-and-a-pitr)).
+  ([Backup and restore](backup.md#42-branches-and-a-pitr)).
 - **Do not rely on a set you have not restored.** Restore the newest set to a spare host and check a row count, on a schedule.

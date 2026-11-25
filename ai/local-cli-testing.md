@@ -20,28 +20,28 @@ Pin the CLI to the version your project expects (example below uses **0.1.9**). 
 # 1. Match the pin. `aouda start -h` / `--help` print flags and do not bind.
 dotnet tool uninstall -g Aouda.Cli -ErrorAction SilentlyContinue
 dotnet tool install -g Aouda.Cli --version 0.1.9
-aouda --version # expect Aouda 0.1.9 (or your pin)
+aouda --version   # expect Aouda 0.1.9 (or your pin)
 
 # 2. Own ports + own data dir. Pick free ports; do not reuse a maintainer's or lab map.
 $dd = Join-Path $env:TEMP "aouda-agent-probe"
 $admin = 26133
-$data = 26134
+$data  = 26134
 Start-Process aouda -ArgumentList @(
- "start","--port","$admin","--bind","127.0.0.1","--data-dir",$dd,
- "--data-plane-bind","127.0.0.1:$data"
+  "start","--port","$admin","--bind","127.0.0.1","--data-dir",$dd,
+  "--data-plane-bind","127.0.0.1:$data"
 ) -WindowStyle Hidden
 # wait until GET http://127.0.0.1:26133/health and :26134/health return 200
 
 # 3. Fresh store → init creates the admin on THIS server.
-# --admin-password never appears on the command line — pipe it, e.g. printf '%s' "$PW" | aouda init...
+# --admin-password never appears on the command line — pipe it, e.g. printf '%s' "$PW" | aouda init ...
 printf '%s' … | aouda init --server http://127.0.0.1:26133 --admin-email … --admin-password-stdin --json
 # save accessToken; do not print it. Then:
 aouda databases create -n auth --kind auth -s http://127.0.0.1:26133 -t <token> --json
 # the response has no key. A principal and its key are declared, or minted on the principal.
 
 # 4. Schema: HTTP body { "schema": <doc>, "options": { "allowDestructive": true } }
-# or `aouda schema apply -s … -d … -f aouda.schema.json`.
-# Named-query names: string literals from aouda.schema.json (codegen Args/Row is optional).
+#    or `aouda schema apply -s … -d … -f aouda.schema.json`.
+#    Named-query names: string literals from aouda.schema.json (codegen Args/Row is optional).
 
 # 5. Data-plane reads: POST …/named-queries/{name}/query — not POST …/query.
 # 6. Stop only this process:
@@ -56,7 +56,7 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 
 `aouda start`, `stop`, `status` and `doctor` keep one state file per user, so a second local server collides with the first. Give each its
 own directory with `--state-dir <dir>` (or `AOUDA_STATE_DIR`; the flag wins) on **every** command that should see it, e.g.
-`aouda start --state-dir $dd/state...` and `aouda stop --state-dir $dd/state` (**BL-1587, 0.16.0**).
+`aouda start --state-dir $dd/state ...` and `aouda stop --state-dir $dd/state` (**BL-1587, 0.16.0**).
 
 ## Do not (engine / CLI traps)
 
@@ -78,14 +78,14 @@ own directory with `--state-dir <dir>` (or `AOUDA_STATE_DIR`; the flag wins) on 
 
 ```json
 {
- "Aouda": {
- "Listeners": {
- "DataPlane": {
- "Bind": "127.0.0.1:26134",
- "CorsOrigins": "https://app.example.com"
- }
- }
- }
+  "Aouda": {
+    "Listeners": {
+      "DataPlane": {
+        "Bind": "127.0.0.1:26134",
+        "CorsOrigins": "https://app.example.com"
+      }
+    }
+  }
 }
 ```
 

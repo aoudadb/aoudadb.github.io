@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Named queries and mutations
 
-Document status: Complete (BL-188 S09)
+Document status: Complete (BL-188 S09)  
 Last updated: 2026-09-08
 
 A **named query** is a server-authored, parameterized query template. The client sends a **name** plus arguments. It cannot name tables, columns, or operators. Identity is injected from the validated principal — it is never an argument.
@@ -105,81 +105,81 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "trading",
- "tables": {
- "EquityQuote": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1 },
- "ticker": { "type": "String" },
- "bid": { "type": "Decimal", "precision": 18, "scale": 2 },
- "ask": { "type": "Decimal", "precision": 18, "scale": 2 },
- "internalSpread": { "type": "Decimal", "precision": 18, "scale": 2 },
- "asOf": { "type": "Timestamp" }
- }
- },
- "Position": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1 },
- "accountId": { "type": "Int64" },
- "ticker": { "type": "String" },
- "qty": { "type": "Int64" }
- }
- }
- },
- "namedQueries": {
- "equity.quoteByTicker": {
- "table": "EquityQuote",
- "select": ["ticker", "bid", "ask", "asOf"],
- "limit": 1,
- "where": {
- "and": [{ "column": "ticker", "op": "eq", "param": "ticker" }]
- },
- "params": {
- "ticker": { "required": true, "maxLength": 8 }
- },
- "version": "v1"
- },
- "equity.stockOverview": {
- "table": "Position",
- "select": ["Position.ticker", "Position.qty", "EquityQuote.bid", "EquityQuote.ask"],
- "limit": 500,
- "joins": [
- {
- "table": "EquityQuote",
- "type": "inner",
- "leftColumn": "ticker",
- "rightColumn": "ticker"
- }
- ],
- "where": {
- "and": [{ "column": "accountId", "op": "eq", "param": "accountId" }]
- },
- "params": {
- "accountId": { "required": true }
- },
- "version": "v1"
- }
- },
- "namedMutations": {
- "equity.adjustQty": {
- "op": "update",
- "table": "Position",
- "limit": 1,
- "where": {
- "and": [
- { "column": "id", "op": "eq", "param": "id" }
- ]
- },
- "set": { "qty": { "param": "qty" } },
- "returning": ["id", "qty"],
- "params": {
- "id": { "required": true },
- "qty": { "required": true, "min": 0 }
- },
- "version": "v1"
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "trading",
+  "tables": {
+    "EquityQuote": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1 },
+        "ticker": { "type": "String" },
+        "bid": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "ask": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "internalSpread": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "asOf": { "type": "Timestamp" }
+      }
+    },
+    "Position": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1 },
+        "accountId": { "type": "Int64" },
+        "ticker": { "type": "String" },
+        "qty": { "type": "Int64" }
+      }
+    }
+  },
+  "namedQueries": {
+    "equity.quoteByTicker": {
+      "table": "EquityQuote",
+      "select": ["ticker", "bid", "ask", "asOf"],
+      "limit": 1,
+      "where": {
+        "and": [{ "column": "ticker", "op": "eq", "param": "ticker" }]
+      },
+      "params": {
+        "ticker": { "required": true, "maxLength": 8 }
+      },
+      "version": "v1"
+    },
+    "equity.stockOverview": {
+      "table": "Position",
+      "select": ["Position.ticker", "Position.qty", "EquityQuote.bid", "EquityQuote.ask"],
+      "limit": 500,
+      "joins": [
+        {
+          "table": "EquityQuote",
+          "type": "inner",
+          "leftColumn": "ticker",
+          "rightColumn": "ticker"
+        }
+      ],
+      "where": {
+        "and": [{ "column": "accountId", "op": "eq", "param": "accountId" }]
+      },
+      "params": {
+        "accountId": { "required": true }
+      },
+      "version": "v1"
+    }
+  },
+  "namedMutations": {
+    "equity.adjustQty": {
+      "op": "update",
+      "table": "Position",
+      "limit": 1,
+      "where": {
+        "and": [
+          { "column": "id", "op": "eq", "param": "id" }
+        ]
+      },
+      "set": { "qty": { "param": "qty" } },
+      "returning": ["id", "qty"],
+      "params": {
+        "id": { "required": true },
+        "qty": { "required": true, "min": 0 }
+      },
+      "version": "v1"
+    }
+  }
 }
 ```
 
@@ -226,7 +226,7 @@ box should not expose them:
 ```ts
 // The caller decides the pattern shape; the definition fixes the column and the operator.
 await client.namedQueries.execute("equity.stocks.screener", {
- keywords: `%${userInput.replace(/[%_\\]/g, "")}%`,
+  keywords: `%${userInput.replace(/[%_\\]/g, "")}%`,
 });
 ```
 
@@ -259,7 +259,7 @@ There is **no** `POST /named-queries/register`. Inventory is `GET …/schema/exp
 ## Array columns (**BL-035, 0.9.0**)
 
 (**BL-035, 0.9.0**) A named query may **select** an [array column](array-columns.md) (`"select": ["CurveId", "Rates"]`); the
-result gives the array whole, in `types` as `"Double"`. It may not use one in `where`, `orderBy`, a group,
+result gives the array whole, in `types` as `"Double[]"`. It may not use one in `where`, `orderBy`, a group,
 an aggregate (`count(col)` included), `distinct`, a `selectExpr`, a join key or a `perKey` key or order: that definition is **refused at `schema apply`** —
 its entry is `Failed` with a reason starting `ARRAY_COLUMN_UNSUPPORTED:` — and the other definitions in the document still apply.
 A named mutation may write an array column from a parameter or a literal (`upsert` and `update … set` replace the whole array), but
@@ -276,20 +276,20 @@ These fields exist on the definition. They were missing from this page.
 
 ```json
 "equity.quotesPage": {
- "table": "EquityQuote",
- "select": ["ticker", "bid", "ask", "asOf"],
- "where": { "and": [{ "column": "ticker", "op": "in", "param": "tickers" }] },
- "orderBy": [{ "column": "ticker", "descending": false }],
- "limit": 25,
- "limitParam": "pageSize",
- "offset": 10000,
- "offsetParam": "pageOffset",
- "count": true,
- "params": {
- "tickers": { "required": true, "maxItems": 32 },
- "pageSize": { "min": 1, "max": 25 },
- "pageOffset": { "min": 0, "max": 10000 }
- }
+  "table": "EquityQuote",
+  "select": ["ticker", "bid", "ask", "asOf"],
+  "where": { "and": [{ "column": "ticker", "op": "in", "param": "tickers" }] },
+  "orderBy": [{ "column": "ticker", "descending": false }],
+  "limit": 25,
+  "limitParam": "pageSize",
+  "offset": 10000,
+  "offsetParam": "pageOffset",
+  "count": true,
+  "params": {
+    "tickers": { "required": true, "maxItems": 32 },
+    "pageSize": { "min": 1, "max": 25 },
+    "pageOffset": { "min": 0, "max": 10000 }
+  }
 }
 ```
 
@@ -305,24 +305,24 @@ Mark a `where` condition with `"whenParamPresent": true` to make it **skip entir
 
 ```json
 "listings.screener": {
- "table": "listings",
- "select": ["ticker", "currency", "sector", "mcap"],
- "where": {
- "and": [
- { "column": "currency", "op": "in", "param": "currency", "whenParamPresent": true },
- { "column": "sector", "op": "eq", "param": "sector", "whenParamPresent": true },
- { "column": "mcap", "op": "gte", "param": "minMcap", "whenParamPresent": true }
- ]
- },
- "orderBy": [{ "column": "ticker", "descending": false }],
- "limit": 25, "limitParam": "pageSize",
- "count": true,
- "params": {
- "currency": { "required": false },
- "sector": { "required": false, "maxLength": 64 },
- "minMcap": { "required": false },
- "pageSize": { "required": false, "min": 1, "max": 25 }
- }
+  "table": "listings",
+  "select": ["ticker", "currency", "sector", "mcap"],
+  "where": {
+    "and": [
+      { "column": "currency", "op": "in",  "param": "currency", "whenParamPresent": true },
+      { "column": "sector",   "op": "eq",  "param": "sector",   "whenParamPresent": true },
+      { "column": "mcap",     "op": "gte", "param": "minMcap",  "whenParamPresent": true }
+    ]
+  },
+  "orderBy": [{ "column": "ticker", "descending": false }],
+  "limit": 25, "limitParam": "pageSize",
+  "count": true,
+  "params": {
+    "currency":  { "required": false },
+    "sector":    { "required": false, "maxLength": 64 },
+    "minMcap":   { "required": false },
+    "pageSize":  { "required": false, "min": 1, "max": 25 }
+  }
 }
 ```
 
@@ -346,35 +346,35 @@ each device's:
 
 ```json
 "connect.presence.online": {
- "table": "Presence",
- "select": ["UserId", "State", "LastHeartbeat"],
- "where": { "and": [{ "column": "LastHeartbeat", "op": "gt", "param": "leaseStart" }] },
- "params": { "leaseStart": { "serverTime": { "offsetSeconds": -75 } } },
- "limit": 500
+  "table": "Presence",
+  "select": ["UserId", "State", "LastHeartbeat"],
+  "where": { "and": [{ "column": "LastHeartbeat", "op": "gt", "param": "leaseStart" }] },
+  "params": { "leaseStart": { "serverTime": { "offsetSeconds": -75 } } },
+  "limit": 500
 }
 ```
 
 - **One-shot reads only**: execute, batch, `count` and aggregate definitions. **Subscribe refuses** the query with
- `NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE` — a row would leave the result because time passed, with no write to
- report, which is a timer, not a predicate. Subscribe to the table's query without the bound and judge the lease on the
- client (below), or execute the bounded query on an interval. A materialized query cannot declare one (its predicate takes
- literal values).
+  `NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE` — a row would leave the result because time passed, with no write to
+  report, which is a timer, not a predicate. Subscribe to the table's query without the bound and judge the lease on the
+  client (below), or execute the bounded query on an interval. A materialized query cannot declare one (its predicate takes
+  literal values).
 - **The caller cannot supply it.** Naming it in `args` fails with `NAMED_QUERY_SERVER_TIME_INVALID` (400); omit it.
- Generated typed clients leave it out of the arguments.
+  Generated typed clients leave it out of the arguments.
 - **Where it may stand** (checked at apply, `NAMED_QUERY_SERVER_TIME_INVALID`): an `eq` / `ne` / `gt` / `gte` / `lt` / `lte`
- condition on a `Timestamp` column, in the base `where` or a join's. Not `in` / `like`, not `whenParamPresent`, not a
- `limitParam` / `offsetParam`, not in `selectExpr`, and with no other constraint (`required`, `min`, …). Named mutations
- cannot declare one. `offsetSeconds` is within ±10 years.
+  condition on a `Timestamp` column, in the base `where` or a join's. Not `in` / `like`, not `whenParamPresent`, not a
+  `limitParam` / `offsetParam`, not in `selectExpr`, and with no other constraint (`required`, `min`, …). Named mutations
+  cannot declare one. `offsetSeconds` is within ±10 years.
 - **Whose clock.** The node that answers the read binds the bound, and stamps are the primary's clock — a read served by a
- secondary compares the secondary's clock with the primary's stamps, so their skew shifts the lease window. Read leases from the
- primary, or allow for the skew.
+  secondary compares the secondary's clock with the primary's stamps, so their skew shifts the lease window. Read leases from the
+  primary, or allow for the skew.
 - **Pairs with a server-time stamp.** With `LastHeartbeat` declared `derived: { "serverTime": "write" }`
- ([insert transforms](insert-transforms.md#server-time-stamp-servertime)), both
- sides of the comparison are the server's clock.
+  ([insert transforms](insert-transforms.md#server-time-stamp-servertime)), both
+  sides of the comparison are the server's clock.
 
 **Judging a lease on the client.** A subscription delivers the rows; whether a lease has lapsed is a comparison with now.
 Use the server's now: every HTTP response carries a `Date` header, readable cross-origin, and both SDKs keep the offset —
-`client.serverClockOffsetMs` / `client.serverNow` in TypeScript, `ServerClockOffset` / `ServerNow` in C# — good to
+`client.serverClockOffsetMs` / `client.serverNow()` in TypeScript, `ServerClockOffset` / `ServerNow()` in C# — good to
 about a second.
 
 ## Bounded sort choices (`orderByChoices` / `orderByIndex`)
@@ -383,15 +383,15 @@ Declare a list of allowed sort permutations in the definition. The caller picks 
 
 ```json
 "gainers.top": {
- "table": "bars_with_change",
- "select": ["ticker", "open", "close", "changePct"],
- "orderBy": [{ "column": "changePct", "descending": true }],
- "orderByChoices": [
- [{ "column": "changePct", "descending": true }],
- [{ "column": "ticker", "descending": false }]
- ],
- "limit": 20,
- "params": {}
+  "table": "bars_with_change",
+  "select": ["ticker", "open", "close", "changePct"],
+  "orderBy": [{ "column": "changePct", "descending": true }],
+  "orderByChoices": [
+    [{ "column": "changePct", "descending": true  }],
+    [{ "column": "ticker",    "descending": false }]
+  ],
+  "limit": 20,
+  "params": {}
 }
 ```
 
@@ -420,9 +420,9 @@ Body is `{ "args": { … } }` only. No `database` field (the path already has it
 # with AUTH_KEY_LISTENER_MISMATCH.
 curl -s -X POST \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- -H "Content-Type: application/json" \
- http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
- -d '{"args":{"ticker":"AAPL"}}'
+  -H "Content-Type: application/json" \
+  http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
+  -d '{"args":{"ticker":"AAPL"}}'
 ```
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -435,15 +435,15 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 import { AoudaClient } from "@aouda/client";
 
 const client = new AoudaClient({
- serverUrl: "https://data.example.com", // data-plane listener
- database: "trading",
-// client.whoami — apiKey is an aouda_ key, or session, never both.
+  serverUrl: "https://data.example.com", // data-plane listener
+  database: "trading",
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
-await client.connect;
+await client.connect();
 // after user sign-in, attach the user JWT — do not put identity in args
 
 const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
- ticker: "AAPL",
+  ticker: "AAPL",
 });
 ```
 
@@ -452,12 +452,12 @@ const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
 ```csharp
 var client = new AoudaClient("https://data.example.com", "trading")
 {
-// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 };
 
 var result = await client.NamedQueries.ExecuteAsync(
- "equity.quoteByTicker",
- new Dictionary<string, object?> { ["ticker"] = "AAPL" });
+    "equity.quoteByTicker",
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" });
 ```
 
 Empty or whitespace name throws locally on both SDKs.
@@ -474,10 +474,10 @@ A dashboard of independent panels should not issue N sequential executes. A batc
 
 ```json
 {
- "queries": [
- { "name": "equity.quoteByTicker", "args": { "ticker": "AAPL" } },
- { "name": "equity.stockOverview", "args": { "accountId": 42 } }
- ]
+  "queries": [
+    { "name": "equity.quoteByTicker", "args": { "ticker": "AAPL" } },
+    { "name": "equity.stockOverview", "args": { "accountId": 42 } }
+  ]
 }
 ```
 
@@ -485,10 +485,10 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```json
 {
- "results": [
- { "columns": ["ticker", "bid"], "types": ["String", "Decimal"], "data": [["AAPL"], [189.200000]], "rowCount": 1 },
- { "code": "NAMED_QUERY_NOT_FOUND", "error": "Named query 'equity.unknown' was not found." }
- ]
+  "results": [
+    { "columns": ["ticker", "bid"], "types": ["String", "Decimal"], "data": [["AAPL"], [189.200000]], "rowCount": 1 },
+    { "code": "NAMED_QUERY_NOT_FOUND", "error": "Named query 'equity.unknown' was not found." }
+  ]
 }
 ```
 
@@ -498,24 +498,24 @@ Envelope **400** (no `results`): empty array, more than 32 elements, or a **name
 
 ```typescript
 const slots = await client.namedQueries.batch([
- { name: "equity.quoteByTicker", args: { ticker: "AAPL" } },
- { name: "equity.stockOverview", args: { accountId: 42 } },
+  { name: "equity.quoteByTicker", args: { ticker: "AAPL" } },
+  { name: "equity.stockOverview", args: { accountId: 42 } },
 ]);
 
 for (const slot of slots) {
- if (slot.isError) {
- console.error(slot.code, slot.error);
- continue;
- }
- console.log(slot.result!.rows);
+  if (slot.isError) {
+    console.error(slot.code, slot.error);
+    continue;
+  }
+  console.log(slot.result!.rows);
 }
 ```
 
 ```csharp
-var slots = await client.NamedQueries.BatchAsync(new
+var slots = await client.NamedQueries.BatchAsync(new[]
 {
- new NamedQueryBatchInput("equity.quoteByTicker", new Dictionary<string, object?> { ["ticker"] = "AAPL" }),
- new NamedQueryBatchInput("equity.stockOverview", new Dictionary<string, object?> { ["accountId"] = 42L }),
+    new NamedQueryBatchInput("equity.quoteByTicker", new Dictionary<string, object?> { ["ticker"] = "AAPL" }),
+    new NamedQueryBatchInput("equity.stockOverview", new Dictionary<string, object?> { ["accountId"] = 42L }),
 });
 ```
 
@@ -537,27 +537,27 @@ Use the SDK — gap resume, reconnect, `re_auth`, snapshot paging, and conflatio
 
 ```typescript
 const sub = client.namedQueries.subscribe<ByTickerRow>(
- namedQueries.byTicker.hash,
- { ticker: "AAPL" },
- {
- conflate: { key: ["ticker"], interval_ms: 100 },
- onSnapshot: (rows) => { /* current match */ },
- onChange: (evt) => { /* insert | update | delete */ },
- }
+  namedQueries.byTicker.hash,
+  { ticker: "AAPL" },
+  {
+    conflate: { key: ["ticker"], interval_ms: 100 },
+    onSnapshot: (rows) => { /* current match */ },
+    onChange: (evt) => { /* insert | update | delete */ },
+  }
 );
 // later
-await sub.unsubscribe;
+await sub.unsubscribe();
 ```
 
 ```csharp
 await foreach (var evt in client.NamedQueries.SubscribeAsync(
- NamedQueries.ByTicker,
- new Dictionary<string, object?> { ["ticker"] = "AAPL" },
- new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], 100) },
- ct))
+    NamedQueries.ByTicker,
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" },
+    new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], 100) },
+    ct))
 {
- if (evt.IsSnapshot) { /* current match */ }
- else { /* insert | update | delete */ }
+    if (evt.IsSnapshot) { /* current match */ }
+    else { /* insert | update | delete */ }
 }
 ```
 
@@ -565,11 +565,11 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
 
 ```json
 {
- "type": "subscribe",
- "id": "sub-1",
- "name": "equity.quoteByTicker",
- "args": { "ticker": "AAPL" },
- "conflate": { "key": ["ticker"], "interval_ms": 100 }
+  "type": "subscribe",
+  "id": "sub-1",
+  "name": "equity.quoteByTicker",
+  "args": { "ticker": "AAPL" },
+  "conflate": { "key": ["ticker"], "interval_ms": 100 }
 }
 ```
 
@@ -577,8 +577,8 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
 
 ```json
 { "type": "subscribe", "id": "lp", "name": "quotes.lastPrice",
- "args": { "tickers": ["AAPL"], "source": "nasdaq" },
- "conflate": { "collapse_inserts": true } }
+  "args": { "tickers": ["AAPL"], "source": "nasdaq" },
+  "conflate": { "collapse_inserts": true } }
 ```
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -593,27 +593,27 @@ Both clients expose this directly — you do not hand-roll the frames. `namedQue
 
 ```typescript
 const sub = client.namedQueries.subscribe(
- "equity.quoteByTicker",
- { ticker: "AAPL" },
- {
- conflate: { key: ["ticker"], interval_ms: 100 },
- onSnapshot: (rows, version) => grid.reset(rows, version),
- onChange: (event) => grid.apply(event),
- onError: (error) => console.error(error),
- }
+  "equity.quoteByTicker",
+  { ticker: "AAPL" },
+  {
+    conflate: { key: ["ticker"], interval_ms: 100 },
+    onSnapshot: (rows, version) => grid.reset(rows, version),
+    onChange: (event) => grid.apply(event),
+    onError: (error) => console.error(error),
+  }
 );
 
-await sub.unsubscribe;
+await sub.unsubscribe();
 ```
 
 ```csharp
 await foreach (var evt in client.NamedQueries.SubscribeAsync(
- "equity.quoteByTicker",
- new Dictionary<string, object?> { ["ticker"] = "AAPL" },
- new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], TimeSpan.FromMilliseconds(100)) },
- ct))
+    "equity.quoteByTicker",
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" },
+    new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], TimeSpan.FromMilliseconds(100)) },
+    ct))
 {
- // snapshot pages, then snapshot_complete, then change events
+    // snapshot pages, then snapshot_complete, then change events
 }
 ```
 
@@ -633,10 +633,10 @@ Notes that bite:
 # Browser-tier JWT on the data-plane. Service keys that mutate via named artifacts
 # may use either listener; ad-hoc insert still requires admin.
 curl -s -X POST \
- -H "Authorization: Bearer $JWT" \
- -H "Content-Type: application/json" \
- http://localhost:5434/api/databases/trading/named-mutations/equity.adjustQty/execute \
- -d '{"args":{"id":1,"qty":10}}'
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  http://localhost:5434/api/databases/trading/named-mutations/equity.adjustQty/execute \
+  -d '{"args":{"id":1,"qty":10}}'
 ```
 
 ```typescript
@@ -676,20 +676,20 @@ write's. A write that would return more than `MaxReturningRows` rows fails befor
 >
 > ```json
 > "Presence": {
-> "columns": {
-> "UserId": { "type": "String", "primaryKey": 1, "derived": { "identity": "subject" } },
-> "State": { "type": "String" },
-> "LastHeartbeat": { "type": "Timestamp", "derived": { "serverTime": "write" } }
-> }
+>   "columns": {
+>     "UserId":        { "type": "String", "primaryKey": 1, "derived": { "identity": "subject" } },
+>     "State":         { "type": "String" },
+>     "LastHeartbeat": { "type": "Timestamp", "derived": { "serverTime": "write" } }
+>   }
 > }
 > ```
 >
 > ```json
 > "connect.presence.heartbeat": {
-> "op": "upsert",
-> "table": "Presence",
-> "values": { "State": { "param": "state" } },
-> "params": { "state": { "required": true } }
+>   "op": "upsert",
+>   "table": "Presence",
+>   "values": { "State": { "param": "state" } },
+>   "params": { "state": { "required": true } }
 > }
 > ```
 >
@@ -699,9 +699,9 @@ write's. A write that would return more than `MaxReturningRows` rows fails befor
 > mutation does not, and cannot, send it.
 >
 > ```text
-> first call every call after
-> { "rowsInserted": 1, { "rowsInserted": 0,
-> "rowsUpdated": 0 } "rowsUpdated": 1 }
+> first call                every call after
+> { "rowsInserted": 1,      { "rowsInserted": 0,
+>   "rowsUpdated": 0 }        "rowsUpdated": 1 }
 > ```
 >
 > The split is the point of the two counters: an upsert whose `rowsInserted` stays at zero is a
@@ -728,15 +728,15 @@ Each entry maps a **column** to one of three things — a literal, a parameter h
 
 ```json
 "message.send": {
- "op": "insert",
- "table": "Messages",
- "values": {
- "ConversationId": { "param": "conversationId" },
- "Content": { "param": "content" },
- "Source": "web",
- "Id": { "value": 0 }
- },
- "params": { "conversationId": {}, "content": { "maxLength": 4000 } }
+  "op": "insert",
+  "table": "Messages",
+  "values": {
+    "ConversationId": { "param": "conversationId" },
+    "Content":        { "param": "content" },
+    "Source":         "web",
+    "Id":             { "value": 0 }
+  },
+  "params": { "conversationId": {}, "content": { "maxLength": 4000 } }
 }
 ```
 
@@ -774,34 +774,34 @@ that row's `{ "param": … }` holes, overriding a top-level `args` value of the 
 
 ```json
 "tick.record": {
- "op": "insert",
- "table": "PriceTick",
- "values": {
- "ticker": { "param": "ticker" },
- "px": { "param": "px" }
- },
- "batchParam": "rows",
- "params": {
- "ticker": { "maxLength": 8 },
- "px": {},
- "rows": { "maxItems": 20000 }
- }
+  "op": "insert",
+  "table": "PriceTick",
+  "values": {
+    "ticker": { "param": "ticker" },
+    "px": { "param": "px" }
+  },
+  "batchParam": "rows",
+  "params": {
+    "ticker": { "maxLength": 8 },
+    "px": {},
+    "rows": { "maxItems": 20000 }
+  }
 }
 ```
 
 ```bash
 curl -s -X POST \
- -H "Authorization: Bearer $JWT" \
- -H "Content-Type: application/json" \
- http://localhost:5434/api/databases/trading/named-mutations/tick.record/execute \
- -d '{"args":{"rows":{"columns":["ticker","px"],"data":[["AAPL","MSFT"],[189.2,402.1]]}}}'
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  http://localhost:5434/api/databases/trading/named-mutations/tick.record/execute \
+  -d '{"args":{"rows":{"columns":["ticker","px"],"data":[["AAPL","MSFT"],[189.2,402.1]]}}}'
 ```
 
 ```typescript
 // The SDK sends a batch argument given as rows as column arrays (Lead S14, 0.6.0) — the type the generated client
 // declares for it (`Array<{…}>`). A ColumnBatch works too.
 await client.namedMutations.execute("tick.record", {
- rows: ticks.map((t) => ({ ticker: t.ticker, px: t.px })),
+  rows: ticks.map((t) => ({ ticker: t.ticker, px: t.px })),
 });
 ```
 
@@ -811,9 +811,9 @@ await client.namedMutations.execute("tick.record", {
 
 ```json
 "values": {
- "Id": { "value": 0 },
- "ticker": { "param": "ticker" },
- "px": { "param": "px" }
+  "Id": { "value": 0 },
+  "ticker": { "param": "ticker" },
+  "px": { "param": "px" }
 }
 ```
 
@@ -821,9 +821,9 @@ For a batch insert where some callers choose the id, bind it instead and send `0
 
 ```json
 "values": {
- "Id": { "param": "id" },
- "ticker": { "param": "ticker" },
- "px": { "param": "px" }
+  "Id": { "param": "id" },
+  "ticker": { "param": "ticker" },
+  "px": { "param": "px" }
 }
 ```
 
@@ -837,9 +837,9 @@ Bind is **all-or-nothing**, matching the plain multi-row insert path: the cap is
 
 ```json
 {
- "error": "Required parameter 'px' was not supplied. (batch index 1)",
- "code": "NAMED_QUERY_PARAM_REQUIRED",
- "rowErrors": [{ "index": 1, "code": "NAMED_QUERY_PARAM_REQUIRED", "message": "Required parameter 'px' was not supplied. (batch index 1)" }]
+  "error": "Required parameter 'px' was not supplied. (batch index 1)",
+  "code": "NAMED_QUERY_PARAM_REQUIRED",
+  "rowErrors": [{ "index": 1, "code": "NAMED_QUERY_PARAM_REQUIRED", "message": "Required parameter 'px' was not supplied. (batch index 1)" }]
 }
 ```
 

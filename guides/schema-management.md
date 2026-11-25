@@ -32,33 +32,33 @@ In your project root, create `aouda.schema.json`:
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "myapp",
- "tables": {
- "users": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "name": { "type": "String" },
- "created_at": { "type": "Timestamp" }
- }
- }
- },
- "settings": {
- "durability": { "replicationFactor": 1 }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "myapp",
+  "tables": {
+    "users": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "name": { "type": "String" },
+        "created_at": { "type": "Timestamp" }
+      }
+    }
+  },
+  "settings": {
+    "durability": { "replicationFactor": 1 }
+  }
 }
 ```
 
 (**Lead S26, 0.6.0**) `settings.durability` carries only `replicationFactor`. A database's durability level (`strict`, `os`,
 `unlogged` or `memory`) is set where the database is created, not in the schema; a table may name its own with
-`"durability": { "level": "unlogged" }` (`strict`, `unlogged` or `memory`; `strict` is allowed in a database at `os`,). A change between `unlogged` and a WAL level waits for the table's writes to settle, flushes it, then applies — refused as a retryable conflict, nothing changed, if it cannot. The retired `walEnabled` is a validation error. See
+`"durability": { "level": "unlogged" }` (`strict`, `unlogged` or `memory`; `strict` is allowed in a database at `os`). A change between `unlogged` and a WAL level waits for the table's writes to settle, flushes it, then applies — refused as a retryable conflict, nothing changed, if it cannot. The retired `walEnabled` is a validation error. See
 [Write Path Durability](write-durability.md#durability-levels-lead-s26-060).
 
 Set `database` to the database name your Aouda server uses. Your IDE can validate and autocomplete if `$schema` points to the JSON Schema (see [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-declarative-schema-management.md)).
 
 ### 2. Choose your CLI
 
-#### Option A:.NET (C# / F# / VB projects)
+#### Option A: .NET (C# / F# / VB projects)
 
 Install the Aouda CLI as a global or local tool:
 
@@ -88,7 +88,7 @@ export AOUDA_SERVER=http://localhost:5433
 export AOUDA_DATABASE=myapp
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
 
-dotnet aouda schema diff # no flags needed
+dotnet aouda schema diff                # no flags needed
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
 ```
 
@@ -104,7 +104,7 @@ npx @aouda/client schema diff --server http://localhost:5433 --database myapp
 npx @aouda/client schema apply --server http://localhost:5433 --database myapp
 ```
 
-Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as in the.NET CLI.
+Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as in the .NET CLI.
 
 ### 3. Verify
 
@@ -148,35 +148,35 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "trading",
- "tables": { },
- "materializedQueries": {
- "latest_quote": {
- "type": "latestPerKey",
- "sourceTable": "EquityQuote",
- "groupBy": ["ticker"],
- "orderBy": "ts",
- "descending": true,
- "select": ["ticker", "price", "ts"]
- },
- "ohlc_1m": {
- "type": "aggregate",
- "sourceTable": "EquityQuote",
- "groupBy": [
- "ticker",
- { "column": "ts", "function": "TruncateToMinute", "outputName": "bucket" }
- ],
- "aggregates": [
- { "function": "first", "sourceColumn": "price", "outputName": "open", "orderByColumn": "ts" },
- { "function": "max", "sourceColumn": "price", "outputName": "high" },
- { "function": "min", "sourceColumn": "price", "outputName": "low" },
- { "function": "last", "sourceColumn": "price", "outputName": "close", "orderByColumn": "ts" },
- { "function": "count", "outputName": "ticks" }
- ],
- "updateMode": "async"
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "trading",
+  "tables": { },
+  "materializedQueries": {
+    "latest_quote": {
+      "type": "latestPerKey",
+      "sourceTable": "EquityQuote",
+      "groupBy": ["ticker"],
+      "orderBy": "ts",
+      "descending": true,
+      "select": ["ticker", "price", "ts"]
+    },
+    "ohlc_1m": {
+      "type": "aggregate",
+      "sourceTable": "EquityQuote",
+      "groupBy": [
+        "ticker",
+        { "column": "ts", "function": "TruncateToMinute", "outputName": "bucket" }
+      ],
+      "aggregates": [
+        { "function": "first", "sourceColumn": "price", "outputName": "open",  "orderByColumn": "ts" },
+        { "function": "max",   "sourceColumn": "price", "outputName": "high" },
+        { "function": "min",   "sourceColumn": "price", "outputName": "low" },
+        { "function": "last",  "sourceColumn": "price", "outputName": "close", "orderByColumn": "ts" },
+        { "function": "count",                          "outputName": "ticks" }
+      ],
+      "updateMode": "async"
+    }
+  }
 }
 ```
 
@@ -226,15 +226,15 @@ If you declare your databases in the declaration file (`aouda.json`, **BL-1463, 
 
 ```json
 {
- "version": 1,
- "databases": {
- "derive_auth": { "kind": "auth" },
- "ledger": {
- "kind": "data",
- "authDatabase": "derive_auth",
- "schema": "schemas/ledger.json"
- }
- }
+  "version": 1,
+  "databases": {
+    "derive_auth": { "kind": "auth" },
+    "ledger": {
+      "kind": "data",
+      "authDatabase": "derive_auth",
+      "schema": "schemas/ledger.json"
+    }
+  }
 }
 ```
 
@@ -245,14 +245,14 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | You want to know | Answer |
 |---|---|
 | Is it safe to restart? | Yes. A file already in effect gives an empty diff: nothing is written, no history entry. A changed file applies only the difference. |
-| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, 0.14.0**), an overlay that adds a table. A change that cannot be applied fails the start too. (**BL-1463, 0.14.0**) Every bad file is reported at once, each with its code and a JSON pointer into the file (`SCHEMA_INVALID`, `SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_OVERLAY_INVALID`, `SCHEMA_CHANGE_REFUSED`,...; see [Declaration Finding Codes](../reference/plan-codes.md)); a file or an overlay that cannot be read (`SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE`) exits with status 1, so a supervisor retries it once the volume is mounted, and an invalid one exits 78. |
+| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, 0.14.0**), an overlay that adds a table. A change that cannot be applied fails the start too. (**BL-1463, 0.14.0**) Every bad file is reported at once, each with its code and a JSON pointer into the file (`SCHEMA_INVALID`, `SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_OVERLAY_INVALID`, `SCHEMA_CHANGE_REFUSED`, ...; see [Declaration Finding Codes](../reference/plan-codes.md)); a file or an overlay that cannot be read (`SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE`) exits with status 1, so a supervisor retries it once the volume is mounted, and an invalid one exits 78. |
 | What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"schemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
 | Which tables can I still change over HTTP? | None that the file created: a table schema apply creates refuses HTTP DDL in every inference mode, whether the CLI, the API or the start-time apply created it. |
 | Where is the history? | `GET /api/databases/{db}/schema/history`, with the source `DeclaredApply`. |
 | Do the CLI and the API still work? | Yes, unchanged. The catalog is the runtime truth; the next start applies the file again, and does not remove what you added through the API unless the file omits it **and** `schemaAllowDestructive` is set. |
 
 The process setting `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`; **BL-1463, 0.16.0**, one per server; it replaces the per-database `SchemaEnvironment`) is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
-file: `<file without.json>.<env>.json`, so `aouda.schema.json` → `aouda.schema.prod.json` and `rates.aouda.schema.json` →
+file: `<file without .json>.<env>.json`, so `aouda.schema.json` → `aouda.schema.prod.json` and `rates.aouda.schema.json` →
 `rates.aouda.schema.prod.json` (**BL-1460, 0.14.0**; before, every file in one directory shared `aouda.schema.<env>.json`). An
 overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `schema` is refused on a `"kind": "auth"` database, and `schemaAllowDestructive` without `schema` is refused at start.
 
@@ -336,7 +336,7 @@ Use overlays to keep one schema definition and vary only settings (e.g. replicat
 
 Overlays can only change **database-level settings** (`settings.durability`) and **per-table policy and durability** (`policy`, `durability`). They may not add or remove tables, and may not specify columns, partition keys, or cluster columns. The structural definition (columns, partitionKey, clusterColumns) always comes from the base file. Select overlay with `--env staging` or `AOUDA_ENVIRONMENT=prod`. See ADR 0019 for the exact merge rules.
 
-The overlay's name comes from the base file's: `<base without.json>.<env>.json` beside it (`orders.schema.json` with `--env prod` reads
+The overlay's name comes from the base file's: `<base without .json>.<env>.json` beside it (`orders.schema.json` with `--env prod` reads
 `orders.schema.prod.json`). An overlay is read as strictly as the base file: an unknown or wrong-case member is refused
 (`SCHEMA_UNKNOWN_MEMBER`), and an overlay that exists but cannot be read, or is empty, is an error naming it (**BL-1460, 0.14.0**).
 

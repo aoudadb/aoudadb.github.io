@@ -79,32 +79,32 @@ Aouda's schema lifecycle combines both worlds:
 ### Source map
 
 - Task/report evidence:
- - `docs/tasks/P4/P4-EpicA-Task3-SchemaManagementApi-Report.md`
- - `docs/tasks/P7/BL025-Fix2-AddColumnColdBackfill-Report.md`
- - `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`
- - `docs/tasks/P8/P8-EpicC-Task4-RestApiEndpoints-Report.md`
- - `docs/tasks/P8/P8-EpicF-Task2-CatalogLevelBranchIsolation-Report.md`
- - `docs/tasks/P8/P8-EpicF-Task3-BranchDiffAndMerge-Report.md`
- - `docs/tasks/P8/P8-EpicF-Task4-CopyOnWriteSegmentSharing-Report.md`
+  - `docs/tasks/P4/P4-EpicA-Task3-SchemaManagementApi-Report.md`
+  - `docs/tasks/P7/BL025-Fix2-AddColumnColdBackfill-Report.md`
+  - `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`
+  - `docs/tasks/P8/P8-EpicC-Task4-RestApiEndpoints-Report.md`
+  - `docs/tasks/P8/P8-EpicF-Task2-CatalogLevelBranchIsolation-Report.md`
+  - `docs/tasks/P8/P8-EpicF-Task3-BranchDiffAndMerge-Report.md`
+  - `docs/tasks/P8/P8-EpicF-Task4-CopyOnWriteSegmentSharing-Report.md`
 - Core code:
- - `src/Aouda.Server/Controllers/TablesController.cs`
- - `src/Aouda.Server/Controllers/SchemaController.cs`
- - `src/Aouda.Server/Controllers/BranchController.cs`
- - `src/Aouda.Server/Configuration/SchemaOptions.cs`
- - `src/Aouda.Cli/Program.cs`
- - `src/Aouda.Cli/Commands/SchemaCommandHandler.cs`
- - `src/Aouda.Client/SchemaOperations.cs`
- - `src/Aouda.Engine.Schema/Diff/SchemaDiffEngine.cs`
- - `src/Aouda.Engine.Schema/Apply/SchemaApplyEngine.cs`
- - `src/Aouda.Engine.Schema/Export/SchemaExporter.cs`
+  - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Server/Controllers/SchemaController.cs`
+  - `src/Aouda.Server/Controllers/BranchController.cs`
+  - `src/Aouda.Server/Configuration/SchemaOptions.cs`
+  - `src/Aouda.Cli/Program.cs`
+  - `src/Aouda.Cli/Commands/SchemaCommandHandler.cs`
+  - `src/Aouda.Client/SchemaOperations.cs`
+  - `src/Aouda.Engine.Schema/Diff/SchemaDiffEngine.cs`
+  - `src/Aouda.Engine.Schema/Apply/SchemaApplyEngine.cs`
+  - `src/Aouda.Engine.Schema/Export/SchemaExporter.cs`
 - Test evidence:
- - `tests/Aouda.Server.Tests/SchemaControllerIntegrationTests.cs`
- - `tests/Aouda.Cli.Tests/SchemaCommandHandlerTests.cs`
- - `tests/Aouda.Client.Tests/Schema/SchemaApiTests.cs`
- - `tests/Aouda.Engine.Schema.Tests/Diff/SchemaDiffEngineTests.cs`
- - `tests/Aouda.Engine.Schema.Tests/Apply/SchemaApplyEngineTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/ColdColumnBackfillTests.cs`
- - `tests/Aouda.Engine.Schema.Tests/Branching/BranchMergeTests.cs`
+  - `tests/Aouda.Server.Tests/SchemaControllerIntegrationTests.cs`
+  - `tests/Aouda.Cli.Tests/SchemaCommandHandlerTests.cs`
+  - `tests/Aouda.Client.Tests/Schema/SchemaApiTests.cs`
+  - `tests/Aouda.Engine.Schema.Tests/Diff/SchemaDiffEngineTests.cs`
+  - `tests/Aouda.Engine.Schema.Tests/Apply/SchemaApplyEngineTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/ColdColumnBackfillTests.cs`
+  - `tests/Aouda.Engine.Schema.Tests/Branching/BranchMergeTests.cs`
 
 ---
 
@@ -113,14 +113,14 @@ Aouda's schema lifecycle combines both worlds:
 If you do not configure schema management explicitly:
 
 - Server `InferenceMode` defaults to `On`, which answers `404` to an insert into a missing table. Only `Extend` creates a table on
- insert.
+  insert.
 - A table that schema apply created refuses HTTP DDL in every mode (**BL-1177, 0.7.1**). See the table below.
 - The C# client reconciles a typed insert by default and does not drop columns the model omits (`ReconcilePolicy` defaults to
- `Safe`). A typed update does not reconcile. (**BL-1178, 0.9.0**) See the warning below.
+  `Safe`). A typed update does not reconcile. (**BL-1178, 0.9.0**) See the warning below.
 - Runtime schema truth is always the server catalog, not a file.
 - Declarative safety still defaults to non-destructive:
- - API apply defaults to `allowDestructive = false`.
- - CLI apply defaults to no `--allow-destructive`.
+  - API apply defaults to `allowDestructive = false`.
+  - CLI apply defaults to no `--allow-destructive`.
 
 | Setting / behavior | Default | Allowed values | Practical impact |
 |---|---|---|---|
@@ -142,17 +142,17 @@ If you do not configure schema management explicitly:
 
 - **Creating a missing table needs an unconditional `write`**: under `Extend`, a caller whose `write` carries a `where` gets `403 AUTH_POLICY_DENIED` and nothing is created, because the table does not exist yet to apply the condition to.
 - **`InferenceMode` decides only what an insert into a missing table does.** `On` does not create a missing table; only `Extend`
- does. `Off` and `On` differ only in the `404`'s message.
+  does. `Off` and `On` differ only in the `404`'s message.
 - **The declarative lock belongs to the table, not the mode.** A table that schema apply *created* refuses HTTP DDL in every mode:
- drop or rename the table, its options, add, alter, reorder or drop a column, and a policy change to `storageTemperature` or
- `retention`. Change these through `schema apply`. The residency knobs (`memoryRowCap`, `targetMemoryBytes`, `memoryFilter`,
- `hotOnlyBackstop`) have no place in the file, so `PUT …/policy` that restates the current temperature and changes only them is
- still served. (**BL-1177, 0.7.1**: before this, only `Extend` refused. In `On` and `Off`, HTTP DDL stayed open on a table the
- file had just applied, including `DELETE` of a column.) `Off` stops inference. It was never the lock.
+  drop or rename the table, its options, add, alter, reorder or drop a column, and a policy change to `storageTemperature` or
+  `retention`. Change these through `schema apply`. The residency knobs (`memoryRowCap`, `targetMemoryBytes`, `memoryFilter`,
+  `hotOnlyBackstop`) have no place in the file, so `PUT …/policy` that restates the current temperature and changes only them is
+  still served. (**BL-1177, 0.7.1**: before this, only `Extend` refused. In `On` and `Off`, HTTP DDL stayed open on a table the
+  file had just applied, including `DELETE` of a column.) `Off` stops inference. It was never the lock.
 - A table that HTTP DDL created stays open to HTTP DDL in every mode, even after an apply later extends it. Only a table the apply
- created is locked.
+  created is locked.
 - The lock is logged with the table's create, so a replica, the primary it is promoted to, and a point-in-time restore hold it too
- (**BL-1177, 0.7.1**; before, all three held the table open, even in `Extend`).
+  (**BL-1177, 0.7.1**; before, all three held the table open, even in `Extend`).
 
 > **⚠️ `Unsafe` drops non-key columns your model does not declare. The default is `Safe`.** (**BL-1178, 0.9.0**)
 >
@@ -179,17 +179,17 @@ If you do not configure schema management explicitly:
 
 - Imperative DDL API for table and column lifecycle (`/api/tables` surfaces).
 - Declarative schema API:
- - `POST /schema/diff`
- - `POST /schema/apply`
- - `GET /schema/export`
- - `GET /schema/history`
--.NET client schema wrappers (`DiffAsync`, `ApplyAsync`, `ExportAsync`, `HistoryAsync`).
--.NET CLI schema commands:
- - `schema diff`, `apply`, `export`, `validate`, `history`.
+  - `POST /schema/diff`
+  - `POST /schema/apply`
+  - `GET /schema/export`
+  - `GET /schema/history`
+- .NET client schema wrappers (`DiffAsync`, `ApplyAsync`, `ExportAsync`, `HistoryAsync`).
+- .NET CLI schema commands:
+  - `schema diff`, `apply`, `export`, `validate`, `history`.
 - Add-column invariants from ADR 0018 + follow-up fixes:
- - no on-disk rewrite of historical column files,
- - query-time defaults for missing historical values,
- - cold-page aligned backfill support for new columns.
+  - no on-disk rewrite of historical column files,
+  - query-time defaults for missing historical values,
+  - cold-page aligned backfill support for new columns.
 - Branch lifecycle with schema diff/merge and copy-on-write segment sharing (server-side branch endpoints and engine support).
 - `InferenceMode: Extend`: an insert into a missing table infers and creates it (BL-022).
 - The declarative DDL lock: a table schema apply created refuses HTTP DDL in every `InferenceMode` (**BL-1177, 0.7.1**; before, only in `Extend`).
@@ -203,7 +203,7 @@ If you do not configure schema management explicitly:
 
 ### Reserved / not yet wired
 
--.NET CLI `schema seed` command is still a stub even though server seed endpoint exists.
+- .NET CLI `schema seed` command is still a stub even though server seed endpoint exists.
 - First-class branch/seed wrappers on `ISchemaOperations` are not present.
 - Dedicated "validate" HTTP endpoint is not present (CLI validate composes diff locally).
 
@@ -215,7 +215,7 @@ If you do not configure schema management explicitly:
 |---|---|---|---|---|
 | P4 | `P4-EpicA-Task3-SchemaManagementApi-Report.md` | Core imperative table/column/policy HTTP management | Declarative desired-state not yet in this phase | N/A |
 | P7 | `BL025-Fix2-AddColumnColdBackfill-Report.md` | Correct add-column behavior over cold segments with aligned backfill | Further performance tuning can continue | N/A |
-| P8 | `P8-DeclarativeSchemaManagement-Tasks.md`, C.4 report, F.2/F.3/F.4 reports | Declarative schema diff/apply/export/history, migration history, CLI integration, branch isolation/merge/COW sharing | `InferenceMode: Extend` deferred; CLI seed command still stub on.NET tool | `docs/BACKLOG.md` (BL-022) |
+| P8 | `P8-DeclarativeSchemaManagement-Tasks.md`, C.4 report, F.2/F.3/F.4 reports | Declarative schema diff/apply/export/history, migration history, CLI integration, branch isolation/merge/COW sharing | `InferenceMode: Extend` deferred; CLI seed command still stub on .NET tool | `docs/BACKLOG.md` (BL-022) |
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
@@ -243,7 +243,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Studio column alter UI | Yes | No | No | P36 S14 | Alter / PK / reorder / default-description dialogs |
 | Identity-insert (ordinary insert + bulk-load) | Yes | No | No | BL-130, BL-131 — see HTTP API / Bulk Load / Getting Started | Request/job-scoped; does not flip schema `autoIncrement` |
 | Server seed endpoint | Yes | No | No | `SchemaController.cs` | Endpoint exists |
-|.NET CLI seed command | No | Yes | No | `Program.cs` + `RunSeedStub` | Stubbed, intentionally not wired |
+| .NET CLI seed command | No | Yes | No | `Program.cs` + `RunSeedStub` | Stubbed, intentionally not wired |
 | Branch create/list/get/delete/diff/merge APIs | Yes | No | No | `BranchController.cs`, F.2/F.3 reports | Includes conflict handling |
 | Copy-on-write branch data sharing | Yes | No | No | F.4 report, branch tests | Branch writes isolated from parent |
 | `partitionKey` / `clusterColumns` / `partitionFunction` evolution | No | No | Yes | P36 overview §12 → BACKLOG | Cross-partition / full re-sort — post-P36. (**BL-1199, 0.9.0**) A table's partition key is fixed when it is created: schema apply refuses a document that changes it, and no API drops, renames or adds a key column |
@@ -256,15 +256,15 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - **Runtime truth**: Aouda server catalog is authoritative at runtime.
 - **Lifecycle pattern**: bootstrap -> stabilize -> evolve -> harden -> contract.
 - **Safety boundary**:
- - Additive changes are normal path.
- - Destructive changes are explicit and separate.
+  - Additive changes are normal path.
+  - Destructive changes are explicit and separate.
 - **Add-column invariant**:
- - old rows are not rewritten in-place,
- - defaults/nulls are synthesized or aligned via backfill path.
+  - old rows are not rewritten in-place,
+  - defaults/nulls are synthesized or aligned via backfill path.
 - **Branching model**:
- - branch catalogs diverge from parent,
- - data sharing uses copy-on-write semantics,
- - merges are schema-level with conflict detection.
+  - branch catalogs diverge from parent,
+  - data sharing uses copy-on-write semantics,
+  - merges are schema-level with conflict detection.
 
 ---
 
@@ -282,19 +282,19 @@ High-level flow:
 Key anchors:
 
 - Diff/Apply/Export engine:
- - `src/Aouda.Engine.Schema/Diff/SchemaDiffEngine.cs`
- - `src/Aouda.Engine.Schema/Apply/SchemaApplyEngine.cs`
- - `src/Aouda.Engine.Schema/Export/SchemaExporter.cs`
+  - `src/Aouda.Engine.Schema/Diff/SchemaDiffEngine.cs`
+  - `src/Aouda.Engine.Schema/Apply/SchemaApplyEngine.cs`
+  - `src/Aouda.Engine.Schema/Export/SchemaExporter.cs`
 - HTTP integration:
- - `src/Aouda.Server/Controllers/SchemaController.cs`
- - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Server/Controllers/SchemaController.cs`
+  - `src/Aouda.Server/Controllers/TablesController.cs`
 - Client and CLI:
- - `src/Aouda.Client/SchemaOperations.cs`
- - `src/Aouda.Cli/Program.cs`
- - `src/Aouda.Cli/Commands/SchemaCommandHandler.cs`
+  - `src/Aouda.Client/SchemaOperations.cs`
+  - `src/Aouda.Cli/Program.cs`
+  - `src/Aouda.Cli/Commands/SchemaCommandHandler.cs`
 - Branching:
- - `src/Aouda.Server/Controllers/BranchController.cs`
- - `src/Aouda.Engine.Schema/Branching/BranchManager.cs`
+  - `src/Aouda.Server/Controllers/BranchController.cs`
+  - `src/Aouda.Engine.Schema/Branching/BranchManager.cs`
 
 ---
 
@@ -329,9 +329,9 @@ Key anchors:
 > habits make it safe:
 >
 > - Run `POST …/schema/diff` (or `dryRun: true`) first and read the plan. `DropColumn` / `DropTable`
-> entries are listed explicitly.
+>   entries are listed explicitly.
 > - Apply exactly one version of a file per database. If two things apply schemas to the same
-> database, an older one will silently undo the newer one's columns.
+>   database, an older one will silently undo the newer one's columns.
 >
 > A dropped column's data is not recoverable from the catalog: re-adding a column of the same name
 > creates a **new** column (new `id`, see [`GET …/tables/{name}/schema`](../reference/http-api.md)),
@@ -402,7 +402,7 @@ Key anchors:
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-###.NET example (programmatic declarative flow)
+### .NET example (programmatic declarative flow)
 
 ```csharp
 using Aouda.Abstractions.Schema;
@@ -414,8 +414,8 @@ using var client = new AoudaClient("http://localhost:5433", "myapp");
 var schema = SchemaFile.LoadWithOverlay("aouda.schema.json", "staging");
 var diff = await client.Schema.DiffAsync(schema);
 var apply = await client.Schema.ApplyAsync(
- schema,
- new ApplyOptions(AllowDestructive: false, DryRun: false));
+    schema,
+    new ApplyOptions(AllowDestructive: false, DryRun: false));
 
 var history = await client.Schema.HistoryAsync(limit: 20, offset: 0);
 ```
@@ -443,8 +443,8 @@ POST /api/databases/myapp/schema/apply
 Content-Type: application/json
 
 {
- "schema": { "database": "myapp", "tables": { } },
- "options": { "allowDestructive": false, "dryRun": false }
+  "schema": { "database": "myapp", "tables": { } },
+  "options": { "allowDestructive": false, "dryRun": false }
 }
 ```
 
@@ -482,41 +482,41 @@ This is a full, versioned example set you can keep in git and run end-to-end.
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "commerce",
- "tables": {
- "customers": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "email": { "type": "String" },
- "name": { "type": "String", "nullable": true },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- },
- "orders": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "customer_id": { "type": "Int64", "references": "customers.id" },
- "status": { "type": "String" },
- "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "commerce",
+  "tables": {
+    "customers": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "email": { "type": "String" },
+        "name": { "type": "String", "nullable": true },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "Auto" },
+      "durability": { "level": "strict" },
+    },
+    "orders": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "customer_id": { "type": "Int64", "references": "customers.id" },
+        "status": { "type": "String" },
+        "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "Auto" },
+      "durability": { "level": "strict" },
+    }
+  }
 }
 ```
 
@@ -529,60 +529,60 @@ Changes from v1:
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "commerce",
- "tables": {
- "customers": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "email": { "type": "String" },
- "name": { "type": "String", "nullable": true },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- },
- "orders": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "customer_id": { "type": "Int64", "references": "customers.id" },
- "status": { "type": "String" },
- "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
- "priority": { "type": "Int32", "nullable": true },
- "fulfilled_at": { "type": "Timestamp", "nullable": true },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- },
- "payments": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "order_id": { "type": "Int64", "references": "orders.id" },
- "provider": { "type": "String" },
- "status": { "type": "String" },
- "amount": { "type": "Decimal", "precision": 18, "scale": 2 },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "commerce",
+  "tables": {
+    "customers": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "email": { "type": "String" },
+        "name": { "type": "String", "nullable": true },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "Auto" },
+      "durability": { "level": "strict" },
+    },
+    "orders": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "customer_id": { "type": "Int64", "references": "customers.id" },
+        "status": { "type": "String" },
+        "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "priority": { "type": "Int32", "nullable": true },
+        "fulfilled_at": { "type": "Timestamp", "nullable": true },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "Auto" },
+      "durability": { "level": "strict" },
+    },
+    "payments": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "order_id": { "type": "Int64", "references": "orders.id" },
+        "provider": { "type": "String" },
+        "status": { "type": "String" },
+        "amount": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "Auto" },
+      "durability": { "level": "strict" },
+    }
+  }
 }
 ```
 
@@ -594,59 +594,59 @@ Changes from v2:
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "commerce",
- "tables": {
- "customers": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "email": { "type": "String" },
- "name": { "type": "String", "nullable": true },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- },
- "orders": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "customer_id": { "type": "Int64", "references": "customers.id" },
- "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
- "priority": { "type": "Int32", "nullable": true },
- "fulfilled_at": { "type": "Timestamp", "nullable": true },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- },
- "payments": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "order_id": { "type": "Int64", "references": "orders.id" },
- "provider": { "type": "String" },
- "status": { "type": "String" },
- "amount": { "type": "Decimal", "precision": 18, "scale": 2 },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "ColdPreferred" },
- "durability": { "level": "strict" },
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "commerce",
+  "tables": {
+    "customers": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "email": { "type": "String" },
+        "name": { "type": "String", "nullable": true },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "Auto" },
+      "durability": { "level": "strict" },
+    },
+    "orders": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "customer_id": { "type": "Int64", "references": "customers.id" },
+        "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "priority": { "type": "Int32", "nullable": true },
+        "fulfilled_at": { "type": "Timestamp", "nullable": true },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "Auto" },
+      "durability": { "level": "strict" },
+    },
+    "payments": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "tenant_id": { "type": "String" },
+        "order_id": { "type": "Int64", "references": "orders.id" },
+        "provider": { "type": "String" },
+        "status": { "type": "String" },
+        "amount": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "created_at": { "type": "Timestamp" }
+      },
+      "partitionKey": [
+        { "column": "tenant_id" }
+      ],
+      "clusterColumns": ["created_at"],
+      "policy": { "storageTemperature": "ColdPreferred" },
+      "durability": { "level": "strict" },
+    }
+  }
 }
 ```
 
@@ -659,12 +659,12 @@ Overlay examples:
 
 ```json
 {
- "extends": "aouda.schema.json",
- "tables": {
- "payments": {
- "policy": { "storageTemperature": "Auto" }
- }
- }
+  "extends": "aouda.schema.json",
+  "tables": {
+    "payments": {
+      "policy": { "storageTemperature": "Auto" }
+    }
+  }
 }
 ```
 
@@ -672,12 +672,12 @@ Overlay examples:
 
 ```json
 {
- "extends": "aouda.schema.json",
- "tables": {
- "payments": {
- "policy": { "storageTemperature": "ColdPreferred" }
- }
- }
+  "extends": "aouda.schema.json",
+  "tables": {
+    "payments": {
+      "policy": { "storageTemperature": "ColdPreferred" }
+    }
+  }
 }
 ```
 
@@ -713,7 +713,7 @@ dotnet aouda schema apply --server http://localhost:5433 --database commerce --f
 | C# SDK | `DiffAsync/ApplyAsync/ExportAsync/HistoryAsync` | Available | `SchemaOperations.cs` + client tests |
 | C# SDK | `AlterColumnAsync` / `ReorderColumnsAsync` / pending jobs | Available | P36 S13 |
 | TS SDK | `alterColumn` / `reorderColumns` / `client.jobs` / typed `SchemaChangeType` | Available | P36 S13 |
-|.NET CLI | diff/apply/export/validate/history | Available | `Program.cs` + CLI tests |
+| .NET CLI | diff/apply/export/validate/history | Available | `Program.cs` + CLI tests |
 | HTTP | branch create/list/get/delete/diff/merge/query/insert | Available | `BranchController.cs` |
 | Studio | Schema view alter / PK / reorder / metadata dialogs | Available | P36 S14 |
 
@@ -724,7 +724,7 @@ dotnet aouda schema apply --server http://localhost:5433 --database commerce --f
 | C# SDK seed wrapper | Missing on `ISchemaOperations` | call HTTP directly or server tooling path |
 | C# SDK branch wrapper | Missing on `ISchemaOperations` | call branch HTTP endpoints directly |
 | HTTP validate endpoint | Missing | CLI `schema validate` performs diff and exits by drift |
-|.NET CLI `schema seed` | Stubbed | use seed endpoint via HTTP until CLI command is wired |
+| .NET CLI `schema seed` | Stubbed | use seed endpoint via HTTP until CLI command is wired |
 | PATCH fields for default/description/PK | Not on AlterColumnRequest | Declarative apply or Studio metadata/PK dialogs |
 
 ### C) Aouda.Schema.Contract NuGet facade
@@ -786,7 +786,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `CreateTable` | No | A table exists in desired but not in actual. |
 | `AddColumn` | No | A column exists in desired table but not in actual. |
 | `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
-| `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed. |
+| `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies, after the table's writes settle (up to 60 s) and it is flushed — otherwise it is refused as a retryable conflict and reported `Failed` in the apply's result. |
 | `UpdateSettings` | No | The database-level `settings.durability` (its `replicationFactor`) changed. |
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
@@ -842,11 +842,11 @@ var diff = await client.Schema.DiffAsync(schema);
 
 if (diff.Warnings is { Count: > 0 })
 {
- foreach (var w in diff.Warnings)
- Console.WriteLine($"WARNING {w.TableName}.{w.ColumnName ?? "(table)"} [{w.Property}]: {w.Message}");
+    foreach (var w in diff.Warnings)
+        Console.WriteLine($"WARNING {w.TableName}.{w.ColumnName ?? "(table)"} [{w.Property}]: {w.Message}");
 
- // Decide: abort, or proceed with apply (warnings are not applied — only changes are).
- // A partitionKey / partitionFunction warning means the apply will be refused (400 PARTITION_KEY_FIXED).
+    // Decide: abort, or proceed with apply (warnings are not applied — only changes are).
+    // A partitionKey / partitionFunction warning means the apply will be refused (400 PARTITION_KEY_FIXED).
 }
 
 Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChanges} safe, {diff.Summary.DestructiveChanges} destructive)");
@@ -913,8 +913,8 @@ describe the behaviour before that.
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
 | `columns` | `columns` | `object` | None | Map of column name → `ColumnDefinition`. Required when creating a table. |
-| `partitionKey` | `partitionKey` | `PartitionKeyEntry` | None | Ordered list of partition key columns. Omit for non-partitioned tables. |
-| `clusterColumns` | `clusterColumns` | `string` | None | Ordered list of clustering column names. Each must be a column of this table: `Cluster column 'nope' in table 'orders' is not a column of the table.` (**BL-1460, 0.14.0**; it was dropped). |
+| `partitionKey` | `partitionKey` | `PartitionKeyEntry[]` | None | Ordered list of partition key columns. Omit for non-partitioned tables. |
+| `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. Each must be a column of this table: `Cluster column 'nope' in table 'orders' is not a column of the table.` (**BL-1460, 0.14.0**; it was dropped). |
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, 0.6.0**) and replication settings for this table. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
@@ -945,7 +945,7 @@ and must say `"nullable": true`: `"formula": { "type": "Expression", "nullable":
 the column are on [Formulas](formulas.md#the-column). A seed row gives an Expression column its formula as a JSON object (or a string
 holding one); its driven value must then be null or absent.
 
-(**BL-035, 0.9.0**) And the six [array types](array-columns.md), spelled exactly: `Double`, `Float32`, `Int32`, `Int64`, `Byte`, `String`.
+(**BL-035, 0.9.0**) And the six [array types](array-columns.md), spelled exactly: `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`.
 An array column cannot be a key, an index or a rule, a non-nullable one is allowed at create, and one added to an existing table is
 nullable (the rows that were there read null; `schema apply` refuses a non-nullable one, `POST …/columns` adds it nullable): see [Array columns](array-columns.md#declaring-an-array-column).
 
@@ -966,21 +966,21 @@ could leave out `precision` and `scale` and was then a 128-bit `System.Decimal` 
 retired:
 
 - `"type": "Decimal"` without `precision` and `scale` — in a schema document, `POST …/tables` or
- `POST …/tables/{t}/columns` — is refused with `400`: *A Decimal column declares its precision and scale (Decimal(p,s),
- 1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* A precision above 18 is refused: *Decimal precision
- above 18 is not supported (got N).* A value that needs more than 18 digits belongs in a `Double` or a `String` column.
+  `POST …/tables/{t}/columns` — is refused with `400`: *A Decimal column declares its precision and scale (Decimal(p,s),
+  1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* A precision above 18 is refused: *Decimal precision
+  above 18 is not supported (got N).* A value that needs more than 18 digits belongs in a `Double` or a `String` column.
 - Where a type is named by a string alone, with no `precision` / `scale` beside it — a materialized query's computed
- output `type` and `cast(x, …)`'s target type — spell it `"Decimal(p,s)"`, e.g. `"Decimal(18,6)"`. Plain `"Decimal"`
- there is refused the same way.
+  output `type` and `cast(x, …)`'s target type — spell it `"Decimal(p,s)"`, e.g. `"Decimal(18,6)"`. Plain `"Decimal"`
+  there is refused the same way.
 - A C# `decimal` property declares its column with `[AoudaDecimal(p, s)]` (namespace `Aouda.Abstractions.Attributes`),
- e.g. `[AoudaDecimal(18, 6)] public decimal Price { get; set; }`. Without it, `CreateTableAsync<T>` and the embedded
- engine refuse the type with a message naming the property. A table created implicitly from its first inserted row no
- longer infers a column from a C# `decimal` value: create the table with a `Decimal(p,s)` column first. (A JSON number
- with a fraction already inferred `Double` there.)
+  e.g. `[AoudaDecimal(18, 6)] public decimal Price { get; set; }`. Without it, `CreateTableAsync<T>()` and the embedded
+  engine refuse the type with a message naming the property. A table created implicitly from its first inserted row no
+  longer infers a column from a C# `decimal` value: create the table with a `Decimal(p,s)` column first. (A JSON number
+  with a fraction already inferred `Double` there.)
 - A data directory whose catalog names a column of the old type (type 13), or that holds a segment, WAL record or cold
- page of it, is refused when the database opens, naming the column: *… has type 13, the undeclared 128-bit Decimal
- retired by LoadSpeed S13; this build has no reader for it … Export the data with the build that wrote it.* There is no
- migration: export with the old build, declare the column `Decimal(p,s)`, and load it into a new database.
+  page of it, is refused when the database opens, naming the column: *… has type 13, the undeclared 128-bit Decimal
+  retired by LoadSpeed S13; this build has no reader for it … Export the data with the build that wrote it.* There is no
+  migration: export with the old build, declare the column `Decimal(p,s)`, and load it into a new database.
 
 | | Declared `Decimal(p,s)` |
 |---|---|
@@ -1046,20 +1046,20 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
 
 ```json
 {
- "events": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "ts": { "type": "Timestamp" },
- "tenant_id": { "type": "String" },
- "payload": { "type": "String", "nullable": true }
- },
- "partitionKey": [
- { "column": "ts", "function": "TruncateToDay" }
- ],
- "clusterColumns": ["ts"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" }
- }
+  "events": {
+    "columns": {
+      "id":         { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+      "ts":         { "type": "Timestamp" },
+      "tenant_id":  { "type": "String" },
+      "payload":    { "type": "String", "nullable": true }
+    },
+    "partitionKey": [
+      { "column": "ts", "function": "TruncateToDay" }
+    ],
+    "clusterColumns": ["ts"],
+    "policy": { "storageTemperature": "Auto" },
+    "durability": { "level": "strict" }
+  }
 }
 ```
 
@@ -1067,21 +1067,21 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
 
 ```json
 {
- "orders": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenant_id": { "type": "String" },
- "status": { "type": "String" },
- "amount": { "type": "Decimal", "precision": 18, "scale": 2 },
- "created_at": { "type": "Timestamp" }
- },
- "partitionKey": [
- { "column": "tenant_id" }
- ],
- "clusterColumns": ["created_at"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" },
- }
+  "orders": {
+    "columns": {
+      "id":         { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+      "tenant_id":  { "type": "String" },
+      "status":     { "type": "String" },
+      "amount":     { "type": "Decimal", "precision": 18, "scale": 2 },
+      "created_at": { "type": "Timestamp" }
+    },
+    "partitionKey": [
+      { "column": "tenant_id" }
+    ],
+    "clusterColumns": ["created_at"],
+    "policy": { "storageTemperature": "Auto" },
+    "durability": { "level": "strict" },
+  }
 }
 ```
 
@@ -1123,10 +1123,10 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
 1. Use server `InferenceMode=Extend` in development (or HTTP DDL, or the C# client's `AutoCreateSchema`).
 2. Build and iterate with inferred table creation.
 3. Export schema:
- - `dotnet aouda schema export --server http://localhost:5433 --database myapp --output aouda.schema.json`
+   - `dotnet aouda schema export --server http://localhost:5433 --database myapp --output aouda.schema.json`
 4. Commit exported schema to git.
 5. Switch production/shared environments to `InferenceMode=Off` (or `On`), apply the file there, and set
- `AutoReconcileSchema = false` on C# service clients (see [what `InferenceMode` decides](#what-inferencemode-decides-and-what-it-does-not)).
+   `AutoReconcileSchema = false` on C# service clients (see [what `InferenceMode` decides](#what-inferencemode-decides-and-what-it-does-not)).
 
 Expected result:
 - Teams keep prototyping speed early.
@@ -1162,22 +1162,22 @@ Expected result:
 **Via schema file:**
 
 1. In your `aouda.schema.json`, change the column from:
- ```json
- "id": { "type": "Int64", "primaryKey": 1 }
- ```
- to:
- ```json
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }
- ```
+   ```json
+   "id": { "type": "Int64", "primaryKey": 1 }
+   ```
+   to:
+   ```json
+   "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }
+   ```
 2. Diff to verify the plan:
- ```bash
- dotnet aouda schema diff --server http://localhost:5433 --database commerce
- # Output: 1 column altered (UpdateColumnAutoIncrement: customers.id)
- ```
+   ```bash
+   dotnet aouda schema diff --server http://localhost:5433 --database commerce
+   # Output: 1 column altered (UpdateColumnAutoIncrement: customers.id)
+   ```
 3. Apply (no `--allow-destructive` needed — this change is safe):
- ```bash
- dotnet aouda schema apply --server http://localhost:5433 --database commerce
- ```
+   ```bash
+   dotnet aouda schema apply --server http://localhost:5433 --database commerce
+   ```
 
 **Via Studio UI:**
 
@@ -1213,11 +1213,11 @@ POST /api/databases/commerce/tables/orders/rows
 Content-Type: application/json
 
 {
- "database": "commerce",
- "table": "orders",
- "identityInsert": true,
- "columns": ["id", "status"],
- "data": [[1000, 0], ["seeded", "literal-zero"]]
+  "database": "commerce",
+  "table": "orders",
+  "identityInsert": true,
+  "columns": ["id", "status"],
+  "data": [[1000, 0], ["seeded", "literal-zero"]]
 }
 ```
 
@@ -1251,15 +1251,15 @@ Expected result:
 
 - Use `schema diff` as primary pre-apply control signal.
 - Treat migration history as applied-state audit trail:
- - timestamp, source, hash, and change list.
+  - timestamp, source, hash, and change list.
 - Prefer `dryRun=true` or CLI dry-run in higher-risk environments.
 - For branch workflows:
- - monitor branch count and branch lifecycle cleanup,
- - verify branch deletion cleanup for catalog/tables/WAL branch paths.
+  - monitor branch count and branch lifecycle cleanup,
+  - verify branch deletion cleanup for catalog/tables/WAL branch paths.
 - Key operational checks:
- - `InferenceMode` is set intentionally per environment,
- - destructive applies are gated by process, not ad-hoc CLI usage,
- - schema history is reviewed as part of release diagnostics.
+  - `InferenceMode` is set intentionally per environment,
+  - destructive applies are gated by process, not ad-hoc CLI usage,
+  - schema history is reviewed as part of release diagnostics.
 
 ---
 
@@ -1284,7 +1284,7 @@ Expected result:
 | Claim | Verification type | Evidence |
 |---|---|---|
 | Declarative diff/apply/export/history endpoints are shipped | Code + integration tests | `SchemaController.cs`, `SchemaControllerIntegrationTests.cs` |
-|.NET CLI schema commands work for diff/apply/export/validate/history | Code + unit tests | `Program.cs`, `SchemaCommandHandlerTests.cs` |
+| .NET CLI schema commands work for diff/apply/export/validate/history | Code + unit tests | `Program.cs`, `SchemaCommandHandlerTests.cs` |
 | C# client wrappers exist for diff/apply/export/history | Code + unit tests | `ISchemaOperations.cs`, `SchemaOperations.cs`, `SchemaApiTests.cs` |
 | Destructive guard defaults to opt-in behavior | Code | `SchemaApplyEngine.cs`, `SchemaCommandHandler.cs` |
 | Add-column no-rewrite + alignment behavior is implemented | ADR + report + tests | ADR 0018, `BL025-Fix2-AddColumnColdBackfill-Report.md`, `ColdColumnBackfillTests.cs` |
@@ -1312,7 +1312,7 @@ Expected result:
 
 - Add explicit integration tests for schema apply + branch merge interaction in one workflow.
 - Add end-to-end tests for auth metadata fields inside declarative schema apply/diff/export paths.
-- Add regression test ensuring.NET CLI seed command remains intentionally stubbed until endpoint wiring lands (to avoid silent behavior changes).
+- Add regression test ensuring .NET CLI seed command remains intentionally stubbed until endpoint wiring lands (to avoid silent behavior changes).
 - Add performance tests around large schema plans and large history pages.
 
 ---
@@ -1320,9 +1320,9 @@ Expected result:
 ## 2.18 Known gaps and undone work
 
 - The declarative DDL lock covers only tables that schema apply created. A table HTTP DDL created and an apply later extended stays
- open to HTTP DDL.
+  open to HTTP DDL.
 - No HTTP `/schema/validate` endpoint (validate is currently a CLI composition over diff).
--.NET CLI `schema seed` remains stubbed while server `schema/seed` endpoint exists.
+- .NET CLI `schema seed` remains stubbed while server `schema/seed` endpoint exists.
 - C# high-level schema interface does not yet include seed and branch convenience wrappers.
 - IDENTITY seed configuration (starting value / increment knobs for the auto-increment counter) is not yet exposed; the counter always recovers from `MAX(column) + 1` on first use (ADR 0013). **Supplying explicit IDs** without a schema flip is available via identity-insert (BL-130 ordinary insert; BL-131 bulk-load) — do not confuse that with IDENTITY seed configuration.
 - Table `partitionKey` / `clusterColumns` / column `partitionFunction` evolution, non-PK `unique` constraints, declarative `PkUniquenessMode`, and Vector/MdVector type changes remain out of scope (see engine `docs/BACKLOG.md` BL-148+ / P36 overview §12).

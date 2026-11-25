@@ -109,371 +109,371 @@ Thirteen databases (one auth database, eleven data databases linked to it, one u
 <!-- declaration-example -->
 ```json
 {
- "version": 1,
- "keyRoot": {
- "env": "AOUDA_KEY_ROOT"
- },
- "server": {
- "principals": {
- "ops@example.com": {
- "roles": [
- "admin"
- ],
- "credentials": {
- "password": {
- "env": "AOUDA_OPS_PASSWORD"
- }
- }
- }
- }
- },
- "databases": {
- "auth": {
- "kind": "auth",
- "signup": {
- "enabled": false,
- "roles":,
- "statements":
- },
- "roles": {
- "rates-feeder": {
- "statements": [
- {
- "actions": [
- "write"
- ],
- "resources": [
- "rates/table/DepositQuote"
- ],
- "where": {
- "column": "source",
- "op": "in",
- "value": [
- "tullett"
- ]
- }
- }
- ]
- },
- "browser": {
- "statements": [
- {
- "actions": [
- "execute"
- ],
- "resources": [
- "market/query/latest"
- ]
- }
- ]
- },
- "ops-read": {
- "statements": [
- {
- "actions": [
- "read"
- ],
- "resources": [
- "*/table/*"
- ]
- }
- ]
- },
- "credit-writer": {
- "statements": [
- {
- "actions": [
- "write"
- ],
- "resources": [
- "credit/table/Limit"
- ],
- "where": {
- "column": "book",
- "op": "eq",
- "value": "flow"
- }
- }
- ]
- }
- },
- "principals": {
- "anonymous": {
- "statements": [
- {
- "actions": [
- "execute"
- ],
- "resources": [
- "market/query/latest"
- ]
- }
- ]
- },
- "rates-feeder": {
- "roles": [
- "rates-feeder"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "orders-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "positions-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "refdata-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "limits-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "calendar-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "fx-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "credit-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "research-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "market-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "audit-feeder": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "browser-backend": {
- "roles": [
- "writer"
- ],
- "credentials": {
- "keys": [
- {
- "id": "aouda_exampleexampleex",
- "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
- }
- ]
- }
- },
- "shop-backend": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "ops-reader": {
- "roles": [
- "ops-read"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "credit-writer-job": {
- "roles": [
- "credit-writer"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "nightly": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "reconciler": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "publisher": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "archive": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- },
- "support": {
- "roles": [
- "reader"
- ],
- "credentials": {
- "derivedKey": {
- "version": 1
- }
- }
- }
- }
- },
- "rates": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/rates.aouda.schema.json"
- },
- "orders": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/orders.aouda.schema.json"
- },
- "positions": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/positions.aouda.schema.json"
- },
- "refdata": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/refdata.aouda.schema.json"
- },
- "limits": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/limits.aouda.schema.json"
- },
- "calendar": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/calendar.aouda.schema.json"
- },
- "fx": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/fx.aouda.schema.json"
- },
- "credit": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/credit.aouda.schema.json"
- },
- "research": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/research.aouda.schema.json"
- },
- "auditlog": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/auditlog.aouda.schema.json"
- },
- "market": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/market.aouda.schema.json"
- },
- "lab": {
- "kind": "data"
- }
- }
+  "version": 1,
+  "keyRoot": {
+    "env": "AOUDA_KEY_ROOT"
+  },
+  "server": {
+    "principals": {
+      "ops@example.com": {
+        "roles": [
+          "admin"
+        ],
+        "credentials": {
+          "password": {
+            "env": "AOUDA_OPS_PASSWORD"
+          }
+        }
+      }
+    }
+  },
+  "databases": {
+    "auth": {
+      "kind": "auth",
+      "signup": {
+        "enabled": false,
+        "roles": [],
+        "statements": []
+      },
+      "roles": {
+        "rates-feeder": {
+          "statements": [
+            {
+              "actions": [
+                "write"
+              ],
+              "resources": [
+                "rates/table/DepositQuote"
+              ],
+              "where": {
+                "column": "source",
+                "op": "in",
+                "value": [
+                  "tullett"
+                ]
+              }
+            }
+          ]
+        },
+        "browser": {
+          "statements": [
+            {
+              "actions": [
+                "execute"
+              ],
+              "resources": [
+                "market/query/latest"
+              ]
+            }
+          ]
+        },
+        "ops-read": {
+          "statements": [
+            {
+              "actions": [
+                "read"
+              ],
+              "resources": [
+                "*/table/*"
+              ]
+            }
+          ]
+        },
+        "credit-writer": {
+          "statements": [
+            {
+              "actions": [
+                "write"
+              ],
+              "resources": [
+                "credit/table/Limit"
+              ],
+              "where": {
+                "column": "book",
+                "op": "eq",
+                "value": "flow"
+              }
+            }
+          ]
+        }
+      },
+      "principals": {
+        "anonymous": {
+          "statements": [
+            {
+              "actions": [
+                "execute"
+              ],
+              "resources": [
+                "market/query/latest"
+              ]
+            }
+          ]
+        },
+        "rates-feeder": {
+          "roles": [
+            "rates-feeder"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "orders-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "positions-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "refdata-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "limits-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "calendar-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "fx-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "credit-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "research-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "market-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "audit-feeder": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "browser-backend": {
+          "roles": [
+            "writer"
+          ],
+          "credentials": {
+            "keys": [
+              {
+                "id": "aouda_exampleexampleex",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ]
+          }
+        },
+        "shop-backend": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "ops-reader": {
+          "roles": [
+            "ops-read"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "credit-writer-job": {
+          "roles": [
+            "credit-writer"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "nightly": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "reconciler": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "publisher": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "archive": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        },
+        "support": {
+          "roles": [
+            "reader"
+          ],
+          "credentials": {
+            "derivedKey": {
+              "version": 1
+            }
+          }
+        }
+      }
+    },
+    "rates": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/rates.aouda.schema.json"
+    },
+    "orders": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/orders.aouda.schema.json"
+    },
+    "positions": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/positions.aouda.schema.json"
+    },
+    "refdata": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/refdata.aouda.schema.json"
+    },
+    "limits": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/limits.aouda.schema.json"
+    },
+    "calendar": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/calendar.aouda.schema.json"
+    },
+    "fx": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/fx.aouda.schema.json"
+    },
+    "credit": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/credit.aouda.schema.json"
+    },
+    "research": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/research.aouda.schema.json"
+    },
+    "auditlog": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/auditlog.aouda.schema.json"
+    },
+    "market": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/market.aouda.schema.json"
+    },
+    "lab": {
+      "kind": "data"
+    }
+  }
 }
 ```
 
