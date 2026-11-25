@@ -297,7 +297,7 @@ Use branches if you need a safety net:
 
 ```ts
 // Create a branch before truncating in production
-await client.branches.create({ name: 'pre-truncate-backup', parentBranch: 'main' });
+await client.branches.create({ name: 'pre-truncate-backup', from: 'main' });
 await client.table('auditLog').truncate();
 ```
 
@@ -968,7 +968,7 @@ const report = await client.table('sales')
 ```ts
 // In tests or staging: reset a table between runs
 // Branch first for safety, then truncate
-await client.branches.create({ name: `backup-${Date.now}`, parentBranch: 'main' });
+await client.branches.create({ name: `backup-${Date.now}`, from: 'main' });
 
 await client.table('testEvents').truncate; // requires Truncate scope
 

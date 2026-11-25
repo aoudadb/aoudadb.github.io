@@ -109,7 +109,7 @@ await client.connect;
 
 ### Consistency token (read-your-writes)
 
-The client captures `X-Aouda-Token` after every data-plane response and presents it on the next request. The default store is **in-memory per instance**. Recreating the client without sharing `consistencyTokenStore` **loses** read-your-writes. Pin a token with `.atLeast(token)`; fetch this node's current token with `getConsistencyToken`. `client.forgetConsistencyTokens()` discards the client's tokens for every database (a custom `ConsistencyTokenStore` implements `forgetAll()`; a successful `admin.backup.restore` calls it for you) (**BL-1731, next train**). Full caveats: [Freshness](../guides/freshness.md).
+The client captures `X-Aouda-Token` after every data-plane response and presents it on the next request. The default store is **in-memory per instance**. Recreating the client without sharing `consistencyTokenStore` **loses** read-your-writes. Pin a token with `.atLeast(token)`; fetch this node's current token with `getConsistencyToken`. `client.forgetConsistencyTokens()` discards the client's tokens for every database (a custom `ConsistencyTokenStore` implements `forget(database)` and `forgetAll()`; a successful `admin.backup.restore` calls it for you) (**BL-1731, next train**). Full caveats: [Freshness](../guides/freshness.md).
 
 ```typescript
 import { AoudaClient, MemoryConsistencyTokenStore } from '@aouda/client';
@@ -1208,7 +1208,7 @@ refused `400 ROW_OBJECTS_UNSUPPORTED` ([HTTP reference](../reference/http-api.md
 
 ## 9) Branches
 
-Branches are schema-level constructs managed via `client.branches`. Data operations always target the current database; branch-scoped data queries are not supported directly on `TableQuery`.
+Branches are schema-level constructs managed via `client.branches`. `create` takes the parent as `from` (`main` when left out); `parentBranch`, a second name of it, is refused by name (**Operability S25b, next train**). Data operations always target the current database; branch-scoped data queries are not supported directly on `TableQuery`.
 
 ```typescript
 // List branches (excludes implicit main)
@@ -1579,7 +1579,9 @@ resumes the subscriptions. Before, it ended every subscription. A connection tha
 WebSocket carried moves there as after a reconnect: subscriptions resume, streams follow the rule under [write streams](#write-streams), and
 the WebSocket is closed. If long-poll fails too, the call rejects, and the subscriptions and streams there are stay with the WebSocket's
 reconnect. Before, they were left behind and went silent. A `subscribe` or `openWriteStream` made while a lost WebSocket waits for its
-reconnect connects at once, and that connection is the reconnect (**BL-1849, next train**).
+reconnect connects at once, and that connection is the reconnect (**BL-1849, next train**). The same holds over long-poll: the session it
+opens is the reconnect's, and is polled from then on (**BL-1860, next train**; before, the call failed with `Long-poll session is not
+connected`).
 
 ### Write streams
 
@@ -1770,9 +1772,10 @@ try {
  so a repeat changes nothing, and they are re-sent after any transient failure, these two included.
 - **A restore that succeeded clears the consistency tokens of the client that ran it** (**BL-1731, next train**), for every database. A restore
  rewinds the node; a token from before it is ahead of the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` — again and
- again — until it is discarded. A refused restore changes nothing. A client that did not run the restore (another process did, or
+ again — until it is discarded. A refused restore changes nothing; nor does one whose answer never came (a timeout, a lost connection):
+ the server may have gone on and restored, and then the call below is yours to make. A client that did not run the restore (another process did, or
  another client of this process) calls `client.forgetConsistencyTokens()`; a store you share between clients is cleared for all of them.
- A custom `ConsistencyTokenStore` has to implement `forgetAll()` (it fails to compile without it). Before this change `AoudaClient` had no
+ A custom `ConsistencyTokenStore` has to implement `forget(database)` (it was optional) and `forgetAll()`: it fails to compile without them. Before this change `AoudaClient` had no
  such call: the remedy was a fresh client, or `forget(database)` on a `MemoryConsistencyTokenStore` you had passed in.
  Studio discards its data clients after a restore it ran.
 
@@ -2045,7 +2048,8 @@ try {
  `GET …/schema/typescript` generates for it is `Formula | null`. A live subscription's snapshot and change rows (`row`, `prev`) give the
  Expression column as a `Formula` too, `null` for an input row (**Operability S25b, next train**; before it they carried the formula's JSON object);
  `Formula.fromValue(cell)` reads a JSON object, the formula's text or `null` to the same `Formula`. A change message does not name the
- column again: the subscription keeps the names its snapshot gave. `formula.equals(other)` compares two by
+ column again: the subscription keeps the names its snapshot gave (so a subscription that `resumeFrom` resumed, with no snapshot, gives the JSON
+ object). An integer literal past 2^53 is exact in both. `formula.equals(other)` compares two by
  structure, property order aside (`1` and `1.0` are one number in JavaScript); `formula.toString` is its JSON text.
 - **The driven column is an ordinary typed column** (a `Decimal` is a `number` in a query read). A formula whose value cannot be computed
  leaves the cell `null`, not `0`; `client.table(name).explain(key, column)` returns a `FormulaExplanation` — the row's `kind` and `formula`,
