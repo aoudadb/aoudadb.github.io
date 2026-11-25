@@ -1358,8 +1358,8 @@ The same applies to `POST …/named-queries/{name}/query`; the named-query batch
   still held whole and still refused there. A batch is sized from what the rows' frames actually cost — the first is one row
   group, so long strings are measured before they are batched — and the size only grows with what it meets: a table whose rows
   become much wider partway through can still pass the ceiling in one batch, and that read then ends with an error end frame
-  (`STATEMENT_TOO_LARGE`, status 400, when that batch alone exceeds the ceiling — the same read meets it again — **BL-1033, next
-  train**; `MEMORY_BUDGET_EXCEEDED`, status 503, when other work held the memory). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
+  (`STATEMENT_TOO_LARGE`, status 400, when that batch alone exceeds the ceiling — the same read meets it again;
+  `MEMORY_BUDGET_EXCEEDED`, status 503, when other work held the memory). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
   budget) and come in the order the JSON answer's rows have. Its `stats.rowsScanned` is the rows the scan read (the rows of the row
   groups no statistic ruled out) and `executionMs` the time to the last frame (**Lead S09, 0.6.0**: before, `rowsScanned`
   repeated `rowsReturned` and `executionMs` was the time to the count). A string value over 16 MB fails a streamed read with an
@@ -1383,8 +1383,8 @@ The same applies to `POST …/named-queries/{name}/query`; the named-query batch
 
 `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats` and `X-Aouda-Warnings` are gone (**Lead S09, 0.6.0**).
 Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a browser client reads them cross-origin —
-together with `X-Request-Id`, `X-Aouda-Protocol-Version`, `Accept-Post` and `Retry-After` (**architecture review, next
-train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
+together with `X-Request-Id`, `X-Aouda-Protocol-Version`, `Accept-Post` and `Retry-After` (before,
+a browser read `Retry-After` as `null` on every 429 / 503).
 
 - **Column kinds by logical type.** A null is the frame's null bit.
 
@@ -3328,8 +3328,8 @@ A `colRef` names its column exactly as the table does — case-sensitively, as `
 }
 ```
 
-With `price` a `Decimal(18,2)` column, `price * 0.9` is exact at scale 3, the sum of the two scales (**LoadSpeed S13, next
-train**: a fractional JSON literal is a decimal at the scale it is written with, and a decimal expression is exact).
+With `price` a `Decimal(18,2)` column, `price * 0.9` is exact at scale 3, the sum of the two scales
+(a fractional JSON literal is a decimal at the scale it is written with, and a decimal expression is exact).
 
 Computed column types are inferred where the expression permits (`"Unknown"` otherwise) and are always nullable. See [browser-tier read limits](../guides/browser-tier-read-limits.md#selectexpr-result-types).
 
@@ -3371,7 +3371,7 @@ admin-listener routes: on the data-plane listener they are `404`. A write needs 
 #### `POST /api/databases/{db}/edge-tables`
 
 Create an edge table: two `Int64` columns, the source and the destination node ids (and the `rlsColumn`, when given). An edge
-table stores every column it has (ADR 0027): add **property** columns with `POST …/tables/{name}/columns` — a scalar or, an array — and write them with the [bulk load](../guides/bulk-load.md) or `POST …/tables/{name}/rows`. What each
+table stores every column it has (ADR 0027): add **property** columns with `POST …/tables/{name}/columns` — a scalar or an array — and write them with the [bulk load](../guides/bulk-load.md) or `POST …/tables/{name}/rows`. What each
 write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtablesnameedges) below.
 
 | Field | Type | Required | Description |
@@ -5776,8 +5776,8 @@ S:  09 00      06   00000000 02000000 02000000   00000000 01000000 02000000   78
 
 **JSON column arrays** are the body for curl and for any client without the frame (**Lead S12, 0.6.0**; NDJSON was, until
 this train). The server decodes them straight into a column batch, as it does a frame. A column whose rows mix integers and
-fractions is read as decimal for every row — except in a `String` column, whose numbers keep their text as sent (**BL-1108, next
-train**; see [values](#column-arrays-the-write-body)).
+fractions is read as decimal for every row — except in a `String` column, whose numbers keep their text as sent
+(see [values](#column-arrays-the-write-body)).
 
 **Example (single table):**
 ```
