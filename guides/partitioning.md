@@ -246,6 +246,7 @@ the partition value **is** the caller's identity, and you need Option A or Optio
 
 **Option A — let Aouda inject it.** Give the caller's role an `execute` statement whose `where` binds the partition key to the caller. The condition is then added to every query, snapshot and subscription of that named query, and it counts as the partition filter. Nothing in the named query mentions `UserId`, and no client can ask for another user's rows:
 
+<!-- declaration-example -->
 ```json
 {
   "version": 1,
@@ -256,7 +257,7 @@ the partition value **is** the caller's identity, and you need Option A or Optio
         "member": {
           "statements": [
             { "actions": ["execute"], "resources": ["chat/query/rooms.mine"],
-              "where": { "column": "UserId", "op": "eq", "principal": "id" } }
+              "where": { "and": [ { "column": "UserId", "op": "eq", "principal": "id" } ] } }
           ]
         }
       }

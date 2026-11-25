@@ -284,7 +284,7 @@ Primary evidence:
 
 ### Walk-through D: A query over the partitions an attribute lists
 
-1. A statement's `where` is `{ "column": "room", "op": "in", "principal": "attributes.rooms" }`.
+1. A statement's `where` is `{ "and": [ { "column": "room", "op": "in", "principal": "attributes.rooms" } ] }`.
 2. The request's principal has the attribute `rooms`; its values are bound into the condition.
 3. The condition joins the query's own predicate, so it satisfies the partition filter and prunes to the listed partitions.
 4. Result set contains only rows from those partitions. A missing attribute matches no row.

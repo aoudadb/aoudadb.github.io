@@ -146,10 +146,14 @@ Thirteen databases (one auth database, eleven data databases linked to it, one u
                 "rates/table/DepositQuote"
               ],
               "where": {
-                "column": "source",
-                "op": "in",
-                "value": [
-                  "tullett"
+                "and": [
+                  {
+                    "column": "source",
+                    "op": "in",
+                    "value": [
+                      "tullett"
+                    ]
+                  }
                 ]
               }
             }
@@ -189,9 +193,13 @@ Thirteen databases (one auth database, eleven data databases linked to it, one u
                 "credit/table/Limit"
               ],
               "where": {
-                "column": "book",
-                "op": "eq",
-                "value": "flow"
+                "and": [
+                  {
+                    "column": "book",
+                    "op": "eq",
+                    "value": "flow"
+                  }
+                ]
               }
             }
           ]

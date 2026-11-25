@@ -130,7 +130,7 @@ No credential on the admin listener: `401 AUTH_CREDENTIAL_MISSING` with remedy `
       {
         "actions": ["write"],
         "resources": ["rates/table/DepositQuote"],
-        "where": { "column": "source", "op": "in", "value": ["tullett"] },
+        "where": { "and": [ { "column": "source", "op": "in", "value": ["tullett"] } ] },
         "from": "role:rates-feeder"
       }
     ]
@@ -1174,8 +1174,8 @@ columns.
 
 **Row conditions on a joined table (BL-818, 0.3.0; BL-1464, 0.16.0).** The caller's `read` statements for every joined
 table are applied on that join's side, exactly as on a direct read of the table: a join onto a table the caller may read only
-part of answers with that part, and a joined table the caller has no `read` statement on joins against no rows of it (an inner join answers
-nothing, a left join nulls) — never a `403`. `crossPartitionAccess` is not carried to a joined table. The same holds for `…/query/count`.
+part of answers with that part, and one whose statements admit no row joins against no rows of it (an inner join answers nothing, a left join
+nulls). A joined table the caller has no `read` statement on at all is `403 AUTH_POLICY_DENIED`. `crossPartitionAccess` is not carried to a joined table. The same holds for `…/query/count`.
 A named query is different: its joined tables are read as the definition wrote them ([Execute](../auth/authorization.md#execute)).
 
 **Join example:**

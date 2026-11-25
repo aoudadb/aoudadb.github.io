@@ -178,7 +178,7 @@ const string Declaration = """
 await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
 {
     Declaration = Declaration,
-    KeyRoot = new string('k', 43), // test-only; at least 32 bytes
+    KeyRoot = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)), // at least 32 bytes; using System.Security.Cryptography
 });
 
 string backendKey = aouda.DerivedKey("auth/backend"); // what the declared backend may do

@@ -752,7 +752,7 @@ only `"formula": null` keeps the last computed value as the input.
 administrator's task, with the key above):
 
 ```bash
-WHERE='"where": { "column": "dept", "op": "in", "principal": "attributes.depts" }'
+WHERE='"where": { "and": [ { "column": "dept", "op": "in", "principal": "attributes.depts" } ] }'
 TABLES='"resources": ["finance/table/pnl", "finance/table/balance"]'
 curl -s -X POST "$AOUDA/api/auth/auth/roles" "${A[@]}" \
      -d "{ \"name\": \"viewer\", \"statements\": [ { \"actions\": [\"read\"], $TABLES, $WHERE } ] }"

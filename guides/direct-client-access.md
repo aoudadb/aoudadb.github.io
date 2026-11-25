@@ -98,6 +98,7 @@ refused `400 INVALID_REQUEST`: to act as a user, send that user's session or a [
 The browser tier reaches named artifacts only, and an artifact is closed until a statement opens it: `anonymous` and `signup` hold
 nothing by default. Give the caller an `execute` statement; nothing is set on the table or the materialized query.
 
+<!-- declaration-example -->
 ```json
 {
   "version": 1,
@@ -108,7 +109,7 @@ nothing by default. Give the caller an `execute` statement; nothing is set on th
         "enabled": true,
         "statements": [
           { "actions": ["execute"], "resources": ["trading/query/equity.positions"],
-            "where": { "column": "accountId", "op": "eq", "principal": "id" } }
+            "where": { "and": [ { "column": "accountId", "op": "eq", "principal": "id" } ] } }
         ]
       },
       "principals": {

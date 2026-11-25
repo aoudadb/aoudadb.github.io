@@ -164,8 +164,8 @@ const backend = new AoudaClient({
 });
 await backend.connect();
 
-// A server key, for server/admin calls: the same option
 // An operator, for server/admin calls: a key of a `_serverauth` principal, in the same option
+const admin = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
   apiKey: process.env.AOUDA_OPERATOR_KEY,
@@ -269,8 +269,8 @@ stop reconnecting. See [Sessions](../reference/http-api.md#sessions).
 are gone, with no alias: the constructor throws, naming what replaces each ([Moving from 0.14](../auth/migrating-from-0-14.md)). A key goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves it to
 its principal; nothing about the key's text says what it may do. The client checks the key at construction (shape, checksum, the retired
 format) and the error never contains the value. `client.whoami()` says which principal the credential is and what it may do.
-`client.databases.list()` and `create()` need `manage` on `server`, which only a principal of `_serverauth` can hold; another principal
-is refused `403 AUTH_POLICY_DENIED`.
+`client.databases.list()` and `create()` need `manage` on `server`, which only a principal of `_serverauth` can hold: one without it
+is refused `403 AUTH_POLICY_DENIED`, a principal of an application auth database `403 AUTH_WRONG_AUTH_DATABASE`.
 
 **Auth option rules:**
 - `apiKey` cannot be combined with a `session` that holds a token: a key and a signed-in session are two credentials, refused at
@@ -332,7 +332,7 @@ await access.roles.create({
   statements: [{
     actions: ['read', 'write'],
     resources: ['chat/table/messages'],
-    where: { column: 'room', op: 'in', principal: 'attributes.rooms' },
+    where: { and: [ { column: 'room', op: 'in', principal: 'attributes.rooms' } ] },
   }],
 });
 await access.principals.create({ name: 'ann@example.com', roles: ['member'], attributes: { rooms: ['room_42'] } });

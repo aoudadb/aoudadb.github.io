@@ -24,6 +24,8 @@ from jsonschema import Draft202012Validator
 
 _ACTIONS = {"read", "write", "delete", "execute", "manage", "set-identity", "*"}
 
+_WHERE = {"and", "or", "groups"}
+
 _MARKER = re.compile(r"^<!-- declaration-example(?:: fragment (/[A-Za-z0-9_./-]+))? -->\s*$")
 _FENCE = re.compile(r"^```json\s*$")
 
@@ -88,7 +90,8 @@ def check_file(path: str, text: str, validator: Draft202012Validator) -> list[st
 
 
 def _walk_actions(node: object, pointer: str, findings: list[str], where: str) -> None:
-    """The published schema types action items as strings. The reader accepts six, plus `*`."""
+    """What the server's reader refuses and the published schema does not: an action outside the six (plus `*`), and a `where`
+    that is a bare condition (aouda BL-1867: the access chapter's own examples were, and a plan refuses them)."""
     if isinstance(node, dict):
         actions = node.get("actions")
         resources = node.get("resources")
@@ -99,6 +102,9 @@ def _walk_actions(node: object, pointer: str, findings: list[str], where: str) -
                         f"{where}: {pointer}/actions/{index} {action!r} is not one of "
                         "read, write, delete, execute, manage, set-identity"
                     )
+            row_condition = node.get("where")
+            if isinstance(row_condition, dict) and not (set(row_condition) & _WHERE and set(row_condition) <= _WHERE):
+                findings.append(f"{where}: {pointer}/where is not a row condition: its members are and, or, groups")
         for key, value in node.items():
             _walk_actions(value, f"{pointer}/{key}", findings, where)
     elif isinstance(node, list):

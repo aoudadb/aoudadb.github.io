@@ -590,7 +590,7 @@ The `derived` expression (base-table computed column) is a fallback for ranking 
 
 ### Pattern 1 — one attribute value (single ticker per user)
 
-Each user's principal carries an attribute (for example `ticker: ["AAPL"]`), and the `execute` statement's `where` binds the partition key to it: `{ "column": "ticker", "op": "eq", "principal": "attributes.ticker" }`. The condition is added to the query, and it satisfies the partition filter. Ideal for apps where each end user watches one symbol.
+Each user's principal carries an attribute (for example `ticker: ["AAPL"]`), and the `execute` statement's `where` binds the partition key to it, with the condition `{ "column": "ticker", "op": "eq", "principal": "attributes.ticker" }`. The condition is added to the query, and it satisfies the partition filter. Ideal for apps where each end user watches one symbol.
 
 See [Row conditions](../auth/authorization.md#row-conditions).
 

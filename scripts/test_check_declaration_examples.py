@@ -74,8 +74,22 @@ _BAD_ACTION = """\
 ```
 """
 
+_BARE_WHERE = _BAD_ACTION.replace('"admin"', '"read"').replace(
+    '"resources": ["rates/table/DepositQuote"]',
+    '"resources": ["rates/table/DepositQuote"], "where": { "column": "source", "op": "eq", "value": "x" }',
+)
+
 
 class DeclarationExampleTests(unittest.TestCase):
+    def test_a_where_that_is_a_bare_condition_is_refused_and_a_list_of_one_passes(self) -> None:
+        bare = cde.main(["--root", _repo(_BARE_WHERE)])
+        self.assertEqual(bare, 1)
+        findings = cde.check_file("a.md", _BARE_WHERE, cde.Draft202012Validator({}))
+        self.assertEqual(len(findings), 1)
+        self.assertIn("/statements/0/where is not a row condition", findings[0])
+        listed = _BARE_WHERE.replace('{ "column": "source", "op": "eq", "value": "x" }', '{ "and": [ { "column": "source", "op": "eq", "value": "x" } ] }')
+        self.assertEqual(cde.main(["--root", _repo(listed)]), 0)
+
     def test_valid_block_passes(self) -> None:
         root = _repo(_VALID)
         self.assertEqual(cde.main(["--root", root]), 0)

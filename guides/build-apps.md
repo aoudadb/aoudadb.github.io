@@ -128,6 +128,7 @@ Three things in that file are worth naming, because each one is a service you di
 
 The fourth is in the other file. **Who may run these names, and on which rows, is in `aouda.json`**, the declaration:
 
+<!-- declaration-example -->
 ```json
 {
   "version": 1,
@@ -138,7 +139,7 @@ The fourth is in the other file. **Who may run these names, and on which rows, i
         "enabled": true,
         "statements": [
           { "actions": ["execute"], "resources": ["tasks/query/tasks.page", "tasks/mutation/tasks.setDone"],
-            "where": { "column": "ownerId", "op": "eq", "principal": "id" } }
+            "where": { "and": [ { "column": "ownerId", "op": "eq", "principal": "id" } ] } }
         ]
       }
     },
@@ -357,10 +358,10 @@ Then pick the row condition of each statement:
 
 | The statement's `where` | Use when | Cost |
 |---|---|---|
-| `{ "column": "tenant", "op": "eq", "principal": "attributes.tenant" }` | The user belongs to exactly one tenant/partition | One attribute per user |
-| `{ "column": "room", "op": "in", "principal": "attributes.rooms" }` | The user may reach **many** partitions (a watchlist, a set of rooms, a portfolio) | An attribute that lists them (at most 1 000 values) |
-| `{ "column": "ownerId", "op": "eq", "principal": "id" }` | "Rows I own" | Nothing to maintain |
-| A group: `{ "and": [ ... ] }` | Both: partition isolation *and* a row predicate inside it | Both of the above |
+| `{ "and": [ { "column": "tenant", "op": "eq", "principal": "attributes.tenant" } ] }` | The user belongs to exactly one tenant/partition | One attribute per user |
+| `{ "and": [ { "column": "room", "op": "in", "principal": "attributes.rooms" } ] }` | The user may reach **many** partitions (a watchlist, a set of rooms, a portfolio) | An attribute that lists them (at most 1 000 values) |
+| `{ "and": [ { "column": "ownerId", "op": "eq", "principal": "id" } ] }` | "Rows I own" | Nothing to maintain |
+| Several conditions in the `and` | Both: partition isolation *and* a row predicate inside it | Both of the above |
 
 Worked setups, including reads and writes under different conditions (two statements, one per action) and an embargo: [Policy](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) — stamp the principal into the row and scope writes with the `write` statement's `where`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
 
@@ -368,7 +369,7 @@ Worked setups, including reads and writes under different conditions (two statem
 
 MFA (TOTP) is available, and password-reset and OTP delivery are configurable through [Email, SMS & notifications](../auth/notifications.md). Note that neither client SDK wraps password reset or MFA enrolment — the endpoints exist, and you call them over HTTP.
 
-**Alternatives.** A native app whose users sign in (with MFA) in the browser? **Native sign-in** hands the browser session to the app: the web front issues a single-use PKCE code, the app redeems it for its own session (**NativeClients, 0.4.0**) — [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser). Corporate IdP required? A hosted OAuth 2.0 authorization server (login page, social login, consent) and token introspection are **not shipped**. The supported shapes are Aouda email/password (+ MFA) directly, or a backend that authenticates against your IdP and holds a key — see [Choose your shape](#choose-your-shape).
+**Alternatives.** A native app whose users sign in (with MFA) in the browser? **Native sign-in** hands the browser session to the app: the web front issues a single-use PKCE code, the app redeems it for its own session (**NativeClients, 0.4.0**) — [Native apps](../clients/typescript.md#with-authentication). Corporate IdP required? A hosted OAuth 2.0 authorization server (login page, social login, consent) and token introspection are **not shipped**. The supported shapes are Aouda email/password (+ MFA) directly, or a backend that authenticates against your IdP and holds a key — see [Choose your shape](#choose-your-shape).
 
 ### Phase 3 — Build the surface
 
@@ -607,7 +608,7 @@ The showcase, and the table to check your feature list against. If something you
 | A high-rate event or telemetry ingest | Write stream (`insert`/`upsert`), plus `route`/`tee` to fan rows out | [Real-time](real-time.md) · [Insert-time transforms](insert-transforms.md) |
 | An append-only audit or event log | Table clustered on time, `ColdPreferred` temperature, durability `strict` | [Time-series](time-series.md) · [Hot/cold](hot-cold.md) |
 | Multi-tenant row isolation (SaaS) | A statement whose `where` binds the tenant column to an attribute. **Whether the table also gets a `partitionKey` is a separate, volume-only decision** | [Policy](../auth/authorization.md#row-conditions) · [Partitioning](partitioning.md#which-one-you-want) |
-| "Only rows I own" | A statement with `{ "column": "ownerId", "op": "eq", "principal": "id" }` | [Row conditions](../auth/authorization.md#row-conditions) |
+| "Only rows I own" | A statement whose `where` holds `{ "column": "ownerId", "op": "eq", "principal": "id" }` | [Row conditions](../auth/authorization.md#row-conditions) |
 | Users who span many tenants/rooms/tickers | An attribute that lists them, and a `where` with `"op": "in"`. No `partitionKey` needed | [Attributes](../auth/principals.md#attributes) |
 | Role-based admin screens | Roles (bundles of statements: `read` / `write` / `delete` per table, `manage`) given to principals | [Roles](../auth/principals.md#roles) |
 | Sign-up, sign-in, refresh, password change | Application auth, called directly from the browser | [Setup and flows](../auth/setup.md) |
@@ -640,7 +641,7 @@ The path above is the one that removes the most work. It is not the only support
 | Pure Node/JS CI, cannot add .NET | `npx @aouda/client schema diff` on the schema; review `aouda.json` in the pull request | `aouda plan` and `policy explain` before the merge | [Schema CI/CD](schema-cicd.md) |
 | Your team needs SQL | A trusted service using the fluent query builder; ad-hoc queries on admin | There is **no SQL surface** | [Query execution](query.md) |
 | Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and review both files | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
-| Native mobile or desktop app, not a browser | Identical to the browser path for data — same data-plane listener, no key, same names. Sign-in: email/password in the app, or **native sign-in through the browser** — the signed-in web front issues a PKCE code, the app redeems it for its own session, MFA carried (**NativeClients, 0.4.0**). Persist the rotated refresh token (`onTokensChanged`) | Nothing | [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser) · [Direct client access](direct-client-access.md) |
+| Native mobile or desktop app, not a browser | Identical to the browser path for data — same data-plane listener, no key, same names. Sign-in: email/password in the app, or **native sign-in through the browser** — the signed-in web front issues a PKCE code, the app redeems it for its own session, MFA carried (**NativeClients, 0.4.0**). Persist the rotated refresh token (`onTokensChanged`) | Nothing | [Native apps](../clients/typescript.md#with-authentication) · [Direct client access](direct-client-access.md) |
 | Edge / serverless functions | Treat them as trusted services with a key; mind connection lifetime and that subscriptions want a long-lived socket | Streaming from a short-lived function | [Direct client access](direct-client-access.md) |
 | Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
 | A browser needs cross-partition analytics | **Refused by design.** Use an `execute` statement whose `where` lists the caller's partitions, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener) |

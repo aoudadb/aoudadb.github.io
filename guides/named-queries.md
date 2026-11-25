@@ -452,6 +452,9 @@ const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
 ### C# (`Aouda.Client`)
 
 ```csharp
+using Aouda.Client;
+using Aouda.Client.Auth;
+
 var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "https://data.example.com",

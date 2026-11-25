@@ -1653,8 +1653,8 @@ One credential: a key or a session. [Client integration](../auth/client-integrat
 #### .NET Client
 
 ```csharp
-using Aouda.Client.Auth;
 using Aouda.Client;
+using Aouda.Client.Auth;
 
 var client = new AoudaClient(new AoudaClientOptions
 {
