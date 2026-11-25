@@ -714,7 +714,7 @@ Common mistake: passing invalid writeConcern strings (for example `w:majority`) 
 
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Replication status | `AoudaClient.GetReplicationStatusAsync()` | `client.admin.replication.status()` | `GET /admin/replication/status` | Implemented | Surface parity |
+| Replication status, with per-member and per-database lag (`members`, `perDatabaseLag`) | `AoudaClient.GetReplicationStatusAsync()` | `client.admin.replication.status()` | `GET /admin/replication/status` | Implemented | Surface parity (**BL-1477, next train**: `Aouda.Client` read neither before, `@aouda/client` no `members`) |
 | Topology discovery | `AoudaClient.GetTopologyAsync()` | `client.admin.replication.topology()` | `GET /admin/replication/topology` | Implemented | Surface parity |
 | Coverage discovery | No first-class method | `client.admin.replication.coverage()` | `GET /admin/replication/coverage` | Partial | .NET gap |
 | Query read preference | `RemoteTableQuery.WithReadPreference(...)` | No first-class support | `readPreference` param / `X-Read-Preference` header | Partial | TS gap; server supports HTTP path |
@@ -848,7 +848,8 @@ Suggested tuning sequence:
 | Question | Practical answer |
 |---|---|
 | Which endpoint tells me who can serve reads? | `GET /admin/replication/topology` (`readCandidates`) |
-| How do I check if secondaries are behind per database? | `GET /admin/replication/status` (`perDatabaseLag`) |
+| Which secondary is behind, per database? | `GET /admin/replication/status` on the primary (`members[].perDatabaseStatus[db].lagBytes`; `null` is unknown) (**BL-1477, next train**) |
+| How far behind is this node, per database? | `GET /admin/replication/status` on it (`perDatabaseLag`) |
 | Why is write latency suddenly higher? | Check write concern level and `WriteConcernWait*` counters |
 | How do I detect stale-primary write attempts? | Look for fencing token conflicts (`409 STALE_FENCING_TOKEN`) |
 

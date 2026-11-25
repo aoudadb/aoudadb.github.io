@@ -177,6 +177,19 @@ loses, level changes, backups that need no quiesce, retention, restore to a new 
 | `FILE_FORMAT_REFUSED: kind=<kind> found=<n or the reason> expected=<m> path=<file>` | a versioned file is damaged or of another version; the file is named. At a start it is the **second** line, under `DATA_DIRECTORY_FORMAT_REFUSED` naming the same file; exit 78. A **damaged** WAL segment (`kind=wal-segment` with `found=checksum mismatch`, `length mismatch`, `truncated` or `missing`) is that database's, not the data directory's: the database stays quarantined and the server starts |
 | `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> …` | not a start: a **read** of a cold segment whose column file is missing or short is refused (HTTP 500 `INTERNAL_ERROR`; this line is in the server log) instead of answered with nulls; restore the database from a backup |
 
+## Upgrading to the next train
+
+What an old client now gets from a server of the next train. Upgrade the clients with the server; there is no alias and no window.
+
+| What | Before | Now | What an old reader gets |
+|---|---|---|---|
+| A materialized query's lag (**BL-1477, next train**) | `currentLag`, a .NET `TimeSpan` string | `currentLagMs`, a whole number of milliseconds, always sent; non-null exactly when `isStale` is `true` | No `currentLag`: `undefined` in TypeScript, `null` in C#, which those versions take for *not behind*. A new client on an old server reads no `currentLagMs`: not supported |
+| `GET /admin/replication/topology` members (**BL-1477, next train**) | `perDatabaseStatus: {}` and `subscriptions: null` on every member | neither field | `undefined` where it was `{}`. Read `members` of `GET /admin/replication/status`, which needs `manage` on the server |
+| `lagBytes` in the status's `members` (**BL-1477, next train**) | an integer; `0` when not known | an integer or `null`; `null` when not known | a reader that adds it up meets a `null` |
+
+A node joining across versions (`--join`) is unaffected: it reads the members' addresses and the set's name. No data-directory, WAL or
+backup format changes with these rows.
+
 ## What every release's notes carry
 
 Each changelog entry that bumps the format quotes the line a server prints when it meets the previous version, with the real numbers, says what
