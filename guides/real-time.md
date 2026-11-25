@@ -40,17 +40,17 @@ If your question is "What is implemented vs missing?", jump to:
 Aouda streaming exists to make data movement and data observation first-class primitives, rather than requiring polling loops and per-request write overhead.
 
 - User problem solved:
- - Clients need live table updates without periodic `query` polling.
- - High-throughput writes should avoid per-request HTTP round-trips.
- - Reconnects should recover continuity without forcing full refresh every time.
+  - Clients need live table updates without periodic `query` polling.
+  - High-throughput writes should avoid per-request HTTP round-trips.
+  - Reconnects should recover continuity without forcing full refresh every time.
 - Operational outcomes:
- - Snapshot plus incremental `change` event model for subscribers.
- - Bidirectional stream path for `insert` and `upsert` ingest.
- - Auth-aware event delivery and write validation in the streaming path.
- - Optional fallback transport (long-poll) when WebSocket is blocked.
+  - Snapshot plus incremental `change` event model for subscribers.
+  - Bidirectional stream path for `insert` and `upsert` ingest.
+  - Auth-aware event delivery and write validation in the streaming path.
+  - Optional fallback transport (long-poll) when WebSocket is blocked.
 - Scope boundaries:
- - This domain covers database-scoped table subscriptions, write streams, reconnect/resume, MessagePack wire mode, and long-poll fallback.
- - It does not provide broker-style consumer groups, exactly-once guarantees, cross-database subscriptions, or transaction-scoped streaming writes.
+  - This domain covers database-scoped table subscriptions, write streams, reconnect/resume, MessagePack wire mode, and long-poll fallback.
+  - It does not provide broker-style consumer groups, exactly-once guarantees, cross-database subscriptions, or transaction-scoped streaming writes.
 
 ## 2.2 Discovery and navigation map
 
@@ -65,7 +65,7 @@ Aouda streaming exists to make data movement and data observation first-class pr
 | Protocol and semantics mental model | `2.7 Core concepts and mental model` |
 | How snapshot/resume/write internals work | `2.8 How Aouda implements it` and `2.8.1 Critical path walk-throughs` |
 | All knobs and defaults | `2.10 Configuration and settings reference` |
-|.NET, TypeScript, and HTTP/protocol mapping | `2.11 API and CLI coverage reference` |
+| .NET, TypeScript, and HTTP/protocol mapping | `2.11 API and CLI coverage reference` |
 | Ops checks and incident response | `2.13 Operations and observability`, `2.14 Troubleshooting by symptom` |
 | What remains incomplete | `2.18 Known gaps and undone work` |
 
@@ -81,55 +81,55 @@ Aouda streaming exists to make data movement and data observation first-class pr
 ### Source map
 
 - Task/report evidence:
- - `docs/tasks/P10/P10-S1-ChangeEventFoundation.md`
- - `docs/tasks/P10/P10-S3-WebSocketInfrastructure.md`
- - `docs/tasks/P10/P10-S4-ADRAFilteredSubscriptions.md`
- - `docs/tasks/P10/P10-S5-ServerSideSubscriptionFilters.md`
- - `docs/tasks/P10/P10-S7-StreamingWrites.md`
- - `docs/tasks/P10/P10-S9-CSharpClientStreamingAPI.md`
- - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
- - `docs/tasks/P10/P10-S11-HotCacheAndLiveCollection.md`
- - `docs/tasks/P10/P10-S12-TypeScriptWebSocketTransport.md`
- - `docs/tasks/P10/P10-S13-TypeScriptClientStreamingAPI.md`
- - `docs/tasks/P10/P10-S14-I3-MessagePackWireMode.md`
- - `docs/tasks/P10/P10-S14-I4-HttpLongPollFallback.md`
+  - `docs/tasks/P10/P10-S1-ChangeEventFoundation.md`
+  - `docs/tasks/P10/P10-S3-WebSocketInfrastructure.md`
+  - `docs/tasks/P10/P10-S4-ADRAFilteredSubscriptions.md`
+  - `docs/tasks/P10/P10-S5-ServerSideSubscriptionFilters.md`
+  - `docs/tasks/P10/P10-S7-StreamingWrites.md`
+  - `docs/tasks/P10/P10-S9-CSharpClientStreamingAPI.md`
+  - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
+  - `docs/tasks/P10/P10-S11-HotCacheAndLiveCollection.md`
+  - `docs/tasks/P10/P10-S12-TypeScriptWebSocketTransport.md`
+  - `docs/tasks/P10/P10-S13-TypeScriptClientStreamingAPI.md`
+  - `docs/tasks/P10/P10-S14-I3-MessagePackWireMode.md`
+  - `docs/tasks/P10/P10-S14-I4-HttpLongPollFallback.md`
 - Core server/engine code:
- - `src/Aouda.Engine.Storage/Streaming/ChangeEventEmitter.cs`
- - `src/Aouda.Server/WebSocket/WebSocketHandler.cs`
- - `src/Aouda.Server/WebSocket/MessageRouter.cs`
- - `src/Aouda.Server/WebSocket/Handlers/SubscriptionHandler.cs`
- - `src/Aouda.Server/WebSocket/Handlers/WriteStreamHandler.cs`
- - `src/Aouda.Server/Controllers/LongPollStreamController.cs`
- - `src/Aouda.Server/WebSocket/WebSocketOptions.cs`
- - `src/Aouda.Server/WebSocket/StreamingWriteOptions.cs`
--.NET client code:
- - `src/Aouda.Client/AoudaClient.cs`
- - `src/Aouda.Client/RemoteTableQuery.cs`
- - `src/Aouda.Client/Internal/WebSocketTransport.cs`
- - `src/Aouda.Client/Internal/LongPollTransport.cs`
- - `src/Aouda.Client/Streaming/SubscriptionAsyncEnumerable.cs`
- - `src/Aouda.Client/Streaming/WriteStream.cs`
+  - `src/Aouda.Engine.Storage/Streaming/ChangeEventEmitter.cs`
+  - `src/Aouda.Server/WebSocket/WebSocketHandler.cs`
+  - `src/Aouda.Server/WebSocket/MessageRouter.cs`
+  - `src/Aouda.Server/WebSocket/Handlers/SubscriptionHandler.cs`
+  - `src/Aouda.Server/WebSocket/Handlers/WriteStreamHandler.cs`
+  - `src/Aouda.Server/Controllers/LongPollStreamController.cs`
+  - `src/Aouda.Server/WebSocket/WebSocketOptions.cs`
+  - `src/Aouda.Server/WebSocket/StreamingWriteOptions.cs`
+- .NET client code:
+  - `src/Aouda.Client/AoudaClient.cs`
+  - `src/Aouda.Client/RemoteTableQuery.cs`
+  - `src/Aouda.Client/Internal/WebSocketTransport.cs`
+  - `src/Aouda.Client/Internal/LongPollTransport.cs`
+  - `src/Aouda.Client/Streaming/SubscriptionAsyncEnumerable.cs`
+  - `src/Aouda.Client/Streaming/WriteStream.cs`
 - TypeScript client code (cross-repo):
- - `../aouda-client-ts/src/client.ts`
- - `../aouda-client-ts/src/query-builder.ts`
- - `../aouda-client-ts/src/streaming/websocket-transport.ts`
- - `../aouda-client-ts/src/streaming/longpoll-transport.ts`
- - `../aouda-client-ts/src/streaming/subscription.ts`
- - `../aouda-client-ts/src/streaming/write-stream.ts`
+  - `../aouda-client-ts/src/client.ts`
+  - `../aouda-client-ts/src/query-builder.ts`
+  - `../aouda-client-ts/src/streaming/websocket-transport.ts`
+  - `../aouda-client-ts/src/streaming/longpoll-transport.ts`
+  - `../aouda-client-ts/src/streaming/subscription.ts`
+  - `../aouda-client-ts/src/streaming/write-stream.ts`
 - Test evidence:
- - `tests/Aouda.Server.Tests/WebSocket/WebSocketHandlerIntegrationTests.cs`
- - `tests/Aouda.Server.Tests/WebSocket/SubscriptionHandlerIntegrationTests.cs`
- - `tests/Aouda.Server.Tests/WebSocket/WriteStreamHandlerIntegrationTests.cs`
- - `tests/Aouda.Server.Tests/WebSocket/StreamingSubscriptionManagerTests.cs`
- - `tests/Aouda.Protocol.Tests/Streaming/MessageSerializerTests.cs`
- - `tests/Aouda.Client.Tests/Streaming/SubscriptionApiTests.cs`
- - `tests/Aouda.Client.Tests/Streaming/WriteStreamApiTests.cs`
- - `tests/Aouda.Client.Tests/Streaming/StreamingFallbackLifecycleTests.cs`
- - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
- - `../aouda-client-ts/tests/streaming/websocket-transport.test.ts`
- - `../aouda-client-ts/tests/streaming/subscription.test.ts`
- - `../aouda-client-ts/tests/streaming/write-stream.test.ts`
- - `../aouda-client-ts/tests/streaming/longpoll-transport.test.ts`
+  - `tests/Aouda.Server.Tests/WebSocket/WebSocketHandlerIntegrationTests.cs`
+  - `tests/Aouda.Server.Tests/WebSocket/SubscriptionHandlerIntegrationTests.cs`
+  - `tests/Aouda.Server.Tests/WebSocket/WriteStreamHandlerIntegrationTests.cs`
+  - `tests/Aouda.Server.Tests/WebSocket/StreamingSubscriptionManagerTests.cs`
+  - `tests/Aouda.Protocol.Tests/Streaming/MessageSerializerTests.cs`
+  - `tests/Aouda.Client.Tests/Streaming/SubscriptionApiTests.cs`
+  - `tests/Aouda.Client.Tests/Streaming/WriteStreamApiTests.cs`
+  - `tests/Aouda.Client.Tests/Streaming/StreamingFallbackLifecycleTests.cs`
+  - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
+  - `../aouda-client-ts/tests/streaming/websocket-transport.test.ts`
+  - `../aouda-client-ts/tests/streaming/subscription.test.ts`
+  - `../aouda-client-ts/tests/streaming/write-stream.test.ts`
+  - `../aouda-client-ts/tests/streaming/longpoll-transport.test.ts`
 
 ## 2.3 Defaults and zero-config behavior
 
@@ -137,7 +137,7 @@ If you do nothing:
 
 - No streaming connection is created; normal request/response APIs work as usual.
 - If you call streaming APIs on server mode clients, transport defaults to WebSocket JSON mode with reconnect behavior.
-- If WebSocket connect fails, both.NET and TypeScript clients default to enabling long-poll fallback.
+- If WebSocket connect fails, both .NET and TypeScript clients default to enabling long-poll fallback.
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -153,11 +153,11 @@ If you do nothing:
 | Server `Aouda:WebSocket:StreamingWrites:AckInterval` | `500ms` | Periodic write-stream ack cadence |
 | Server `Aouda:WebSocket:StreamingWrites:SoftPendingRows` | `5000` | Above this threshold, rows can be rejected as `STREAM_PAUSED` |
 | Server `Aouda:WebSocket:StreamingWrites:HardPendingRows` | `10000` | Above this threshold, stream is closed |
-|.NET `WebSocketTransportOptions.WireMode` | `Json` | Starts in text JSON unless negotiated otherwise |
-|.NET `WebSocketTransportOptions.EnableCompression` | `true` | Enables client-side compression when supported |
-|.NET `WebSocketTransportOptions.EnableLongPollFallback` | `true` | Automatic fallback to long-poll on WebSocket connect failure |
-|.NET `WebSocketTransportOptions.ReconnectBaseDelay` | `1s` | Reconnect exponential backoff base |
-|.NET `WebSocketTransportOptions.ReconnectMaxDelay` | `30s` | Reconnect backoff cap |
+| .NET `WebSocketTransportOptions.WireMode` | `Json` | Starts in text JSON unless negotiated otherwise |
+| .NET `WebSocketTransportOptions.EnableCompression` | `true` | Enables client-side compression when supported |
+| .NET `WebSocketTransportOptions.EnableLongPollFallback` | `true` | Automatic fallback to long-poll on WebSocket connect failure |
+| .NET `WebSocketTransportOptions.ReconnectBaseDelay` | `1s` | Reconnect exponential backoff base |
+| .NET `WebSocketTransportOptions.ReconnectMaxDelay` | `30s` | Reconnect backoff cap |
 | TypeScript `streaming.wireMode` | `"json"` | Uses JSON frames unless MessagePack is selected |
 | TypeScript `streaming.wsFactory` | the platform `WebSocket` | Makes the socket; compression is the socket's own (**NativeClients, 0.4.0**: replaces `streaming.enableCompression`, which reached only the `ws` package) |
 | TypeScript `streaming.enableLongPollFallback` | `true` | Uses fallback transport wrapper by default |
@@ -168,31 +168,31 @@ If you do nothing:
 ### Available now
 
 - Streaming foundation:
- - Structured engine change events and sequence tracking.
- - Protocol message contracts and serializer support for JSON and MessagePack modes.
+  - Structured engine change events and sequence tracking.
+  - Protocol message contracts and serializer support for JSON and MessagePack modes.
 - Server WebSocket path:
- - `/api/databases/{db}/ws` endpoint with auth handshake and heartbeat.
- - Connection manager/session state with per-connection subscriptions and write streams.
+  - `/api/databases/{db}/ws` endpoint with auth handshake and heartbeat.
+  - Connection manager/session state with per-connection subscriptions and write streams.
 - Subscription behavior:
- - Snapshot + incremental delivery.
- - User filter evaluation.
+  - Snapshot + incremental delivery.
+  - User filter evaluation.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
- - Resume semantics with `resume_from` and change-buffer replay/fallback.
+  - Resume semantics with `resume_from` and change-buffer replay/fallback.
 - Write-stream behavior:
- - `stream_open`, `stream_rows`, `stream_ack`, `stream_close`.
- - `insert` and `upsert` modes.
- - Backpressure thresholds, per-row authorization errors in `stream_ack.errors`.
+  - `stream_open`, `stream_rows`, `stream_ack`, `stream_close`.
+  - `insert` and `upsert` modes.
+  - Backpressure thresholds, per-row authorization errors in `stream_ack.errors`.
 - Client surfaces:
- -.NET: `SubscribeAsync`, typed `SubscribeAsync`, `OpenWriteStreamAsync`, shared streaming transport.
- - TypeScript: `table(...).subscribe(...)`, async iteration, `openWriteStream(...)`.
+  - .NET: `SubscribeAsync`, typed `SubscribeAsync`, `OpenWriteStreamAsync`, shared streaming transport.
+  - TypeScript: `table(...).subscribe(...)`, async iteration, `openWriteStream(...)`.
 - Extended transport:
- - MessagePack wire-mode negotiation and binary framing support.
- - HTTP long-poll fallback server endpoint plus.NET/TypeScript fallback transports.
+  - MessagePack wire-mode negotiation and binary framing support.
+  - HTTP long-poll fallback server endpoint plus .NET/TypeScript fallback transports.
 - Materialized query streaming:
- - Subscribe via table path to result tables with incremental updates.
+  - Subscribe via table path to result tables with incremental updates.
 - Horizon notices (**Horizon, 0.5.0**):
- - `snapshot_complete` carries `horizon` / `horizon_column` for a windowed result or a table with retention; `horizon` and
- `range_delete` messages tell a client what to drop. See [Horizons and range deletes](#horizons-and-range-deletes).
+  - `snapshot_complete` carries `horizon` / `horizon_column` for a windowed result or a table with retention; `horizon` and
+    `range_delete` messages tell a client what to drop. See [Horizons and range deletes](#horizons-and-range-deletes).
 
 ### Planned / proposed
 
@@ -206,14 +206,14 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ### Reserved / not yet wired
 
 - Dedicated error code for "materialized query exists but not yet ready" is not wired as a separate protocol code path (tracked as BL-053 in task report context).
-- Client-side hot cache / `Live` / SSE `SubscriptionController` withdrawn (BL-162, 2026-08-13). Local materialization returns on named queries (BL-164).
+- Client-side hot cache / `Live()` / SSE `SubscriptionController` withdrawn (BL-162, 2026-08-13). Local materialization returns on named queries (BL-164).
 
 ## 2.5 Phase coverage matrix
 
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
 | P10 S7 | `P10-S7-StreamingWrites.md` | Write stream open/rows/close, insert/upsert, acks, backpressure thresholds, per-row auth rejections | None explicitly listed in S7 report | None |
-| P10 S9-S13 | `P10-S9-CSharpClientStreamingAPI.md`, `P10-S10-MaterializedQuerySubscriptions.md`, `P10-S11-HotCacheAndLiveCollection.md`, `P10-S12-TypeScriptWebSocketTransport.md`, `P10-S13-TypeScriptClientStreamingAPI.md` |.NET and TypeScript streaming APIs, typed subscribe, write streams, MQ subscription behavior | Hot cache + `Live` withdrawn BL-162 | BL-053 (S10); BL-162 (S11) |
+| P10 S9-S13 | `P10-S9-CSharpClientStreamingAPI.md`, `P10-S10-MaterializedQuerySubscriptions.md`, `P10-S11-HotCacheAndLiveCollection.md`, `P10-S12-TypeScriptWebSocketTransport.md`, `P10-S13-TypeScriptClientStreamingAPI.md` | .NET and TypeScript streaming APIs, typed subscribe, write streams, MQ subscription behavior | Hot cache + `Live()` withdrawn BL-162 | BL-053 (S10); BL-162 (S11) |
 | P10 S14 I3/I4 | `P10-S14-I3-MessagePackWireMode.md`, `P10-S14-I4-HttpLongPollFallback.md` | MessagePack negotiation + binary mode; long-poll fallback endpoint and client fallback transport | None called out in I3/I4 reports | None |
 
 ## 2.6 Capability coverage matrix
@@ -225,55 +225,55 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Resume from version (`resume_from`) | Yes | Yes | No | `SubscriptionHandler.cs` resume paths | Implemented in code; dedicated S6 task report template remains unfilled but behavior is present |
 | Streaming writes (`insert`/`upsert`) | Yes | No | No | `WriteStreamHandler.cs`, S7 report/tests | Includes per-row rejection reporting |
 | Write-stream backpressure and ack cadence | Yes | No | No | `StreamingWriteOptions.cs`, `WriteStreamBackpressure.cs` | Soft reject/hard close thresholds |
-|.NET streaming API surface | Yes | No | No | `ITableOperations` + client streaming classes + S9 tests | Embedded mode intentionally throws not-supported |
+| .NET streaming API surface | Yes | No | No | `ITableOperations` + client streaming classes + S9 tests | Embedded mode intentionally throws not-supported |
 | TypeScript streaming API surface | Yes | No | No | `query-builder.ts`, streaming modules, S12/S13 tests | Callback + async iteration + write stream |
 | MessagePack streaming wire mode | Yes | No | No | `WireMode.cs`, serializer, WS transports, I3 tests | Long-poll remains JSON-only |
 | HTTP long-poll fallback transport | Yes | No | No | `LongPollStreamController.cs`, client transports, I4 tests | Fallback selected on WS connect failure |
-| Hot cache sync + C# `Live` collection | No | No | Yes | withdrawn BL-162 | Rebuild on named queries (BL-164) |
+| Hot cache sync + C# `Live()` collection | No | No | Yes | withdrawn BL-162 | Rebuild on named queries (BL-164) |
 | Exactly-once delivery semantics | No | No | Yes | ADR scope and protocol behavior | At-least-once with version dedup model |
 | Cross-database streaming subscription | No | No | Yes | P10 scope notes | One database per streaming connection path |
 
 ## 2.7 Core concepts and mental model
 
 - `snapshot`:
- - Initial full result set for a subscription target at a specific version.
+  - Initial full result set for a subscription target at a specific version.
 - `change`:
- - Incremental event with operation (`insert`, `update`, `delete`, `upsert`) and monotonic version.
+  - Incremental event with operation (`insert`, `update`, `delete`, `upsert`) and monotonic version.
 - `resume_from`:
- - Client-provided last seen **change-event sequence** used to recover after reconnect. Unchanged by P38.
+  - Client-provided last seen **change-event sequence** used to recover after reconnect. Unchanged by P38.
 - `token` (P38):
- - Optional 42-hex consistency token on `snapshot` / `snapshot_complete` / `change` / heartbeat, **alongside** `version`. Hand it to HTTP `?at_least=` or subscribe `at_least`. Heartbeat `version` is **not** a WAL sequence. See [Freshness](freshness.md).
+  - Optional 42-hex consistency token on `snapshot` / `snapshot_complete` / `change` / heartbeat, **alongside** `version`. Hand it to HTTP `?at_least=` or subscribe `at_least`. Heartbeat `version` is **not** a WAL sequence. See [Freshness](freshness.md).
 - `at-least-once`:
- - Clients may see replayed events; version-based dedup is required for idempotent reducers.
+  - Clients may see replayed events; version-based dedup is required for idempotent reducers.
 - Subscription filtering layers:
- - user filter (from subscribe request),
- - partition-level and row-level authorization filters,
- - target-table match.
+  - user filter (from subscribe request),
+  - partition-level and row-level authorization filters,
+  - target-table match.
 - Write stream lifecycle:
- - open -> rows (sequence increasing) -> ack progression -> close.
- - (.NET, **BL-987, 0.4.0**) On a reconnect `Aouda.Client` re-opens each write stream before anything else is sent on it:
- a `WriteAsync` or `CloseAsync` during the reconnect waits for the re-open (a stream being closed is re-opened too, so its
- close is delivered). A write already sent when the connection dropped fails with `AoudaConnectionException` — its rows may
- or may not have been written, so check before re-sending them — and the stream carries on on the new connection. Up to
- 0.3.x such a write could race the re-open and fail the stream for good ("No open stream with id …"), or hang.
- - (TypeScript, **BL-1776, BL-1834, next train**) `@aouda/client` pipelines: `write()` resolves when the frame was sent, and `close()` only when
- the server acknowledged every frame. A refusal, a refused row (`stream_ack` with `errors`) or a connection lost with a frame
- unacknowledged **ends the stream** with an `AoudaWriteStreamError`, which the next `write()` and every `close()` reject with; no
- frame is sent again. With every frame acknowledged the stream re-opens on the new connection and goes on. See
- [write streams](../clients/typescript.md#write-streams).
+  - open -> rows (sequence increasing) -> ack progression -> close.
+  - (.NET, **BL-987, 0.4.0**) On a reconnect `Aouda.Client` re-opens each write stream before anything else is sent on it:
+    a `WriteAsync` or `CloseAsync` during the reconnect waits for the re-open (a stream being closed is re-opened too, so its
+    close is delivered). A write already sent when the connection dropped fails with `AoudaConnectionException` — its rows may
+    or may not have been written, so check before re-sending them — and the stream carries on on the new connection. Up to
+    0.3.x such a write could race the re-open and fail the stream for good ("No open stream with id …"), or hang.
+  - (TypeScript, **BL-1776, BL-1834, next train**) `@aouda/client` pipelines: `write()` resolves when the frame was sent, and `close()` only when
+    the server acknowledged every frame. A refusal, a refused row (`stream_ack` with `errors`) or a connection lost with a frame
+    unacknowledged **ends the stream** with an `AoudaWriteStreamError`, which the next `write()` and every `close()` reject with; no
+    frame is sent again. With every frame acknowledged the stream re-opens on the new connection and goes on. See
+    [write streams](../clients/typescript.md#write-streams).
 - Transport strategy:
- - primary WebSocket, optional long-poll fallback for restricted environments. Over the fallback `@aouda/client` sends one stream's
- frames, and one subscription id's `subscribe` and `unsubscribe`, one after another in the order they were made, so they reach the
- server in order (**BL-1627, next train**); everything else is sent at once. A client that calls `/send` itself must do the same:
- the server handles one stream's frames in the order their requests arrive.
+  - primary WebSocket, optional long-poll fallback for restricted environments. Over the fallback `@aouda/client` sends one stream's
+    frames, and one subscription id's `subscribe` and `unsubscribe`, one after another in the order they were made, so they reach the
+    server in order (**BL-1627, next train**); everything else is sent at once. A client that calls `/send` itself must do the same:
+    the server handles one stream's frames in the order their requests arrive.
 - Bulk loads (**Lead S27b, 0.6.0**: documented; the behaviour is not new):
- - **A bulk load emits no change events on the table it loads.** Its rows become visible at the job's commit, but a
- subscriber to that table receives no `change` event for them, and no other signal: no gap, no notice. A client that
- must see them re-reads the table (or re-subscribes for a fresh snapshot) after the load's `:commit` answers. Inserts,
- updates, deletes, upserts and merges are announced as before.
- - A subscriber to a **materialized query's result** does see a load's effect: when the load's pass folds it in, or a
- rebuild publishes, the result's changed groups arrive as ordinary `change` events (a rebuild announces the difference
- between the old result and the new one).
+  - **A bulk load emits no change events on the table it loads.** Its rows become visible at the job's commit, but a
+    subscriber to that table receives no `change` event for them, and no other signal: no gap, no notice. A client that
+    must see them re-reads the table (or re-subscribes for a fresh snapshot) after the load's `:commit` answers. Inserts,
+    updates, deletes, upserts and merges are announced as before.
+  - A subscriber to a **materialized query's result** does see a load's effect: when the load's pass folds it in, or a
+    rebuild publishes, the result's changed groups arrive as ordinary `change` events (a rebuild announces the difference
+    between the old result and the new one).
 
 Invariants:
 
@@ -295,36 +295,36 @@ feeds, not widgets. A subscribe with `resume_from` never shares, and sharing doe
 A subscription is a read, and it is held to the rules of the HTTP read it mirrors (**BL-1227, 0.9.0**):
 
 - **The same role check.** `subscribe` is authorized as `POST /query` is: the credential needs `read` on the table, and for a
- named-query subscription on **every table the named query touches**. A refusal is the code HTTP answers
- (`INSUFFICIENT_PERMISSIONS`, `AUTHORIZATION_DENIED`, `AUTH_TOKEN_MISSING`), sent as an `error` frame for that subscription.
- A write stream (`stream_open`) needs `write` on the table. Up to 0.8.0 a subscribe and a `stream_open` asked no role check, so a
- credential HTTP refused (the anonymous key, a user with no role) could read, and write, a table that has no partition or row
- security over the socket.
+  named-query subscription on **every table the named query touches**. A refusal is the code HTTP answers
+  (`INSUFFICIENT_PERMISSIONS`, `AUTHORIZATION_DENIED`, `AUTH_TOKEN_MISSING`), sent as an `error` frame for that subscription.
+  A write stream (`stream_open`) needs `write` on the table. Up to 0.8.0 a subscribe and a `stream_open` asked no role check, so a
+  credential HTTP refused (the anonymous key, a user with no role) could read, and write, a table that has no partition or row
+  security over the socket.
 - **The same rows.** A subscription's snapshot returns what an HTTP query by the same credential returns — the rows its `read`
- statements' `where`s admit, with its `filter` — and its change events are judged by the same compiled condition the snapshot
- scans with, so a live event is delivered exactly when the snapshot would have returned its row (up to
- 0.16.0 live events were judged by a separate evaluator, which could answer differently from the query on a typed comparison). A
- statement whose condition the server cannot evaluate at all admits no row, live as in the snapshot. A live event the server
- cannot judge ends that subscription with an `error` frame `INTERNAL_ERROR` (it was dropped for every subscriber of the table).
- Access is described in [Authorization](../auth/authorization.md).
+  statements' `where`s admit, with its `filter` — and its change events are judged by the same compiled condition the snapshot
+  scans with, so a live event is delivered exactly when the snapshot would have returned its row (up to
+  0.16.0 live events were judged by a separate evaluator, which could answer differently from the query on a typed comparison). A
+  statement whose condition the server cannot evaluate at all admits no row, live as in the snapshot. A live event the server
+  cannot judge ends that subscription with an `error` frame `INTERNAL_ERROR` (it was dropped for every subscriber of the table).
+  Access is described in [Authorization](../auth/authorization.md).
 - **Permissions are re-read on every `subscribe`**, a first subscribe included. A subscribe whose permissions cannot be read is
- **refused** (`PERMISSION_REVOKED`), or refused with a retryable capacity code (`SERVICE_UNAVAILABLE`, `MEMORY_BUDGET_EXCEEDED`, …)
- when the read is refused for capacity — never admitted on a stale answer.
+  **refused** (`PERMISSION_REVOKED`), or refused with a retryable capacity code (`SERVICE_UNAVAILABLE`, `MEMORY_BUDGET_EXCEEDED`, …)
+  when the read is refused for capacity — never admitted on a stale answer.
 - **A grant change reaches an open subscription on the next event.** After a role or grant change, the next event on any table the
- session subscribes to (or its next `subscribe` or `re_auth`) re-keys all of that session's subscriptions before the event is
- delivered: a narrowed one stops receiving what it may no longer see, and one narrowed to nothing, or that no longer passes the
- role check, ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
- **not re-snapshotted**: rows that became visible are not pushed, only events from the re-key on. Resubscribe to read the rows
- that were already there.
+  session subscribes to (or its next `subscribe` or `re_auth`) re-keys all of that session's subscriptions before the event is
+  delivered: a narrowed one stops receiving what it may no longer see, and one narrowed to nothing, or that no longer passes the
+  role check, ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
+  **not re-snapshotted**: rows that became visible are not pushed, only events from the re-key on. Resubscribe to read the rows
+  that were already there.
 - **A resume whose policy admits no row is an open stream.** A `subscribe` with `resume_from` whose statements admit no row of the
- table is not refused: it continues offered no event, as a fresh `subscribe` with the same statements gets an empty snapshot and
- stays open, and it widens when the statements do (up to 0.16.0 it ended with `PERMISSION_REVOKED`).
- `PERMISSION_REVOKED` ends a stream when a re-key takes away the rows it admitted — a resumed stream included. The server keeps
- nothing of a closed connection, so a stream whose rows were taken away while it was disconnected resumes open and is offered no
- row, like one that never had any.
+  table is not refused: it continues offered no event, as a fresh `subscribe` with the same statements gets an empty snapshot and
+  stays open, and it widens when the statements do (up to 0.16.0 it ended with `PERMISSION_REVOKED`).
+  `PERMISSION_REVOKED` ends a stream when a re-key takes away the rows it admitted — a resumed stream included. The server keeps
+  nothing of a closed connection, so a stream whose rows were taken away while it was disconnected resumes open and is offered no
+  row, like one that never had any.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
- (operation `insert`, on the first batch the grant decides, and again if the deciding grants change), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
- event**. The `cross_partition_access` flag alone
+  (operation `insert`, on the first batch the grant decides, and again if the deciding grants change), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
+  event**. The `cross_partition_access` flag alone
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 A subscription on a partitioned table needs the same partition filter as a read, or the `cross_partition_access` flag on the
@@ -355,13 +355,13 @@ column lies below it or is null. Both fields are omitted for any other table.
 
 ```json
 {
- "type": "snapshot_complete",
- "id": "sub-candles",
- "version": 100040,
- "row_count": 2880,
- "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213",
- "horizon": "2026-10-09T00:00:00.0000000Z",
- "horizon_column": "Minute"
+  "type": "snapshot_complete",
+  "id": "sub-candles",
+  "version": 100040,
+  "row_count": 2880,
+  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213",
+  "horizon": "2026-10-09T00:00:00.0000000Z",
+  "horizon_column": "Minute"
 }
 ```
 
@@ -412,7 +412,7 @@ lies below the cutoff, so you drop exactly the rows the statement's time would h
 nothing (a table with no row time) gets no notice. Up to 0.16.0 the notice was sent at once with the statement's time, and a held row
 it covered could arrive after it — a row the server no longer had.
 
-**Times.** The notices carry ISO strings; rows on the JSON wire carry a `Timestamp` as.NET ticks (an `Int64`, 100 ns since
+**Times.** The notices carry ISO strings; rows on the JSON wire carry a `Timestamp` as .NET ticks (an `Int64`, 100 ns since
 0001-01-01 UTC) and a `Date` as its day number (days since the Unix epoch). Compare them as the same instant, at full precision — the
 SDK helpers below do. So that a client can tell a day number from a time, a notice on a `Date` column carries
 `"column_type": "date"` (and `snapshot_complete` `"horizon_column_type": "date"`); both are omitted for a `Timestamp`.
@@ -422,14 +422,14 @@ SDK helpers below do. So that a client can tell a day number from a time, a noti
 (`"date"` on a `Date` column); `evt.Removes(row)` says whether a held row goes, reading a `Date` row's day number as days. The typed `SubscriptionEvent<T>` carries the same, with `Removes(row, r => r.Ts)`.
 
 ```csharp
-await foreach (var evt in client.GetTable("trades").SubscribeAsync)
+await foreach (var evt in client.GetTable("trades").SubscribeAsync())
 {
- if (evt.IsSnapshot)
- held = evt.Rows!.Where(row => !evt.Removes(row)).ToList; // drop what lies below evt.Horizon, when the table has one
- else if (evt.IsHorizon || evt.IsRangeDelete)
- held.RemoveAll(row => evt.Removes(row));
- else
- Apply(held, evt); // insert / update / delete, as before
+    if (evt.IsSnapshot)
+        held = evt.Rows!.Where(row => !evt.Removes(row)).ToList();   // drop what lies below evt.Horizon, when the table has one
+    else if (evt.IsHorizon || evt.IsRangeDelete)
+        held.RemoveAll(row => evt.Removes(row));
+    else
+        Apply(held, evt);                         // insert / update / delete, as before
 }
 ```
 
@@ -444,12 +444,12 @@ dropped those rows at the next `horizon` message instead).
 ```typescript
 import { applyNotice } from "@aouda/client";
 
-let rows: Trade = ;
+let rows: Trade[] = [];
 const sub = client.table<Trade>("trades").subscribe({
- onSnapshot: (snapshot, _version, _total, event) => { rows = applyNotice(snapshot, event); },
- onChange: (event) => { /* insert / update / delete, as before */ },
- onHorizon: (event) => { rows = applyNotice(rows, event); },
- onRangeDelete: (event) => { rows = applyNotice(rows, event); },
+  onSnapshot: (snapshot, _version, _total, event) => { rows = applyNotice(snapshot, event); },
+  onChange: (event) => { /* insert / update / delete, as before */ },
+  onHorizon: (event) => { rows = applyNotice(rows, event); },
+  onRangeDelete: (event) => { rows = applyNotice(rows, event); },
 });
 ```
 
@@ -461,29 +461,29 @@ again.
 
 ### Timestamp columns in a subscription (**IR quote report, 0.10.0**)
 
-A `Timestamp` column arrives as a JSON **number**:.NET ticks since `0001-01-01T00:00:00Z`, UTC (`639298350326250000` is
+A `Timestamp` column arrives as a JSON **number**: .NET ticks since `0001-01-01T00:00:00Z`, UTC (`639298350326250000` is
 `2026-11-09T15:30:32.625Z`). The `snapshot` names the column in `column_types` (`{"DateTime":"Timestamp"}`), and a client keeps that
 for the `change` messages, which do not repeat it. `@aouda/client` hands a `Date`; elsewhere, Unix milliseconds are
 `(ticks − 621355968000000000) / 10000`. A column declared `String` is text. Details: [Timestamp semantics](../reference/http-api.md#timestamp-semantics).
 
-(**BL-1391, 0.11.0**) A `Date` column is a JSON number too, a count of days since the Unix epoch, and the `snapshot` now names it as `"Date"` in `column_types` (`{"day":"Date"}`), on every page, so a client can tell it from an `Int32`. The value on the wire is unchanged and a `change` does not repeat the name. `Aouda.Client` reads it: a `Date` cell is a UTC `DateTime` at midnight (as a query result's is) in the snapshot, in a change's `Row` and `PreviousRow` and in a delete's `Key`, and a typed `DateOnly`, `DateOnly?` or `DateTime` property gets the day; a day count a `DateTime` cannot hold ends the subscription naming the column. `@aouda/client` hands a JavaScript `Date` at **00:00:00 UTC** of that day for it, in the snapshot and in every later change's `row` and `prev` (**breaking** for a caller that read the day number itself): read the calendar date with `getUTCFullYear` / `getUTCMonth` / `getUTCDate` or `toISOString.slice(0, 10)`, never the local-time getters. A query result's `Date` column is unchanged, still the day number.
+(**BL-1391, 0.11.0**) A `Date` column is a JSON number too, a count of days since the Unix epoch, and the `snapshot` now names it as `"Date"` in `column_types` (`{"day":"Date"}`), on every page, so a client can tell it from an `Int32`. The value on the wire is unchanged and a `change` does not repeat the name. `Aouda.Client` reads it: a `Date` cell is a UTC `DateTime` at midnight (as a query result's is) in the snapshot, in a change's `Row` and `PreviousRow` and in a delete's `Key`, and a typed `DateOnly`, `DateOnly?` or `DateTime` property gets the day; a day count a `DateTime` cannot hold ends the subscription naming the column. `@aouda/client` hands a JavaScript `Date` at **00:00:00 UTC** of that day for it, in the snapshot and in every later change's `row` and `prev` (**breaking** for a caller that read the day number itself): read the calendar date with `getUTCFullYear()` / `getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. A query result's `Date` column is unchanged, still the day number.
 
 (**BL-1381, 0.11.0**) The C# SDK (`Aouda.Client`) hands a `DateTime` of kind `Utc`, 100 ns tick kept, in the snapshot and in every
 change: `Row`, `PreviousRow` and a delete's `Key` (a `Timestamp` primary key) — also after a reconnect, a gap resume or a
 `SLOW_CONSUMER` fresh subscribe, and on a named-query subscription. It remembers the names the latest snapshot gave; a fresh snapshot
-replaces them. A typed subscription (`GetTable<T>.SubscribeAsync`) fills a `DateTime`, `DateTime?` or `DateTimeOffset` property
+replaces them. A typed subscription (`GetTable<T>().SubscribeAsync()`) fills a `DateTime`, `DateTime?` or `DateTimeOffset` property
 (offset zero); a `long` property for a `Timestamp` column no longer reads. Until this train, `Aouda.Client` 0.10.0 typed the snapshot
 only, and the first change delivered the raw tick number (an untyped `JsonElement`; a typed subscription threw). `@aouda/client` leaves a
 delete's `key` as the server sent it (ticks).
 
 ### Array columns in a subscription (**BL-035, 0.9.0**)
 
-(**BL-035, 0.9.0**) A table or named-query subscription delivers an [array column](array-columns.md) as an array, a `Byte` as base64
+(**BL-035, 0.9.0**) A table or named-query subscription delivers an [array column](array-columns.md) as an array, a `Byte[]` as base64
 text (MessagePack and long-poll alike) and **tells the client which columns are arrays**: every `snapshot` and `change` message that holds an array
-column carries `column_types`, a map from the column's name to its type (`{"Rates":"Double"}`). **A column named there holds an
+column carries `column_types`, a map from the column's name to its type (`{"Rates":"Double[]"}`). **A column named there holds an
 array of that type; a column not named holds a scalar.** A message without an array column has no `column_types`, so a table
 without arrays is unchanged. A subscription `filter` or a `conflate.key` on an array column is refused with an `error` message,
-code `ARRAY_COLUMN_UNSUPPORTED`. The SDKs read `column_types` and give typed arrays (`Float64Array`, `double`, …). Details:
+code `ARRAY_COLUMN_UNSUPPORTED`. The SDKs read `column_types` and give typed arrays (`Float64Array`, `double[]`, …). Details:
 [Array columns — reading](array-columns.md#subscriptions-long-poll-and-materialized-queries).
 
 ## 2.8 How Aouda implements it
@@ -491,9 +491,9 @@ code `ARRAY_COLUMN_UNSUPPORTED`. The SDKs read `column_types` and give typed arr
 High-level runtime flow:
 
 1. Each commit publishes **one change batch** to the change emitter (`EmitCommit`, its only entry point); the table's
- resume buffer keeps whole batches, and per-row `TableChangeEvent`s are built from a batch only when a listener or a
- resume reads them — the events a subscriber receives are unchanged (**ColumnarCore S09, 0.2.0**; the older
- per-event entry points are removed).
+   resume buffer keeps whole batches, and per-row `TableChangeEvent`s are built from a batch only when a listener or a
+   resume reads them — the events a subscriber receives are unchanged (**ColumnarCore S09, 0.2.0**; the older
+   per-event entry points are removed).
 2. Subscription manager fans out events to per-subscription channels.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. Write stream handler validates mode/sequence/security, writes rows, emits `stream_ack`.
@@ -502,26 +502,26 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 Key implementation anchors:
 
 - Engine events and buffering:
- - `src/Aouda.Engine.Storage/Streaming/ChangeEventEmitter.cs`
+  - `src/Aouda.Engine.Storage/Streaming/ChangeEventEmitter.cs`
 - Server connection and routing:
- - `src/Aouda.Server/WebSocket/WebSocketHandler.cs`
- - `src/Aouda.Server/WebSocket/MessageRouter.cs`
- - `src/Aouda.Server/WebSocket/ConnectionSession.cs`
+  - `src/Aouda.Server/WebSocket/WebSocketHandler.cs`
+  - `src/Aouda.Server/WebSocket/MessageRouter.cs`
+  - `src/Aouda.Server/WebSocket/ConnectionSession.cs`
 - Subscription path:
- - `src/Aouda.Server/WebSocket/StreamingSubscriptionManager.cs`
- - `src/Aouda.Server/WebSocket/Handlers/SubscriptionHandler.cs`
- - `src/Aouda.Server/WebSocket/SubscriptionFilterEvaluator.cs`
+  - `src/Aouda.Server/WebSocket/StreamingSubscriptionManager.cs`
+  - `src/Aouda.Server/WebSocket/Handlers/SubscriptionHandler.cs`
+  - `src/Aouda.Server/WebSocket/SubscriptionFilterEvaluator.cs`
 - Write path:
- - `src/Aouda.Server/WebSocket/Handlers/WriteStreamHandler.cs`
- - `src/Aouda.Server/WebSocket/WriteStreamBackpressure.cs`
- - `src/Aouda.Server/WebSocket/StreamingWriteOptions.cs`
+  - `src/Aouda.Server/WebSocket/Handlers/WriteStreamHandler.cs`
+  - `src/Aouda.Server/WebSocket/WriteStreamBackpressure.cs`
+  - `src/Aouda.Server/WebSocket/StreamingWriteOptions.cs`
 - Protocol:
- - `src/Aouda.Protocol/Streaming/Messages/ClientMessages.cs`
- - `src/Aouda.Protocol/Streaming/Messages/ServerMessages.cs`
- - `src/Aouda.Protocol/Streaming/MessageSerializer.cs`
+  - `src/Aouda.Protocol/Streaming/Messages/ClientMessages.cs`
+  - `src/Aouda.Protocol/Streaming/Messages/ServerMessages.cs`
+  - `src/Aouda.Protocol/Streaming/MessageSerializer.cs`
 - Fallback transport:
- - `src/Aouda.Server/Controllers/LongPollStreamController.cs`
- - `src/Aouda.Client/Internal/LongPollTransport.cs`
+  - `src/Aouda.Server/Controllers/LongPollStreamController.cs`
+  - `src/Aouda.Client/Internal/LongPollTransport.cs`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
@@ -548,14 +548,14 @@ Primary proving tests:
 1. Re-subscribe includes `resume_from`.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 3. Handler compares resume version with current sequence:
- - at-current -> attach to live only,
- - replay available -> deliver buffer events and continue live,
- - replay expired -> send fresh snapshot fallback.
- A server keeps a table's changes for replay only once a subscription on that server has watched the table;
- writes before that are not retained, so a `resume_from` older than them is expired and gets the snapshot
- rather than an empty replay (**ColumnarCore S09, 0.2.0**); on an embedded engine the same holds until an
- `OnTableChange` handler (or `NoteExternalChangeListener`) listens to the table. A single write larger than the replay buffer's
- capacity is not retained either: a `resume_from` from before its end gets the snapshot (**BL-723, 0.2.0**).
+   - at-current -> attach to live only,
+   - replay available -> deliver buffer events and continue live,
+   - replay expired -> send fresh snapshot fallback.
+     A server keeps a table's changes for replay only once a subscription on that server has watched the table;
+     writes before that are not retained, so a `resume_from` older than them is expired and gets the snapshot
+     rather than an empty replay (**ColumnarCore S09, 0.2.0**); on an embedded engine the same holds until an
+     `OnTableChange` handler (or `NoteExternalChangeListener`) listens to the table. A single write larger than the replay buffer's
+     capacity is not retained either: a `resume_from` from before its end gets the snapshot (**BL-723, 0.2.0**).
 4. Consumer continues with sequence gate to avoid duplicates across boundary.
 
 Primary anchors:
@@ -573,9 +573,9 @@ Primary proving tests:
 1. Client opens stream (`stream_open`) with mode (`insert`/`upsert`).
 2. `WriteStreamHandler.HandleOpenAsync(...)` validates stream ID and target table.
 3. Each `stream_rows` frame is read as column arrays (**Lead S12, 0.6.0**; a frame with `rows` is refused `ROW_OBJECTS_UNSUPPORTED`) and enforces:
- - batch limits and payload limits,
- - sequence continuity,
- - backpressure decision (accept/reject/close),
+   - batch limits and payload limits,
+   - sequence continuity,
+   - backpressure decision (accept/reject/close),
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. Accepted rows are inserted/upserted; server emits `stream_ack` with `through` and optional row errors.
 5. `stream_close` closes and removes state, sending `stream_closed`.
@@ -616,7 +616,7 @@ Primary proving tests:
 | Is live data push a first-class query/write path? | Often separate event bus or polling add-on | Built-in bidirectional streaming protocol tied to table operations | Fewer moving parts for app-level real-time behavior |
 | How does reconnect continuity work? | Often opaque reconnect, app-level patching required | Versioned events + `resume_from` + buffer replay/fallback snapshot | Predictable client recovery model |
 | Is multi-transport support built in? | Usually WebSocket only or external gateway needed | WebSocket primary with built-in long-poll fallback and MessagePack mode | More deployment compatibility with constrained networks |
-| Are client SDKs symmetric for streaming primitives? | Often one SDK gets full support first |.NET and TypeScript both expose subscribe + write stream with reconnect support | Easier multi-platform app parity |
+| Are client SDKs symmetric for streaming primitives? | Often one SDK gets full support first | .NET and TypeScript both expose subscribe + write stream with reconnect support | Easier multi-platform app parity |
 
 ## 2.10 Configuration and settings reference (complete surface)
 
@@ -658,23 +658,23 @@ Primary proving tests:
 Configuration precedence and operational notes:
 
 - Server:
- - Bound from `Aouda:WebSocket` and `Aouda:WebSocket:StreamingWrites` config sections.
- - Treated as startup configuration for server processes.
+  - Bound from `Aouda:WebSocket` and `Aouda:WebSocket:StreamingWrites` config sections.
+  - Treated as startup configuration for server processes.
 - Client:
- -.NET options set via `AoudaClientOptions.WebSocketTransportOptions`.
- - TypeScript options set via `AoudaClientOptions.streaming`.
+  - .NET options set via `AoudaClientOptions.WebSocketTransportOptions`.
+  - TypeScript options set via `AoudaClientOptions.streaming`.
 - Dynamic vs restart-required:
- - Server config is effectively restart-required.
- - Per-subscription user filter and resume values are dynamic request-level values.
+  - Server config is effectively restart-required.
+  - Per-subscription user filter and resume values are dynamic request-level values.
 - Safety-gated:
- - Unsupported wire modes are rejected at auth handshake.
- - Batch size/bytes and sequence continuity are validated per frame.
+  - Unsupported wire modes are rejected at auth handshake.
+  - Batch size/bytes and sequence continuity are validated per frame.
 - Deprecated/reserved:
- - None flagged as deprecated in current code for streaming options.
+  - None flagged as deprecated in current code for streaming options.
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-###.NET example
+### .NET example
 
 ```csharp
 using Aouda.Client;
@@ -682,27 +682,27 @@ using Aouda.Abstractions.Streaming;
 
 await using var client = new AoudaClient(new AoudaClientOptions
 {
- ServerUrl = "http://localhost:5000",
- DatabaseName = "appdb",
- WebSocketTransportOptions = new WebSocketTransportOptions
- {
- WireMode = Aouda.Protocol.Streaming.WireMode.Json
- }
+    ServerUrl = "http://localhost:5000",
+    DatabaseName = "appdb",
+    WebSocketTransportOptions = new WebSocketTransportOptions
+    {
+        WireMode = Aouda.Protocol.Streaming.WireMode.Json
+    }
 });
 
-await foreach (var evt in client.GetTable("orders").SubscribeAsync)
+await foreach (var evt in client.GetTable("orders").SubscribeAsync())
 {
- if (evt.IsSnapshot)
- Console.WriteLine($"snapshot version={evt.Version} rows={evt.Rows.Count}");
- else
- Console.WriteLine($"{evt.Type} version={evt.Version}");
- break;
+    if (evt.IsSnapshot)
+        Console.WriteLine($"snapshot version={evt.Version} rows={evt.Rows.Count}");
+    else
+        Console.WriteLine($"{evt.Type} version={evt.Version}");
+    break;
 }
 
 await using var ws = await client.GetTable("orders")
-.OpenWriteStreamAsync(WriteMode.Upsert);
+    .OpenWriteStreamAsync(WriteMode.Upsert);
 await ws.WriteAsync(new Dictionary<string, object?> { ["id"] = 1, ["status"] = "open" });
-await ws.CloseAsync;
+await ws.CloseAsync();
 ```
 
 Expected result: snapshot event is delivered, then write stream accepts rows and acknowledges progression.
@@ -715,18 +715,18 @@ Common mistake: calling streaming APIs from embedded tables; embedded streaming 
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
- serverUrl: "http://localhost:5000",
- database: "appdb",
- streaming: {
- wireMode: "json",
- enableLongPollFallback: true,
- },
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
+  streaming: {
+    wireMode: "json",
+    enableLongPollFallback: true,
+  },
 });
 
 const sub = client.table("orders").subscribe({
- onSnapshot: (rows, version) => console.log("snapshot", version, rows.length),
- onChange: (evt) => console.log(evt.type, evt.version),
- onError: (err) => console.error(err),
+  onSnapshot: (rows, version) => console.log("snapshot", version, rows.length),
+  onChange: (evt) => console.log(evt.type, evt.version),
+  onError: (err) => console.error(err),
 });
 
 const stream = await client.table("orders").openWriteStream({ mode: "upsert" });
@@ -901,12 +901,12 @@ Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports J
 
 ### A) API coverage matrix
 
-| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Subscribe to table changes | `ITableOperations.SubscribeAsync` | `TableQuery.subscribe` | `subscribe` message over WS/long-poll | Implemented | Snapshot then incremental |
-| Typed subscriptions | `ITableOperations<T>.SubscribeAsync` | Generic `TableQuery<T>.subscribe` typing | Same protocol payload, typed client mapping only | Implemented | Type mapping is client-side |
+| Subscribe to table changes | `ITableOperations.SubscribeAsync()` | `TableQuery.subscribe()` | `subscribe` message over WS/long-poll | Implemented | Snapshot then incremental |
+| Typed subscriptions | `ITableOperations<T>.SubscribeAsync()` | Generic `TableQuery<T>.subscribe()` typing | Same protocol payload, typed client mapping only | Implemented | Type mapping is client-side |
 | Resume from version | Automatic in subscription implementation | Automatic re-subscribe with `resume_from` | `resume_from` field in subscribe message | Implemented | At-least-once replay semantics |
-| Subscribe across partitions (waive `PARTITION_FILTER_REQUIRED`) | `WithCrossPartitionAccess` or `SubscribeOptions.CrossPartitionAccess` | `withCrossPartitionAccess` or `SubscribeOptions.crossPartitionAccess`; named queries: `NamedQuerySubscribeOptions.crossPartitionAccess` | `cross_partition_access` field in subscribe message | Implemented (**BL-1227, 0.9.0**) | A cost waiver, not a grant; ignored on the data-plane listener |
+| Subscribe across partitions (waive `PARTITION_FILTER_REQUIRED`) | `WithCrossPartitionAccess()` or `SubscribeOptions.CrossPartitionAccess` | `withCrossPartitionAccess()` or `SubscribeOptions.crossPartitionAccess`; named queries: `NamedQuerySubscribeOptions.crossPartitionAccess` | `cross_partition_access` field in subscribe message | Implemented (**BL-1227, 0.9.0**) | A cost waiver, not a grant; ignored on the data-plane listener |
 | Open write stream | `OpenWriteStreamAsync(mode)` | `openWriteStream({ mode })` | `stream_open`, `stream_rows`, `stream_ack`, `stream_close` | Implemented | Insert/upsert supported |
 | MessagePack wire mode | `.NET WireMode.MessagePack` | `streaming.wireMode = "msgpack"` | auth `wire_mode` negotiation | Implemented | Long-poll is JSON-only |
 | Long-poll fallback | `.NET EnableLongPollFallback` | `streaming.enableLongPollFallback` | `/stream/longpoll/connect|send|poll|{id}` | Implemented | Fallback used when WS connect fails |
@@ -919,7 +919,7 @@ Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports J
 | Exactly-once stream processing contract | No exactly-once mode in server/protocol/SDKs | Use version-based dedup and idempotent reducers | Future architecture decision; not in current P10 scope | Medium |
 | Cross-database subscriptions on single connection | No cross-db subscription targeting in protocol path | Open separate client/connection per database | Future clustering/distribution roadmap work | Medium |
 | Distinct MQ "not ready" error code | No dedicated protocol error; currently generic not-found style | Treat missing/not-ready uniformly and retry after MQ setup | BL-053 from S10 report context | Low/Medium |
-| TS equivalent of C# `Live` hot collection abstraction | Withdrawn with C# `Live` (BL-162) | Use `subscribe` and local reducer state in app layer | BL-164 named-query materialization | — |
+| TS equivalent of C# `Live()` hot collection abstraction | Withdrawn with C# `Live()` (BL-162) | Use `subscribe()` and local reducer state in app layer | BL-164 named-query materialization | — |
 
 ## 2.12 Scenario playbooks (minimum three)
 
@@ -930,7 +930,7 @@ When to use:
 
 Steps:
 1. Keep default WebSocket/server streaming config.
-2. Add one table subscription in.NET or TS and log snapshot version plus change versions.
+2. Add one table subscription in .NET or TS and log snapshot version plus change versions.
 3. Perform known inserts/updates/deletes through normal APIs.
 4. Verify events and version progression.
 
@@ -976,17 +976,17 @@ Expected result checks:
 Monitor first:
 
 - Protocol/session health:
- - connection count vs `MaxConnections`,
- - auth error rates (`AUTH_*` codes),
- - stream error codes (`INVALID_STREAM_SEQUENCE`, `STREAM_PAUSED`, `STREAM_BACKPRESSURE_LIMIT_EXCEEDED`).
+  - connection count vs `MaxConnections`,
+  - auth error rates (`AUTH_*` codes),
+  - stream error codes (`INVALID_STREAM_SEQUENCE`, `STREAM_PAUSED`, `STREAM_BACKPRESSURE_LIMIT_EXCEEDED`).
 - Subscription/write throughput and pressure:
- - `Perf.SubscriptionUpdatesEnqueued`,
- - `Perf.SubscriptionUpdatesProcessed`,
- - `Perf.SubscriptionDroppedUpdates`,
- - `Perf.SubscriptionQueueDepth`,
- - `Perf.SubscriptionLagMs`.
+  - `Perf.SubscriptionUpdatesEnqueued`,
+  - `Perf.SubscriptionUpdatesProcessed`,
+  - `Perf.SubscriptionDroppedUpdates`,
+  - `Perf.SubscriptionQueueDepth`,
+  - `Perf.SubscriptionLagMs`.
 - Storage impact signals during streaming traffic:
- - query rows scanned/returned and page-cache hit/miss metrics in server metrics endpoints.
+  - query rows scanned/returned and page-cache hit/miss metrics in server metrics endpoints.
 
 Recovery/restart expectations:
 
@@ -1026,8 +1026,8 @@ Last verification context date (UTC): `2026-03-31` (from P10 session reports and
 |---|---|---|---|---|
 | Protocol streaming serializer (I3) | `dotnet test tests/Aouda.Protocol.Tests --verbosity minimal --filter "FullyQualifiedName~MessageSerializerTests"` | Pass (`28/28`) | 2026-03-31 | Includes JSON + MessagePack paths |
 | Server WS handler integration (I3) | `dotnet test tests/Aouda.Server.Tests --verbosity minimal --filter "FullyQualifiedName~WebSocketHandlerIntegrationTests"` | Pass (`19/19`) | 2026-03-31 | Auth handshake + wire mode negotiation paths |
-|.NET WS transport integration (I3) | `dotnet test tests/Aouda.Client.Tests --verbosity minimal --filter "FullyQualifiedName~WebSocketTransportTests"` | Pass (`13/13`) | 2026-03-31 | Reconnect and message handling |
-|.NET fallback lifecycle (I4) | `dotnet test tests/Aouda.Client.Tests --verbosity minimal --filter "FullyQualifiedName~SubscriptionApiTests|FullyQualifiedName~WriteStreamApiTests|FullyQualifiedName~WebSocketTransportTests|FullyQualifiedName~StreamingFallbackLifecycleTests"` | Pass | 2026-03-31 | Fallback and lifecycle coverage |
+| .NET WS transport integration (I3) | `dotnet test tests/Aouda.Client.Tests --verbosity minimal --filter "FullyQualifiedName~WebSocketTransportTests"` | Pass (`13/13`) | 2026-03-31 | Reconnect and message handling |
+| .NET fallback lifecycle (I4) | `dotnet test tests/Aouda.Client.Tests --verbosity minimal --filter "FullyQualifiedName~SubscriptionApiTests|FullyQualifiedName~WriteStreamApiTests|FullyQualifiedName~WebSocketTransportTests|FullyQualifiedName~StreamingFallbackLifecycleTests"` | Pass | 2026-03-31 | Fallback and lifecycle coverage |
 | TypeScript streaming transport/tests (I3/I4) | `npm run test -- tests/streaming/fallback-streaming-transport.test.ts tests/streaming/longpoll-transport.test.ts tests/streaming/websocket-transport.test.ts` | Pass | 2026-03-31 | Covers WS + fallback transports |
 | TypeScript streaming API/tests (S13) | `npm run test -- tests/streaming/subscription.test.ts tests/streaming/write-stream.test.ts` | Pass (`10/10`) | 2026-03-31 | Subscribe + write stream APIs |
 
@@ -1038,9 +1038,9 @@ Last verification context date (UTC): `2026-03-31` (from P10 session reports and
 | Subscription snapshot/change lifecycle | `SubscriptionHandlerIntegrationTests.cs` | Pass | Strong | Includes empty/populated snapshot and CRUD change flow |
 | Server-side user filter behavior | `SubscriptionFilterEvaluatorTests.cs` + subscription integration tests | Pass | Strong | Includes normalization and update enter/leave scope behavior |
 | Write-stream lifecycle + backpressure | `WriteStreamHandlerIntegrationTests.cs` | Pass | Strong | Mode validation, sequence, ack, pressure, row-level errors |
-|.NET streaming API behavior | `SubscriptionApiTests.cs`, `WriteStreamApiTests.cs` | Pass | Strong | Reconnect, resume, typed mapping, close/dispose behavior |
+| .NET streaming API behavior | `SubscriptionApiTests.cs`, `WriteStreamApiTests.cs` | Pass | Strong | Reconnect, resume, typed mapping, close/dispose behavior |
 | Materialized query streaming | `MaterializedQuerySubscriptionApiTests.cs` | Pass | Medium/Strong | Subscribing to MQ result tables and change propagation |
-|.NET fallback lifecycle | `StreamingFallbackLifecycleTests.cs` | Pass | Medium/Strong | Long-poll lifecycle and reconnect scenarios |
+| .NET fallback lifecycle | `StreamingFallbackLifecycleTests.cs` | Pass | Medium/Strong | Long-poll lifecycle and reconnect scenarios |
 | TypeScript streaming transport and API | `websocket-transport.test.ts`, `subscription.test.ts`, `write-stream.test.ts`, `longpoll-transport.test.ts` | Pass | Strong | Callback/iterator/write/fallback/wire-mode coverage |
 
 ## 2.17 Testing gaps and proposed tests
@@ -1049,62 +1049,62 @@ Last verification context date (UTC): `2026-03-31` (from P10 session reports and
 |---|---|---|---|
 | Resume path dedicated server integration suite is less explicit than core subscribe suite | Resume correctness is critical under production reconnect churn | Add focused server integration tests for at-current/replay/expired resume triad with concurrent writes | High |
 | Long-duration pressure soak for write streams not explicit in current suite | Sustained throughput can reveal backpressure oscillation bugs | Add deterministic soak test with threshold tuning and expected ack/close behavior assertions | Medium |
-| Cross-SDK parity assertions for messagepack plus fallback combinations | Prevents subtle behavior divergence between.NET and TS | Add contract parity matrix tests shared via protocol fixture payload sets | Medium |
+| Cross-SDK parity assertions for messagepack plus fallback combinations | Prevents subtle behavior divergence between .NET and TS | Add contract parity matrix tests shared via protocol fixture payload sets | Medium |
 
 ## 2.18 Known gaps and undone work
 
 **Closed in P37 (do not treat as current):** silent `DropOldest` without a wire signal; subscription snapshots silently capped at `DefaultLimit` (1 000) with no truncation flag; client-side gap inference from a per-database sequence (impossible — the server now emits `gap`). Durable subscriber cursors beyond the 60 s / 10 000-event buffer remain ADR 0027 / P25.
 
 - Cross-database subscriptions are not a shipped streaming feature.
- - User impact: multi-database consumers must maintain separate subscriptions/connections per database.
+  - User impact: multi-database consumers must maintain separate subscriptions/connections per database.
 - Exactly-once semantics are not provided.
- - User impact: applications must implement version-based dedup/idempotent state transitions.
+  - User impact: applications must implement version-based dedup/idempotent state transitions.
 - Distinct materialized-query "not ready" error code is not yet surfaced as a dedicated protocol contract.
- - User impact: client error handling for MQ-not-ready vs not-found remains coarse.
+  - User impact: client error handling for MQ-not-ready vs not-found remains coarse.
 - Long-poll fallback still uses a bounded outbox; WebSocket overflow is `gap` then unregister (or `SLOW_CONSUMER` on the send-path HWM).
 - A `TRUNCATE` sends subscribers nothing — no notice and no row events (pre-existing; the horizon notices do not cover it).
- - User impact: a client cache keeps a truncated table's rows until it subscribes again.
+  - User impact: a client cache keeps a truncated table's rows until it subscribes again.
 
 ## 2.19 References
 
 - ADRs:
- - `docs/decisions/0020-real-time-streaming.md`
- - `docs/decisions/0023-authentication-and-authorization.md`
+  - `docs/decisions/0020-real-time-streaming.md`
+  - `docs/decisions/0023-authentication-and-authorization.md`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Tasks/reports:
- - `docs/tasks/P10/P10-RealTimeStreaming-Tasks.md`
- - `docs/tasks/P10/P10-S1-ChangeEventFoundation.md`
- - `docs/tasks/P10/P10-S3-WebSocketInfrastructure.md`
- - `docs/tasks/P10/P10-S4-ADRAFilteredSubscriptions.md`
- - `docs/tasks/P10/P10-S5-ServerSideSubscriptionFilters.md`
- - `docs/tasks/P10/P10-S7-StreamingWrites.md`
- - `docs/tasks/P10/P10-S9-CSharpClientStreamingAPI.md`
- - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
- - `docs/tasks/P10/P10-S11-HotCacheAndLiveCollection.md`
- - `docs/tasks/P10/P10-S12-TypeScriptWebSocketTransport.md`
- - `docs/tasks/P10/P10-S13-TypeScriptClientStreamingAPI.md`
- - `docs/tasks/P10/P10-S14-I3-MessagePackWireMode.md`
- - `docs/tasks/P10/P10-S14-I4-HttpLongPollFallback.md`
+  - `docs/tasks/P10/P10-RealTimeStreaming-Tasks.md`
+  - `docs/tasks/P10/P10-S1-ChangeEventFoundation.md`
+  - `docs/tasks/P10/P10-S3-WebSocketInfrastructure.md`
+  - `docs/tasks/P10/P10-S4-ADRAFilteredSubscriptions.md`
+  - `docs/tasks/P10/P10-S5-ServerSideSubscriptionFilters.md`
+  - `docs/tasks/P10/P10-S7-StreamingWrites.md`
+  - `docs/tasks/P10/P10-S9-CSharpClientStreamingAPI.md`
+  - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
+  - `docs/tasks/P10/P10-S11-HotCacheAndLiveCollection.md`
+  - `docs/tasks/P10/P10-S12-TypeScriptWebSocketTransport.md`
+  - `docs/tasks/P10/P10-S13-TypeScriptClientStreamingAPI.md`
+  - `docs/tasks/P10/P10-S14-I3-MessagePackWireMode.md`
+  - `docs/tasks/P10/P10-S14-I4-HttpLongPollFallback.md`
 - Backlog:
- - `docs/BACKLOG.md` (BL-053 in P10 S10 report context)
+  - `docs/BACKLOG.md` (BL-053 in P10 S10 report context)
 - Key code paths:
- - `src/Aouda.Server/WebSocket/WebSocketHandler.cs`
- - `src/Aouda.Server/WebSocket/MessageRouter.cs`
- - `src/Aouda.Server/WebSocket/Handlers/SubscriptionHandler.cs`
- - `src/Aouda.Server/WebSocket/Handlers/WriteStreamHandler.cs`
- - `src/Aouda.Server/Controllers/LongPollStreamController.cs`
- - `src/Aouda.Client/AoudaClient.cs`
- - `src/Aouda.Client/RemoteTableQuery.cs`
- - `src/Aouda.Client/Internal/WebSocketTransport.cs`
- - `src/Aouda.Client/Internal/LongPollTransport.cs`
- - `src/Aouda.Protocol/Streaming/MessageSerializer.cs`
- - `../aouda-client-ts/src/client.ts`
- - `../aouda-client-ts/src/query-builder.ts`
- - `../aouda-client-ts/src/streaming/websocket-transport.ts`
- - `../aouda-client-ts/src/streaming/longpoll-transport.ts`
+  - `src/Aouda.Server/WebSocket/WebSocketHandler.cs`
+  - `src/Aouda.Server/WebSocket/MessageRouter.cs`
+  - `src/Aouda.Server/WebSocket/Handlers/SubscriptionHandler.cs`
+  - `src/Aouda.Server/WebSocket/Handlers/WriteStreamHandler.cs`
+  - `src/Aouda.Server/Controllers/LongPollStreamController.cs`
+  - `src/Aouda.Client/AoudaClient.cs`
+  - `src/Aouda.Client/RemoteTableQuery.cs`
+  - `src/Aouda.Client/Internal/WebSocketTransport.cs`
+  - `src/Aouda.Client/Internal/LongPollTransport.cs`
+  - `src/Aouda.Protocol/Streaming/MessageSerializer.cs`
+  - `../aouda-client-ts/src/client.ts`
+  - `../aouda-client-ts/src/query-builder.ts`
+  - `../aouda-client-ts/src/streaming/websocket-transport.ts`
+  - `../aouda-client-ts/src/streaming/longpoll-transport.ts`
 - Related docs:
- - `docs/dev/Functionality-Overview.md`
- - `docs/dev/Functionality-HotCold-And-Memory.md`
+  - `docs/dev/Functionality-Overview.md`
+  - `docs/dev/Functionality-HotCold-And-Memory.md`
 
 ## 2.20 What is missing from this document? (meta completeness)
 

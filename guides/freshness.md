@@ -79,17 +79,17 @@ it. This holds for every read of the table, input rows included — a token from
 up, which is what "read your own write" means for such a table. A wait that runs out is `409 TOKEN_UNSATISFIED`, never an older value.
 
 - A token read of a formula table on a **replica** is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`: a replica computes no formulas and cannot
- judge the token. A read without a token is served there from the replicated rows.
+  judge the token. A read without a token is served there from the replicated rows.
 - A node whose formula maintainer is not running (a branch; a promoted node until BL-1441 is fixed) refuses the wait
- `503 FORMULA_NOT_MAINTAINED`.
+  `503 FORMULA_NOT_MAINTAINED`.
 - A token read of a formula table whose formulas read a materialized query's result waits until the query has applied the write the token
- names and those formulas are recomputed. A token read of a formula table waits only for the formulas its own values depend on — the
- queries and tables they read, directly or through other formula tables: while a query a formula reads cannot catch up (rebuilding,
- stale, in error), token reads of the formula tables that read it wait, and the others do not (**BL-1505, 0.15.0**).
+  names and those formulas are recomputed. A token read of a formula table waits only for the formulas its own values depend on — the
+  queries and tables they read, directly or through other formula tables: while a query a formula reads cannot catch up (rebuilding,
+  stale, in error), token reads of the formula tables that read it wait, and the others do not (**BL-1505, 0.15.0**).
 - A token read joining a formula table and a materialized query's result is covered as far as both are, and waits for whichever is behind. A
- materialized query **built over** a formula table is not yet judged by the formula maintainer (BL-1486).
+  materialized query **built over** a formula table is not yet judged by the formula maintainer (BL-1486).
 - A change event's token on a formula table never claims an input its values do not reflect; tokens are not ordered across events, so keep
- the highest. A notice's token (`horizon`, `range_delete`) is not a cover.
+  the highest. A notice's token (`horizon`, `range_delete`) is not a cover.
 
 There is no atomic read of an input and the values computed from it. See [Formulas](formulas.md#when-values-change-eventual-consistency-and-tokens).
 
@@ -123,19 +123,19 @@ The budget lives on the named query. A name with no `freshness` block is fail-sa
 
 ```json
 "namedQueries": {
- "portfolio.positionsWithQuotes": {
- "table": "Position",
- "where": { "and": [{ "column": "accountId", "op": "eq", "param": "accountId" }] },
- "select": ["symbol", "quantity", "lastPrice"],
- "limit": 500,
- "freshness": {
- "readYourWrites": true,
- "maxLagBytes": 4194304,
- "maxStalenessMs": 2000,
- "waitMs": 250,
- "onExceeded": "fetchPrimary"
- }
- }
+  "portfolio.positionsWithQuotes": {
+    "table": "Position",
+    "where": { "and": [{ "column": "accountId", "op": "eq", "param": "accountId" }] },
+    "select": ["symbol", "quantity", "lastPrice"],
+    "limit": 500,
+    "freshness": {
+      "readYourWrites": true,
+      "maxLagBytes": 4194304,
+      "maxStalenessMs": 2000,
+      "waitMs": 250,
+      "onExceeded": "fetchPrimary"
+    }
+  }
 }
 ```
 
@@ -160,20 +160,20 @@ Both `Aouda.Client` and `@aouda/client` capture `X-Aouda-Token` after every data
 ```ts
 import { AoudaClient, MemoryConsistencyTokenStore } from "@aouda/client";
 
-const store = new MemoryConsistencyTokenStore; // share this across instances
+const store = new MemoryConsistencyTokenStore(); // share this across instances
 
 const client = new AoudaClient({
- serverUrl: "http://localhost:5433",
- database: "appdb",
- consistencyTokenStore: store,
+  serverUrl: "http://localhost:5433",
+  database: "appdb",
+  consistencyTokenStore: store,
 });
-await client.connect;
+await client.connect();
 
 await client.table("orders").insert({ id: 1, status: "open" });
 // subsequent reads send X-Aouda-Token automatically
 
-const pinned = await client.table("orders").atLeast(store.get("appdb")!).execute;
-const current = await client.getConsistencyToken;
+const pinned = await client.table("orders").atLeast(store.get("appdb")!).execute();
+const current = await client.getConsistencyToken();
 ```
 
 ### C#
@@ -182,24 +182,24 @@ const current = await client.getConsistencyToken;
 using Aouda.Client;
 using Aouda.Client.Consistency;
 
-var store = new MemoryConsistencyTokenStore;
+var store = new MemoryConsistencyTokenStore();
 await using var client = new AoudaClient(new AoudaClientOptions
 {
- ServerUrl = "http://localhost:5433",
- DatabaseName = "appdb",
- ConsistencyTokenStore = store,
+    ServerUrl = "http://localhost:5433",
+    DatabaseName = "appdb",
+    ConsistencyTokenStore = store,
 });
 
 await client.GetTable("orders").InsertAsync(new Dictionary<string, object?>
 {
- ["id"] = 1L, ["status"] = "open"
+    ["id"] = 1L, ["status"] = "open"
 });
 
 var rows = await client.GetTable("orders")
-.AtLeast(client.GetObservedConsistencyToken!)
-.ToListAsync;
+    .AtLeast(client.GetObservedConsistencyToken()!)
+    .ToListAsync();
 
-var current = await client.GetConsistencyTokenAsync;
+var current = await client.GetConsistencyTokenAsync();
 ```
 
 Subscribe `snapshot` / `change` / heartbeat carry the same `token` string. Hand it to an HTTP read or to `at_least` on subscribe. `resume_from` stays the change-event sequence.
@@ -214,7 +214,7 @@ These are load-bearing. Do not treat replica reads as "always current" because a
 
 The default in-memory store is **insufficient for a horizontally scaled application tier**. Recreating the client (new process, new pod, new tab) **loses** read-your-writes unless you inject a **shared** store (Redis, a cookie you round-trip, an Aouda table — application-owned). Aouda does **not** ship a Redis adapter. A test asserts the recreate-without-shared-store failure ([gate 13](https://github.com/aoudadb/aouda/blob/main/docs/dev/P38-Phase-Acceptance.md)).
 
-The **application** holds the token, not the engine. For a BFF: inject one store (or put the string on a cookie/header you name). For a browser talking to the data plane: persist `get` after writes and `observe` on load. The SDK **never** sets `Set-Cookie`.
+The **application** holds the token, not the engine. For a BFF: inject one store (or put the string on a cookie/header you name). For a browser talking to the data plane: persist `get()` after writes and `observe()` on load. The SDK **never** sets `Set-Cookie`.
 
 ### Clock skew — seconds are measured, not magic
 

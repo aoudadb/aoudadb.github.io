@@ -39,7 +39,9 @@ is now honoured.)
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `databases.<name>.memoryWeight` in `aouda.json` (default `1`; **BL-1463, 0.16.0**, before `Aouda:Databases:<name>:MemoryWeight`) |
 | Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB, and it follows the share when it is recomputed (**Lead S10, 0.6.0**). **On** (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). A read whose pages are more than the cache holds admits at most half of it (**Lead S10, 0.6.0**) | `Aouda:Memory:MaxPageCacheBytes` (the server's total, scaled to each database's share — **Lead S10, 0.6.0**), or `memory.maxPageCacheBytes` in `PATCH /admin/config` at runtime; `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
-| Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host |
+| Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host (**WorkloadCore S17, 0.3.0** — `Abundant` raised the fraction to 0.15) | derived |
+| Per-table flush trigger (`T16`) | `clamp(T11 / max(n, 4), min(1 MB, T11 / n), 64 MB)` — `T11` the write buffer's ceiling (15 % of governed, floor 16 MB), `n` the tables sharing it (**WorkloadCore S17, 0.3.0** — `Abundant` raised the ceiling to 1 GB) | derived |
+| Per-table hot budget (`T18`) | `clamp(T10 / max(n, 4), min(8 MB, T10 / n), 1 GB)` — `T10` the hot ceiling (45 % of governed, floor 32 MB) (**WorkloadCore S17, 0.3.0** — `Abundant` raised the ceiling to 16 GB) | `Aouda:Memory:MaxHotBytes` sets `T10`, or `memory.maxHotBytes` in `PATCH /admin/config` at runtime |
 | Bulk-load ingest buffer budget | `max(0.04 × yourDatabaseShare, 8 MB)`, growing with headroom in the server's shared memory governor instead of stopping at a fixed number (P45) | `Aouda:BulkLoad:IngestBufferBudgetFraction`, or `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` to pin an explicit ceiling (`268435456` reproduces the old fixed-256 MB behavior) |
 
 Worked at three detected host sizes, both branches (all figures in MB unless marked GB; rounded to the
@@ -129,9 +131,9 @@ What a write survives is one level per database, optionally narrowed per table. 
 |---|---|---|---|
 | Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `databases.<db>.durability` in `aouda.json` (**BL-1463, 0.16.0**); embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
 | Bulk-load durability (**Lead S26c, 0.6.0**) | **inherits** the database's level for a load: `strict` (an `unlogged` table included); `os` in a database at `os`, unless every table of the job names `strict` | `strict`, `os` — `os` not for a multi-table job, a table with vector columns, or an edge or vector table (such a job in an `os` database names `strict`) | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
-| Table durability | **inherits** the database's level | `strict` (in a database with a WAL: `strict` or `os`;), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
+| Table durability | **inherits** the database's level | `strict` (in a database with a WAL: `strict` or `os`), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
 
-The database's level is read at every open; one with a WAL (`strict`, `os`) reopened at `unlogged` or `memory` flushes everything and **retires its WAL** at that open — refused (`WAL_RETIREMENT_REFUSED`) when it cannot finish ([Changing a level](write-durability.md#changing-a-level);). A table's
+The database's level is read at every open; one with a WAL (`strict`, `os`) reopened at `unlogged` or `memory` flushes everything and **retires its WAL** at that open — refused (`WAL_RETIREMENT_REFUSED`) when it cannot finish ([Changing a level](write-durability.md#changing-a-level)). A table's
 change to or from `memory` after creation is refused. These replace `enableWal` / `EnableWal` (default `true`), `dataDurability`
 (`DiskBacked`) and `durability.walEnabled`, which are now refused by name. (**Lead S26c, 0.6.0**) An open that does not
 follow a clean close empties an `unlogged` table that was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-060)).
@@ -279,18 +281,18 @@ Logging__LogLevel__Aouda.Engine.Storage=Debug
 
 ⚠️ **Any `Logging:LogLevel` setting replaces the shipped levels as a whole**, not just its own category: the moment one key is
 set, from `appsettings.json`, an environment variable or the command line, the server applies none of the defaults in the table
-above, and every category you did not name falls to.NET's own default, `Information` — four ASP.NET lines for every request
-among them. Restate `Default` and the two `Information` categories beside the one you turn up, as above (**LoadScan, next
-train**: the benchmarks were found running this way).
+above, and every category you did not name falls to .NET's own default, `Information` — four ASP.NET lines for every request
+among them. Restate `Default` and the two `Information` categories beside the one you turn up, as above (the
+benchmarks were found running this way).
 
 ```json
 {
- "Logging": {
- "LogLevel": {
- "Default": "Warning",
- "Aouda.Server.Startup": "Information"
- }
- }
+  "Logging": {
+    "LogLevel": {
+      "Default": "Warning",
+      "Aouda.Server.Startup": "Information"
+    }
+  }
 }
 ```
 
@@ -334,7 +336,7 @@ in no guide before).
 
 ## Runtime: GC and thread pool
 
-Set in the server's `runtimeconfig.json`; nothing needs setting..NET's own `DOTNET_*` variables override them (their numbers
+Set in the server's `runtimeconfig.json`; nothing needs setting. .NET's own `DOTNET_*` variables override them (their numbers
 are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing.md#garbage-collection-and-the-thread-pool-columnarcore-s14-020-loadscan-050).
 
 | Setting | Default | Override | Why |
@@ -363,12 +365,12 @@ A first admin by password seed, and a key-only operator whose key root comes fro
 
 ```json
 { "version": 1, "server": { "principals": { "you@example.com": { "roles": ["admin"],
- "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
+    "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
 ```
 
 ```json
 { "version": 1, "keyRoot": { "env": "AOUDA_KEY_ROOT" },
- "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
+  "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
 ```
 
 Not settings, and unchanged: (**BL-1427, 0.14.0**) a reload is limited to one per 5 s and a dry run to one per 1 s, with a 120 s
@@ -419,12 +421,12 @@ The file is wherever `Aouda:Declaration` points. There is no well-known path and
 
 ```json
 {
- "version": 1,
- "databases": {
- "derive_auth": { "kind": "auth" },
- "ledger": { "kind": "data", "authDatabase": "derive_auth" },
- "reports": { "kind": "data", "authDatabase": "derive_auth", "durability": "os" }
- }
+  "version": 1,
+  "databases": {
+    "derive_auth": { "kind": "auth" },
+    "ledger":      { "kind": "data", "authDatabase": "derive_auth" },
+    "reports":     { "kind": "data", "authDatabase": "derive_auth", "durability": "os" }
+  }
 }
 ```
 

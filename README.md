@@ -1,8 +1,8 @@
 # Aouda Docs
 
-This repository is the **canonical public documentation** for [Aouda](https://github.com/aoudadb) — a columnar database engine for.NET with a TypeScript client SDK.
+This repository is the **canonical public documentation** for [Aouda](https://github.com/aoudadb) — a columnar database engine for .NET with a TypeScript client SDK.
 
-**Published site:** https://aoudadb.github.io/
+**Published site:** https://aoudadb.github.io/  
 **AI agent index:** https://aoudadb.github.io/llms.txt
 
 End users and third-party clients have **no other internet source of truth** besides this site, the live HTTP API, and the published SDKs (`@aouda/client`, `Aouda.Client`). Engine-repo `docs/dev/` and ADRs are **implementer-facing**. When docs and code disagree, **code and tests win** and this site must be updated.
@@ -12,13 +12,13 @@ The wire contract is [reference/http-api.md](reference/http-api.md). Do not resu
 ## Structure
 
 ```
-getting-started/ Main onboarding guides — embedded, server, auth, testing, backup
-guides/ Deep functionality guides — query, schema, named queries, streaming, …
-auth/ Access — principals, policy, credentials, whoami, moving from 0.14
-clients/ Client SDKs — TypeScript,.NET, distribution
-deployment/ Deployment — Kubernetes, Helm, Docker, Windows Service, systemd
-ai/ AI agent usage — bootstrap flows, auth patterns, MCP tools
-reference/ HTTP API, CLI, declaration, plan codes
+getting-started/   Main onboarding guides — embedded, server, auth, testing, backup
+guides/            Deep functionality guides — query, schema, named queries, streaming, …
+auth/              Access — principals, policy, credentials, whoami, moving from 0.14
+clients/           Client SDKs — TypeScript, .NET, distribution
+deployment/        Deployment — Kubernetes, Helm, Docker, Windows Service, systemd
+ai/                AI agent usage — bootstrap flows, auth patterns, MCP tools
+reference/         HTTP API, CLI, declaration, plan codes
 ```
 
 ## For AI agents
@@ -50,9 +50,16 @@ Link to another page by its `.md` file, relative to the page you are editing (`[
 link and `#anchor`:
 
 ```bash
-bundle exec jekyll build -d /tmp/aouda-site # any directory outside the repo
+bundle exec jekyll build -d /tmp/aouda-site      # any directory outside the repo
 python3 scripts/check-anchors.py /tmp/aouda-site # exit 1 and one line per broken link
 python3 -m unittest discover -s scripts -p "test_*.py"
+```
+
+After any edit made by a script (a sweep, a search-and-replace), check that it took nothing with it:
+
+```bash
+python3 scripts/check-code-fences.py                    # code that lost a `()`, a `[]` or its indentation
+python3 scripts/check-code-fences.py --base origin/main # and what any page lost since origin/main
 ```
 
 A `(**BL-NNN, next train**)` marker must be **removed** once the work ships (do not stamp a version into the page).

@@ -17,11 +17,11 @@ A data database with no link is governed by `_serverauth`. There is no second au
 <!-- declaration-example -->
 ```json
 {
- "version": 1,
- "databases": {
- "auth": { "kind": "auth", "signup": { "enabled": false } },
- "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" }
- }
+  "version": 1,
+  "databases": {
+    "auth": { "kind": "auth", "signup": { "enabled": false } },
+    "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" }
+  }
 }
 ```
 

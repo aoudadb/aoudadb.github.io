@@ -14,7 +14,7 @@ Install the server on a Windows host, register it with the Service Control Manag
 
 | Requirement | Why |
 |---|---|
-| **The.NET 10 ASP.NET Core runtime** (**BL-739, 0.2.0**;.NET 8 for 0.1.40 and earlier) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the.NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If.NET 10 is missing](#if-net-10-is-missing) |
+| **The .NET 10 ASP.NET Core runtime** (**BL-739, 0.2.0**; .NET 8 for 0.1.40 and earlier) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 10 is missing](#if-net-10-is-missing) |
 | **An elevated prompt** | Registering a service |
 | **Access to the private artefact feed** | ⚠️ Aouda's artefacts are **private**. There is no public download. See [Getting the artefact](#getting-the-artefact) |
 
@@ -38,13 +38,13 @@ You need a GitHub token with access to that repository:
 
 ```powershell
 gh release download v<version> --repo aoudadb/aouda --pattern 'aouda-server-*-win-x64.zip'
-Expand-Archive aouda-server-*-win-x64.zip -DestinationPath.
+Expand-Archive aouda-server-*-win-x64.zip -DestinationPath .
 ```
 
 **Verify it before installing.** Each archive ships a `SHA256SUMS`; the install script checks it for you, and by hand:
 
 ```powershell
-Get-FileHash.\win-x64\Aouda.Server.exe -Algorithm SHA256
+Get-FileHash .\win-x64\Aouda.Server.exe -Algorithm SHA256
 ```
 
 ---
@@ -54,15 +54,15 @@ Get-FileHash.\win-x64\Aouda.Server.exe -Algorithm SHA256
 From an **elevated** PowerShell prompt:
 
 ```powershell
-.\scripts\install-aouda.ps1 -ArtifactDir.\win-x64
+.\scripts\install-aouda.ps1 -ArtifactDir .\win-x64
 ```
 
-The script checks for the.NET 10 runtime, verifies the checksums, copies the binaries to `C:\Program Files\Aouda`, and hands over to `aouda service install`. Everything else — the service registration itself — is done by the server binary, where it is one tested code path.
+The script checks for the .NET 10 runtime, verifies the checksums, copies the binaries to `C:\Program Files\Aouda`, and hands over to `aouda service install`. Everything else — the service registration itself — is done by the server binary, where it is one tested code path.
 
 Any argument the script does not recognise is passed through, in order. `--dry-run` anywhere on the line means a dry run — the script copies nothing and forwards it:
 
 ```powershell
-.\scripts\install-aouda.ps1 -ArtifactDir.\win-x64 --port 5433 --data-path 'D:\Aouda\data'
+.\scripts\install-aouda.ps1 -ArtifactDir .\win-x64 --port 5433 --data-path 'D:\Aouda\data'
 ```
 
 **See what it will register before it does:**
@@ -105,7 +105,7 @@ On Linux the systemd unit carries `MemoryMax`, which does two things: it caps th
 
 ```powershell
 [Environment]::SetEnvironmentVariable(
- 'AOUDA__MEMORY__MAXTOTALRAMBYTES', '17179869184', 'Machine') # 16 GiB
+  'AOUDA__MEMORY__MAXTOTALRAMBYTES', '17179869184', 'Machine')   # 16 GiB
 ```
 
 Then restart the service. Check what it took:
@@ -137,13 +137,13 @@ Set-Content -Path $path -Value $env:ADMIN_PASSWORD -NoNewline -Encoding utf8
 icacls $path /inheritance:r /grant:r "$env:USERNAME:(R)"
 
 # $env:AOUDA_TOKEN is an aouda_ key. aouda whoami --server http://localhost:5000
- --email admin@example.com --password-file $path `
- --data 'C:\ProgramData\Aouda\data'
+  --email admin@example.com --password-file $path `
+  --data 'C:\ProgramData\Aouda\data'
 
 # Or standard input, which touches no filesystem
 # $env:AOUDA_TOKEN is an aouda_ key. aouda whoami --server http://localhost:5000
- --email admin@example.com --password-stdin `
- --data 'C:\ProgramData\Aouda\data'
+  --email admin@example.com --password-stdin `
+  --data 'C:\ProgramData\Aouda\data'
 ```
 
 ⚠️ **The file-permission check is Linux and macOS only.** On Windows Aouda cannot inspect the mode the way it can a Unix one, so a loose ACL is **not** refused — set it yourself, as above, and delete the file once the admin exists.
@@ -164,7 +164,7 @@ Restrict the port with a firewall rule as well as a proxy:
 
 ```powershell
 New-NetFirewallRule -DisplayName 'Aouda admin' -Direction Inbound `
- -LocalPort 5433 -Protocol TCP -RemoteAddress 10.0.0.0/8 -Action Allow
+  -LocalPort 5433 -Protocol TCP -RemoteAddress 10.0.0.0/8 -Action Allow
 ```
 
 ---
@@ -172,11 +172,11 @@ New-NetFirewallRule -DisplayName 'Aouda admin' -Direction Inbound `
 ## Day-to-day
 
 ```powershell
-aouda service status # or: Get-Service Aouda
+aouda service status      # or: Get-Service Aouda
 aouda service start
 aouda service stop
-aouda status # running? ready? where? what budget?
-aouda doctor # what is misconfigured on this machine
+aouda status              # running? ready? where? what budget?
+aouda doctor              # what is misconfigured on this machine
 ```
 
 `aouda status` reads the installed service's port from its registration and probes `/ready`, so it needs no arguments for a default install. Both take `--output json`. `doctor`'s findings carry an id, a severity and a remedy, and are meant to be pasted into a support thread. The exit codes are the same on every platform — see [the table on the Linux page](linux.md#exit-codes).
@@ -208,21 +208,21 @@ Stops and removes the service. **The data directory is never touched.**
 ## The `aouda` command on Windows
 
 - **A long command line.** A command line through a `.cmd` shim is limited to 8191 characters by Windows. A full declaration given to
- `aouda plan` or `aouda start` as `--Aouda:…` arguments can exceed it. Put the arguments in a file, one per line, and pass `@args.txt`
- (**BL-1586, 0.16.0**; see [Plan a declaration](../guides/plan.md#the-command)), or start `Aouda.Server.exe` directly.
+  `aouda plan` or `aouda start` as `--Aouda:…` arguments can exceed it. Put the arguments in a file, one per line, and pass `@args.txt`
+  (**BL-1586, 0.16.0**; see [Plan a declaration](../guides/plan.md#the-command)), or start `Aouda.Server.exe` directly.
 - **Installing the tool with NuGet package source mapping on.** `dotnet tool install -g Aouda.Cli --add-source <feed>` fails when a
- `packageSourceMapping` section does not map `Aouda.Cli` to that source, because the mapping is applied before `--add-source`. Add a
- `<package pattern="Aouda.*" />` entry for the feed to your `NuGet.Config`, or use `dotnet tool update -g Aouda.Cli --version <X>`,
- which works with the mapping on. This is NuGet's behaviour, not Aouda's.
+  `packageSourceMapping` section does not map `Aouda.Cli` to that source, because the mapping is applied before `--add-source`. Add a
+  `<package pattern="Aouda.*" />` entry for the feed to your `NuGet.Config`, or use `dotnet tool update -g Aouda.Cli --version <X>`,
+  which works with the mapping on. This is NuGet's behaviour, not Aouda's.
 
 ---
 
-## If.NET 10 is missing
+## If .NET 10 is missing
 
-The install script checks first. If you skipped it, the failure comes from the.NET host loader rather than from Aouda:
+The install script checks first. If you skipped it, the failure comes from the .NET host loader rather than from Aouda:
 
 ```
-You must install.NET to run this application.
+You must install .NET to run this application.
 App: C:\Program Files\Aouda\Aouda.Server.exe
 Architecture: x64
 Framework: 'Microsoft.AspNetCore.App', version '10.0.0' (x64)
@@ -230,4 +230,4 @@ Framework: 'Microsoft.AspNetCore.App', version '10.0.0' (x64)
 
 ⚠️ **There is no Aouda error message for this, and there cannot be** — the binary is framework-dependent, so the loader fails before any Aouda code runs.
 
-⚠️ **Upgrading from 0.1.40 or earlier is the case that meets this** (**BL-739, 0.2.0**). Those servers ran on.NET 8, so a machine that has run Aouda for months does not necessarily have.NET 10. Install it (`winget install Microsoft.DotNet.AspNetCore.10`) *before* replacing the binaries; the two runtimes install side by side, so the running service is not disturbed.
+⚠️ **Upgrading from 0.1.40 or earlier is the case that meets this** (**BL-739, 0.2.0**). Those servers ran on .NET 8, so a machine that has run Aouda for months does not necessarily have .NET 10. Install it (`winget install Microsoft.DotNet.AspNetCore.10`) *before* replacing the binaries; the two runtimes install side by side, so the running service is not disturbed.

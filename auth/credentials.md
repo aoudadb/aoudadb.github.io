@@ -72,9 +72,9 @@ An OIDC trust says which issuer, audience and subject map to a principal:
 
 ```json
 {
- "issuer": "https://token.actions.githubusercontent.com",
- "audience": "aouda",
- "subject": "repo:example/rates:ref:refs/heads/main"
+  "issuer": "https://token.actions.githubusercontent.com",
+  "audience": "aouda",
+  "subject": "repo:example/rates:ref:refs/heads/main"
 }
 ```
 

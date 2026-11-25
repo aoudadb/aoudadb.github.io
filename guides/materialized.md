@@ -17,7 +17,7 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 
 ## Start Here
 
-> **Declaring MQs in `aouda.schema.json` (new).** Materialized queries can now be declared under a top-level `materializedQueries` map and managed by `schema diff` / `apply` / `export`, instead of only through the.NET helpers or admin HTTP. That is the recommended path for new work — it puts MQ definitions under the same review and CI gate as tables and named queries. Syntax, the five shapes (`latestPerKey`, `firstPerKey`, `aggregate`, `filter`, `topNPerGroup`), and the drop-on-omit semantics are in [Schema management](schema-management.md#materialized-queries-in-the-schema-file). Statements below about MQ lifecycle being.NET-only predate this and are being reworked; the runtime behaviour they describe is unchanged.
+> **Declaring MQs in `aouda.schema.json` (new).** Materialized queries can now be declared under a top-level `materializedQueries` map and managed by `schema diff` / `apply` / `export`, instead of only through the .NET helpers or admin HTTP. That is the recommended path for new work — it puts MQ definitions under the same review and CI gate as tables and named queries. Syntax, the five shapes (`latestPerKey`, `firstPerKey`, `aggregate`, `filter`, `topNPerGroup`), and the drop-on-omit semantics are in [Schema management](schema-management.md#materialized-queries-in-the-schema-file). Statements below about MQ lifecycle being .NET-only predate this and are being reworked; the runtime behaviour they describe is unchanged.
 
 > **One cell, not a result set?** (**ADR 0072, 0.14.0**) A [formula](formulas.md) — the value of an `Expression` column — maintains one value in one row from other rows' values. A formula may read a row of a materialized query's result, which is how a `SUM` over many rows feeds a formula. The other direction is closed at the formula: a materialized query may be built over a formula table (its driven values are ordinary typed columns), but no formula may read the result of a query whose source chain holds a formula table (`400 FORMULA_REFERENCE_INVALID`), and a token read of such a query is not yet judged by the formula maintainer (BL-1486). Dropping a materialized query whose result a formula reads is `409 FORMULA_TABLE_REFERENCED`.
 
@@ -76,29 +76,29 @@ At a high level, Aouda does this:
 What is different in Aouda vs many systems:
 - The result is a regular table, not a special hidden object type.
 - The query name is the table name (unified namespace; no `_mq_` prefix), so it follows the
- [table-name rule](../reference/http-api.md#table-names), and may not start with `_` or exceed 100 characters. `aouda schema
- check`, the start and `POST …/materialized-queries` refuse a name that breaks it before anything is created (**BL-1468, 0.14.0**).
+  [table-name rule](../reference/http-api.md#table-names), and may not start with `_` or exceed 100 characters. `aouda schema
+  check`, the start and `POST …/materialized-queries` refuse a name that breaks it before anything is created (**BL-1468, 0.14.0**).
 - Subscription uses the normal table streaming path (`target = queryName`), not a custom protocol target.
- **A rebuild is announced too (**BL-702, 0.2.0**):** when a change can only be applied by rebuilding the result
- (for example, deleting the source row that held an aggregate's `last`), a subscriber of the result receives the
- difference between the old and new result as ordinary `Insert` / `Update` / `Delete` events on the result table,
- instead of seeing the changed rows only through a later event.
- **A maintained `sum` carries the column's type in update events too (**ColumnarCore S10, 0.2.0**):** an
- update event's `sum` of an integer column (the maintainer's event since **WorkloadCore S09, 0.3.0**; the
- insert's in-commit event before) is an `Int64`, as its insert event and every read already were
- (the JSON is the same, `12`), and a `sum` of a `Double` column is a `double` — `3` where it was `3.0`.
+  **A rebuild is announced too (**BL-702, 0.2.0**):** when a change can only be applied by rebuilding the result
+  (for example, deleting the source row that held an aggregate's `last`), a subscriber of the result receives the
+  difference between the old and new result as ordinary `Insert` / `Update` / `Delete` events on the result table,
+  instead of seeing the changed rows only through a later event.
+  **A maintained `sum` carries the column's type in update events too (**ColumnarCore S10, 0.2.0**):** an
+  update event's `sum` of an integer column (the maintainer's event since **WorkloadCore S09, 0.3.0**; the
+  insert's in-commit event before) is an `Int64`, as its insert event and every read already were
+  (the JSON is the same, `12`), and a `sum` of a `Double` column is a `double` — `3` where it was `3.0`.
 
 - User problem solved:
- - Avoid re-running expensive query logic (for example aggregates, latest-per-key projections) on every read.
- - Keep query reads low-latency while source table writes continue.
+  - Avoid re-running expensive query logic (for example aggregates, latest-per-key projections) on every read.
+  - Keep query reads low-latency while source table writes continue.
 - Operational outcomes:
- - Predictable read path for precomputed results.
- - Incremental maintenance through source-table change events.
- - Unified table semantics: materialized results are regular catalog tables.
+  - Predictable read path for precomputed results.
+  - Incremental maintenance through source-table change events.
+  - Unified table semantics: materialized results are regular catalog tables.
 - Scope boundaries:
- - This functionality does not currently provide JOIN-based materialized queries.
- - This functionality does not currently provide first-class TypeScript or HTTP APIs for MQ create/drop/list/status.
- - This functionality does not currently resolve the known MQ result-table duplicate-row bug after flush (P11 handoff).
+  - This functionality does not currently provide JOIN-based materialized queries.
+  - This functionality does not currently provide first-class TypeScript or HTTP APIs for MQ create/drop/list/status.
+  - This functionality does not currently resolve the known MQ result-table duplicate-row bug after flush (P11 handoff).
 
 ## 2.2 Discovery and navigation map
 
@@ -132,41 +132,41 @@ What is different in Aouda vs many systems:
 ### Source map
 
 - Task/report evidence:
- - `docs/tasks/P4/P4-EpicH-MaterializedQueries-Tasks.md`
- - `docs/tasks/P4/P4-EpicH-Task1-MaterializedQueryInfrastructure-Report.md`
- - `docs/tasks/P4/P4-EpicH-Task2-LatestPerKeyPattern-Report.md`
- - `docs/tasks/P4/P4-EpicH-Task4-FilterPattern-Report.md`
- - `docs/tasks/P4/P4-EpicH-Task5-IncrementalUpdateSubscription-Report.md`
- - `docs/tasks/P4/P4-EpicH-Refactoring-Completion.md`
- - `docs/tasks/P4/P4-EpicH-BL020-QueryPlannerAutoRouting-Report.md`
- - `docs/tasks/P4/P4-EpicH-BL021-UnifiedTableNamespace-Report.md`
- - `docs/tasks/P4/P4-EpicH-R10.4-QueryUnflushedHraTableData-Report.md`
- - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
- - `docs/tasks/P11/P11-Fix-R8-MaterializedQueryFlushIntegrationTests-Report.md`
+  - `docs/tasks/P4/P4-EpicH-MaterializedQueries-Tasks.md`
+  - `docs/tasks/P4/P4-EpicH-Task1-MaterializedQueryInfrastructure-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Task2-LatestPerKeyPattern-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Task4-FilterPattern-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Task5-IncrementalUpdateSubscription-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Refactoring-Completion.md`
+  - `docs/tasks/P4/P4-EpicH-BL020-QueryPlannerAutoRouting-Report.md`
+  - `docs/tasks/P4/P4-EpicH-BL021-UnifiedTableNamespace-Report.md`
+  - `docs/tasks/P4/P4-EpicH-R10.4-QueryUnflushedHraTableData-Report.md`
+  - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
+  - `docs/tasks/P11/P11-Fix-R8-MaterializedQueryFlushIntegrationTests-Report.md`
 - Core code:
- - `src/Aouda.Engine.Api/AoudaEngine.cs`
- - `src/Aouda.Engine.Api/TableQuery.cs`
- - `src/Aouda.Engine.Query/MaterializedQueryMatcher.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryDefinition.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQuerySubscriptionManager.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedResultTableManager.cs`
- - `src/Aouda.Server/Controllers/TablesController.cs`
- - `src/Aouda.Engine.Diagnostics/Perf.cs`
+  - `src/Aouda.Engine.Api/AoudaEngine.cs`
+  - `src/Aouda.Engine.Api/TableQuery.cs`
+  - `src/Aouda.Engine.Query/MaterializedQueryMatcher.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryDefinition.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQuerySubscriptionManager.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedResultTableManager.cs`
+  - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Engine.Diagnostics/Perf.cs`
 - TypeScript client code (cross-repo):
- - `../aouda-client-ts/src/query-builder.ts`
- - `../aouda-client-ts/src/streaming/subscription.ts`
- - `../aouda-client-ts/src/tables.ts`
+  - `../aouda-client-ts/src/query-builder.ts`
+  - `../aouda-client-ts/src/streaming/subscription.ts`
+  - `../aouda-client-ts/src/tables.ts`
 - Test evidence:
- - `tests/Aouda.Engine.Api.Tests/MaterializedQueryApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/LatestPerKeyApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/AggregateApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/FilterApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/MaterializedQueryAutoRoutingTests.cs`
- - `tests/Aouda.Engine.Api.Tests/IncrementalUpdateSubscriptionTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Materialized/`
- - `tests/Aouda.Engine.Query.Tests/MaterializedQueryMatcherTests.cs`
- - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
- - `../aouda-client-ts/tests/streaming/subscription.test.ts`
+  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/LatestPerKeyApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/AggregateApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/FilterApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryAutoRoutingTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/IncrementalUpdateSubscriptionTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Materialized/`
+  - `tests/Aouda.Engine.Query.Tests/MaterializedQueryMatcherTests.cs`
+  - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
+  - `../aouda-client-ts/tests/streaming/subscription.test.ts`
 
 ## 2.3 Defaults and zero-config behavior
 
@@ -176,16 +176,16 @@ If you create a materialized query with standard helpers and no special options:
 - `CreatedUtc` is auto-set if omitted.
 - Result table naming uses unified namespace (`result table name == MQ name`).
 - Normal `TableQuery` reads attempt MQ auto-routing when a compatible MQ is `Ready` **and current** — on every read and over
- HTTP (**ColumnarRead S18, 0.3.0**; [routing](#routing-a-read-to-a-maintained-result)).
+  HTTP (**ColumnarRead S18, 0.3.0**; [routing](#routing-a-read-to-a-maintained-result)).
 - Result-table storage temperature defaults to **`Auto`** — for **every** query type, the same
- default an ordinary table has. Residency is policy, not something inferred from the query type.
- Declare `storage.storageTemperature` to choose; see
- [2.3.1](#where-a-materialized-querys-result-lives).
+  default an ordinary table has. Residency is policy, not something inferred from the query type.
+  Declare `storage.storageTemperature` to choose; see
+  [2.3.1](#where-a-materialized-querys-result-lives).
 - Subscription manager defaults:
- - `MaxLag = 1s`
- - `MaxQueueDepth = 10000`
- - `ProcessingBatchSize = 100`
- - `MaintenanceBacklogMaxBytes = 64 MiB` per update lane (**WorkloadCore S09, 0.3.0**)
+  - `MaxLag = 1s`
+  - `MaxQueueDepth = 10000`
+  - `ProcessingBatchSize = 100`
+  - `MaintenanceBacklogMaxBytes = 64 MiB` per update lane (**WorkloadCore S09, 0.3.0**)
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -193,7 +193,7 @@ If you create a materialized query with standard helpers and no special options:
 | `MaterializedQueryDefinition.CreatedUtc` | set to `DateTime.UtcNow` when missing | Definitions always have creation timestamp |
 | `MaterializedQueryDefinition.ResultTableName` | `Name` (BL-021) | Query/subscription uses normal table name |
 | `window` | none — every group is kept | (**Horizon, 0.5.0**) An `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column may keep only its groups at or after a horizon; a read of anything older is computed from the source. [2.11e](#windows) |
-| `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates and GROUP BY, over HTTP too, and latest-per-key in the embedded API only (HTTP and TypeScript: **BL-801**) — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan` is used ([routing](#routing-a-read-to-a-maintained-result)) |
+| `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates and GROUP BY, over HTTP too, and latest-per-key in the embedded API only (HTTP and TypeScript: **BL-801**) — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan()` is used ([routing](#routing-a-read-to-a-maintained-result)) |
 | Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing; past it a query's batches go to its lane's backlog (**WorkloadCore S09, 0.3.0**) |
@@ -237,16 +237,16 @@ rarely the best answer when you do**, and the table below is how to decide.
 
 ```json
 "materializedQueries": {
- "candles_bid_1m": {
- "type": "aggregate",
- "sourceTable": "quotes",
- "groupBy": [
- { "column": "ticker" },
- { "column": "time", "function": "TruncateToMinute", "outputName": "time" }
- ],
- "aggregates": [ /* … */ ],
- "storage": { "storageTemperature": "ColdPreferred" }
- }
+  "candles_bid_1m": {
+    "type": "aggregate",
+    "sourceTable": "quotes",
+    "groupBy": [
+      { "column": "ticker" },
+      { "column": "time", "function": "TruncateToMinute", "outputName": "time" }
+    ],
+    "aggregates": [ /* … */ ],
+    "storage": { "storageTemperature": "ColdPreferred" }
+  }
 }
 ```
 
@@ -278,8 +278,8 @@ PUT /api/databases/finance/tables/candles_bid_1m/policy
 Content-Type: application/json
 
 {
- "storageTemperature": "Auto",
- "memoryRowCap": 50000
+  "storageTemperature": "Auto",
+  "memoryRowCap": 50000
 }
 ```
 
@@ -324,7 +324,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 `permissionDimension` and `rlsResolverName` that a table carries are **not members of a materialized query**: in a schema file, `schema apply` or `schema diff` they are
 `400 SCHEMA_UNKNOWN_MEMBER` (`aouda plan`: the same finding, with the JSON pointer of the member). They were never read: whatever a query's definition said, its result was filtered by the source
 table's partition-level and row-level security alone, so a file that carried them changed nothing and still changes nothing once they are deleted. From the 0.15.0 the
-message says so: *"a materialized query has no 'authMode'. The server never read it here: a materialized query's security comes from its source table... Delete the member; to secure the
+message says so: *"a materialized query has no 'authMode'. The server never read it here: a materialized query's security comes from its source table ... Delete the member; to secure the
 result, set authMode, permissionDimension, permissionColumn, rlsResolverName or partitionLevelSecurity on the source table."*
 
 **Migration:** delete the member from the materialized query; to secure its result, declare the security on the **source table** (`authMode`, `permissionDimension`, `permissionColumn`,
@@ -344,78 +344,78 @@ the answer equal.
 ### Available now
 
 - Core infrastructure:
- - MQ definition/catalog/store/status lifecycle (`Building`, `Ready`, `Rebuilding`, `Error`).
- - Create/drop/list/status APIs in.NET engine.
+  - MQ definition/catalog/store/status lifecycle (`Building`, `Ready`, `Rebuilding`, `Error`).
+  - Create/drop/list/status APIs in .NET engine.
 - Implemented query patterns:
- - `LatestPerKey`, `Aggregate`, `Filter`.
+  - `LatestPerKey`, `Aggregate`, `Filter`.
 - Aggregate MQ extensions (P28):
- - `FIRST`/`LAST` aggregate functions with `orderByColumn` + `descending` ordering, enabling OHLC (Open/High/Low/Close) candle patterns.
- - Derived time-bucket group-by expressions: `{ "column": "time", "function": "TruncateToHour" }` or `"TruncateToMinute"` alongside plain column group-by. Group keys are stored as Int64 epoch milliseconds (allocation-free integer arithmetic).
- - `AggregateConfig` bumped to v2: each `groupByColumns` entry is an object (`{ "column": "region" }`). (**BL-980, 0.4.0**) The v1 plain-string form is **refused** — a create request carrying it gets `400`, and a stored definition in that form is refused when it is read; up to 0.3.x it was parsed transparently. Pre-1.0 there is no migration: drop and re-create such a query with the object form.
+  - `FIRST`/`LAST` aggregate functions with `orderByColumn` + `descending` ordering, enabling OHLC (Open/High/Low/Close) candle patterns.
+  - Derived time-bucket group-by expressions: `{ "column": "time", "function": "TruncateToHour" }` or `"TruncateToMinute"` alongside plain column group-by. Group keys are stored as Int64 epoch milliseconds (allocation-free integer arithmetic).
+  - `AggregateConfig` bumped to v2: each `groupByColumns` entry is an object (`{ "column": "region" }`). (**BL-980, 0.4.0**) The v1 plain-string form is **refused** — a create request carrying it gets `400`, and a stored definition in that form is refused when it is read; up to 0.3.x it was parsed transparently. Pre-1.0 there is no migration: drop and re-create such a query with the object form.
 - Incremental maintenance:
- - Update routing via `MaterializedQuerySubscriptionManager` with `Async` and `Sync` modes.
- - Guard against infinite loops for result-table events.
+  - Update routing via `MaterializedQuerySubscriptionManager` with `Async` and `Sync` modes.
+  - Guard against infinite loops for result-table events.
 - Table-based result storage:
- - MQ results are regular catalog tables (compaction/hot-cold/persistence integration).
- - Unified namespace (no `_mq_` prefix).
+  - MQ results are regular catalog tables (compaction/hot-cold/persistence integration).
+  - Unified namespace (no `_mq_` prefix).
 - Windows (**Horizon, 0.5.0**): an `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column may declare
- `window: { keep }`. Its result keeps only the groups at or after its horizon, maintenance builds nothing below it, a read below it
- is computed from the source, and expiry drops whole segments without writing. See [2.11e](#windows).
+  `window: { keep }`. Its result keeps only the groups at or after its horizon, maintenance builds nothing below it, a read below it
+  is computed from the source, and expiry drops whole segments without writing. See [2.11e](#windows).
 - Planner integration:
- - Auto-routing from base-table `TableQuery` to matching MQ in `Ready` state — and, since **ColumnarRead S18** (0.15.0), only when it is current, on every read path and over HTTP ([routing](#routing-a-read-to-a-maintained-result)).
- - `WithDirectScan` bypass and routing decision visibility.
+  - Auto-routing from base-table `TableQuery` to matching MQ in `Ready` state — and, since **ColumnarRead S18** (0.15.0), only when it is current, on every read path and over HTTP ([routing](#routing-a-read-to-a-maintained-result)).
+  - `WithDirectScan()` bypass and routing decision visibility.
 - Streaming behavior:
- - Subscribe to MQ results through normal table subscription path.
- - No protocol-level MQ target-kind required.
+  - Subscribe to MQ results through normal table subscription path.
+  - No protocol-level MQ target-kind required.
 - MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
- - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
- - Auto after `BulkLoadAsync`: (**WorkloadCore S10, 0.3.0**) when `PostLoadMqBehavior.Auto` (the default), the load records a pending job and the table's [deferred pass](#deferred-loads) starts at its commit and brings affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) current: a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: a background rebuild job, started after the pass, not inside it). Multi-table and transform loads take the same path. The load does no materialized-query work while its rows stream and is not paced to a drain. Before S10 the queries accumulated during the load's own pass over rows and were published by shadow-swap at commit (the ingest-fed path, P46), with the exception that follows. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load was folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written (gone in **WorkloadCore S10**: the pass reads the load's segments), or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, 0.3.0**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`, `current: false`) until it is done. The work under `MqRebuildStatus.InProgress` reads only the load's segments, not a second full scan of the table; a query the pass can neither fold nor apply is rebuilt, by a background rebuild job after the pass (**WorkloadCore S17, 0.3.0**), and `MqRebuildCompleted` waits for that rebuild too. Source tables at durability `memory` (`MemoryOnly` before **Lead S26, 0.6.0**) are a no-op — a bulk load into one is refused. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
- - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
- - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
- - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
- - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
- - TypeScript client: `client.materializedQueries.refresh(name, { await: true })`.
- - CLI: `aouda mq refresh <name> [--await]`; `--skip-mq-refresh` flag on `aouda table bulk-load`.
- - **Pooled refresh (BL-474)**: several queries over one source table are rebuilt from a *single*
- traversal of it. `POST /api/databases/{db}/materialized-queries:refresh` (collection-level),
- `engine.RefreshMaterializedQueriesForTableAsync(sourceTable, staleOnly, ct)` /
- `RefreshMaterializedQueriesAsync(names, ct)`,
- `client.MaterializedQueries.RefreshTableAsync(...)` / `RefreshManyAsync(...)`, and
- `aouda mq refresh --source-table <table> [--stale-only]`. See
- [§2.11a](#211a-refreshing-several-queries-at-once-pooled-refresh). No TypeScript client surface
- yet. The refresh finishes current, including commits that land while it scans, and does not read the source
- table a second time. A commit already in the snapshot that scan read is not applied again; a commit that becomes
- visible after it is applied once, in order, before the refresh returns. A maintenance-feed failure during the scan
- still leaves the query stale. The frontier is that snapshot's position and the commits the new result actually
- applies, not the database log head. A bulk-load job the snapshot did not read stays owed, and the refresh does not claim
- current over it.
- - **Memory budget**: a rebuild holds one grant. A build that outgrows it partitions and spills
- through its build table instead of being retired (**WorkloadCore S12, 0.3.0**); a rebuild
- refused for capacity leaves the query readable, stale and requeued, never in `Error`. See
- [§2.11b](#211b-what-a-rebuild-costs-and-what-bounds-it).
+  - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
+  - Auto after `BulkLoadAsync`: (**WorkloadCore S10, 0.3.0**) when `PostLoadMqBehavior.Auto` (the default), the load records a pending job and the table's [deferred pass](#deferred-loads) starts at its commit and brings affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) current: a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: a background rebuild job, started after the pass, not inside it). Multi-table and transform loads take the same path. The load does no materialized-query work while its rows stream and is not paced to a drain. Before S10 the queries accumulated during the load's own pass over rows and were published by shadow-swap at commit (the ingest-fed path, P46), with the exception that follows. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load was folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written (gone in **WorkloadCore S10**: the pass reads the load's segments), or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, 0.3.0**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`, `current: false`) until it is done. The work under `MqRebuildStatus.InProgress` reads only the load's segments, not a second full scan of the table; a query the pass can neither fold nor apply is rebuilt, by a background rebuild job after the pass (**WorkloadCore S17, 0.3.0**), and `MqRebuildCompleted` waits for that rebuild too. Source tables at durability `memory` (`MemoryOnly` before **Lead S26, 0.6.0**) are a no-op — a bulk load into one is refused. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
+  - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
+  - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
+  - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
+  - TypeScript client: `client.materializedQueries.refresh(name, { await: true })`.
+  - CLI: `aouda mq refresh <name> [--await]`; `--skip-mq-refresh` flag on `aouda table bulk-load`.
+  - **Pooled refresh (BL-474)**: several queries over one source table are rebuilt from a *single*
+    traversal of it. `POST /api/databases/{db}/materialized-queries:refresh` (collection-level),
+    `engine.RefreshMaterializedQueriesForTableAsync(sourceTable, staleOnly, ct)` /
+    `RefreshMaterializedQueriesAsync(names, ct)`,
+    `client.MaterializedQueries.RefreshTableAsync(...)` / `RefreshManyAsync(...)`, and
+    `aouda mq refresh --source-table <table> [--stale-only]`. See
+    [§2.11a](#211a-refreshing-several-queries-at-once-pooled-refresh). No TypeScript client surface
+    yet. The refresh finishes current, including commits that land while it scans, and does not read the source
+    table a second time. A commit already in the snapshot that scan read is not applied again; a commit that becomes
+    visible after it is applied once, in order, before the refresh returns. A maintenance-feed failure during the scan
+    still leaves the query stale. The frontier is that snapshot's position and the commits the new result actually
+    applies, not the database log head. A bulk-load job the snapshot did not read stays owed, and the refresh does not claim
+    current over it.
+  - **Memory budget**: a rebuild holds one grant. A build that outgrows it partitions and spills
+    through its build table instead of being retired (**WorkloadCore S12, 0.3.0**); a rebuild
+    refused for capacity leaves the query readable, stale and requeued, never in `Error`. See
+    [§2.11b](#211b-what-a-rebuild-costs-and-what-bounds-it).
 
 ### Planned / proposed
 
 - Explicit roadmap/backlog items still open:
- - BL-010: JOIN support in materialized queries (depends on BL-009).
- - BL-053: Distinct `MATERIALIZED_QUERY_NOT_READY` subscription error code.
- - Incremental MQ rebuild (segment-scoped) — P31 implements full rebuild only; incremental deferred.
- - Cross-MQ dependency ordering (MQ whose source is another MQ result table).
- - WebSocket/SSE rebuild progress stream — callers currently poll `mqRebuildStatus`.
+  - BL-010: JOIN support in materialized queries (depends on BL-009).
+  - BL-053: Distinct `MATERIALIZED_QUERY_NOT_READY` subscription error code.
+  - Incremental MQ rebuild (segment-scoped) — P31 implements full rebuild only; incremental deferred.
+  - Cross-MQ dependency ordering (MQ whose source is another MQ result table).
+  - WebSocket/SSE rebuild progress stream — callers currently poll `mqRebuildStatus`.
 - Query API expansion that unblocks richer MQ usage:
- - BL-003: nested AND/OR predicate support in REST query API.
- - BL-009: JOIN exposure in `TableQuery` API.
+  - BL-003: nested AND/OR predicate support in REST query API.
+  - BL-009: JOIN exposure in `TableQuery` API.
 
 ### Reserved / not yet wired
 
 - None for MQ pattern types: `FirstPerKey` (MIN of `orderBy`, not arrival order) and `TopNPerGroup` (N rows per group; in-memory working set) are implemented. Query / subscribe the Top-N result table by name — the planner does not auto-route it.
 - **A `TopNPerGroup` over another query's result keeps its groups in memory (**ColumnarMerge S04, 0.2.0**).**
- When the source of a top-N is another materialized query (the "leaders over daily volume" shape), the
- query holds every member of each group it has seen, ranked, and needs no read-back per commit: a deleted
- winner, a winner whose value gets worse and a row that moves to another group are all answered exactly,
- where before they marked the query stale and rebuilt it. The memory is reserved with the server's memory
- governor; if it is refused, the query keeps working the previous way (correct, slower). A top-N directly
- over a source table is unchanged.
+  When the source of a top-N is another materialized query (the "leaders over daily volume" shape), the
+  query holds every member of each group it has seen, ranked, and needs no read-back per commit: a deleted
+  winner, a winner whose value gets worse and a row that moves to another group are all answered exactly,
+  where before they marked the query stale and rebuilt it. The memory is reserved with the server's memory
+  governor; if it is refused, the query keeps working the previous way (correct, slower). A top-N directly
+  over a source table is unchanged.
 
 Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list/status) were shipped in P16 Epic H (task H.3) and are no longer reserved. See §2.11 for the API reference.
 
@@ -437,17 +437,17 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
-| Define/register/drop materialized queries | Yes | No | No | P4 Task1 report, `AoudaEngine.CreateMaterializedQueryAsync` |.NET engine surface is available |
+| Define/register/drop materialized queries | Yes | No | No | P4 Task1 report, `AoudaEngine.CreateMaterializedQueryAsync` | .NET engine surface is available |
 | Latest-per-key materialization | Yes | No | No | P4 Task2 report, `LatestPerKeyApiTests` | Includes initial build and incremental updates |
 | Aggregate materialization | Yes | No | No | `AggregateApiTests`, storage maintainer tests | Grouping logic has known BL-019 investigations |
 | Filter materialization | Yes | No | No | P4 Task4 report, `FilterApiTests` | Incremental updates handle insert/update/delete paths |
 | Async/sync update modes | Yes | No | No | P4 Task5 report, subscription manager code | `Async` default; `Sync` commit-path updates |
-| Auto-routing of base queries to MQ | Yes | No | No | BL-020 report, `MaterializedQueryAutoRoutingTests` | Can bypass via `WithDirectScan` |
+| Auto-routing of base queries to MQ | Yes | No | No | BL-020 report, `MaterializedQueryAutoRoutingTests` | Can bypass via `WithDirectScan()` |
 | Unified namespace (MQ name == table name) | Yes | No | No | BL-021 report, `ResultTableName`, table listing behavior | Applies to query and subscription paths |
 | Subscribe to MQ result streams via table API | Yes | No | No | P10-S10, client streaming tests | No special protocol field required |
 | FirstPerKey maintainer/runtime | Yes | No | No | BL-187; `CreateFirstPerKeyAsync`; MIN of `orderBy` | Not chronological first-arrival |
 | TopNPerGroup maintainer/runtime | Yes | No | No | BL-187; `CreateTopNPerGroupAsync`; working set in memory | Query the result table by name; no planner auto-route. Source must have a PK. |
-| HTTP/TS API for MQ lifecycle management | No | Yes | No | No server controller/TS surface;.NET only | Workaround: create in.NET, query as table |
+| HTTP/TS API for MQ lifecycle management | No | Yes | No | No server controller/TS surface; .NET only | Workaround: create in .NET, query as table |
 | Correct no-duplicate result-table reads after flush | No | Yes | No | P11 R8 handoff report | Known engine bug |
 | `FIRST`/`LAST` aggregate functions with ordering | Yes | No | No | P28 S2, `AggregateMaintainer`, `AggregateConfig.CurrentVersion == 2` | Enables OHLC candle patterns; requires `orderByColumn` + `descending` fields |
 | Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
@@ -455,8 +455,8 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
 | Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, the table's pass (WorkloadCore S10) | All four MQ types brought current by the table's pass, started at the commit (**WorkloadCore S10, 0.3.0**; they accumulated during the load before); queries it cannot fold or apply are rebuilt. `memory` sources skipped (`MemoryOnly` before Lead S26) |
 | `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Failed; awaitable Task |
-| Replica MQ rebuild after bulk-load | Yes | No | No | P31 S1, `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched; factory via `engine.CreateReplicaMqRebuildScheduler` |
-| HTTP `POST.../materialized-queries/{name}:refresh` | Yes | No | No | P31 S2, `MaterializedQueriesController` | `?await=true` waits; `?await=false` fire-and-forget |
+| Replica MQ rebuild after bulk-load | Yes | No | No | P31 S1, `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched; factory via `engine.CreateReplicaMqRebuildScheduler()` |
+| HTTP `POST .../materialized-queries/{name}:refresh` | Yes | No | No | P31 S2, `MaterializedQueriesController` | `?await=true` waits; `?await=false` fire-and-forget |
 | C# client `MaterializedQueries.RefreshAsync` | Yes | No | No | P31 S2, `src/Aouda.Client/MaterializedQueriesApi.cs` | `awaitCompletion` parameter |
 | TypeScript `materializedQueries.refresh(name, {await})` | Yes | No | No | P31 S2, `aouda-client-ts/src/materialized.ts` | — |
 | CLI `aouda mq refresh <name> [--await]` | Yes | No | No | P31 S2, `src/Aouda.Cli/Commands/MqCommand.cs` | Also `--skip-mq-refresh` on `aouda table bulk-load` |
@@ -464,95 +464,95 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 ## 2.7 Core concepts and mental model
 
 - `MaterializedQueryDefinition`:
- - Durable definition describing source table, type, config JSON, update mode, storage preferences.
+  - Durable definition describing source table, type, config JSON, update mode, storage preferences.
 - `MaterializedQueryEntry`:
- - Runtime catalog entry with current state and status metadata.
+  - Runtime catalog entry with current state and status metadata.
 - Result table:
- - A normal Aouda table produced/maintained for an MQ definition.
- - Under BL-021, its name is the MQ name.
+  - A normal Aouda table produced/maintained for an MQ definition.
+  - Under BL-021, its name is the MQ name.
 - Maintainer:
- - Pattern-specific logic that builds initial state and applies incremental updates.
+  - Pattern-specific logic that builds initial state and applies incremental updates.
 - Update mode:
- - `Async`: enqueue and apply later — every commit, insert included (**WorkloadCore S09, 0.3.0**); in 0.2.0 an insert's
- aggregates and latest/first-per-key queries were maintained inside its own commit (**ColumnarMerge S11**; see below).
- - `Sync`: fed exactly as `Async` (**WorkloadCore S09, 0.3.0**): both are queued at the commit and neither is dropped below the backlog's
- bound. A `Sync` query only ignores `maxCoalesceMs`.
+  - `Async`: enqueue and apply later — every commit, insert included (**WorkloadCore S09, 0.3.0**); in 0.2.0 an insert's
+    aggregates and latest/first-per-key queries were maintained inside its own commit (**ColumnarMerge S11**; see below).
+  - `Sync`: fed exactly as `Async` (**WorkloadCore S09, 0.3.0**): both are queued at the commit and neither is dropped below the backlog's
+    bound. A `Sync` query only ignores `maxCoalesceMs`.
 - Freshness knob, `maxCoalesceMs` (**ColumnarMerge S10, 0.2.0**):
- - How long an `Async` query's incremental batches may wait so that they are applied together — one write per
- changed group instead of one per commit. `0` (the default) applies each batch as it comes. Staleness is bounded
- by the knob plus one commit; a flush (and a clean shutdown) applies what is held at once. Set it on the query in
- `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
- query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
+  - How long an `Async` query's incremental batches may wait so that they are applied together — one write per
+    changed group instead of one per commit. `0` (the default) applies each batch as it comes. Staleness is bounded
+    by the knob plus one commit; a flush (and a clean shutdown) applies what is held at once. Set it on the query in
+    `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
+    query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
 - Currency, `currency` (**Lead S27b, 0.6.0**; ADR 0066 `D-4`) — how the result is kept, declared per query:
- - `current` (the default): maintained off each commit, as everything above describes.
- - `rebuild`: **never maintained incrementally.** A commit to a source marks the query behind — `current: false`,
- `isStale: true` with a `staleReason` naming its currency — and it is not routed to, so a read of the source is answered
- from the source (never from a stale result). It is rebuilt, one scan of the source for every `rebuild` query over it,
- once the source has been quiet for 2 s, after a bulk load into it (the load's pass rebuilds it rather than folding the load
- in), or on `:refresh`. ⚠️ **Under a steady stream of writes it may never be current** (**Lead group 6 review, 0.6.0**):
- a rebuild also starts at most 60 s after the first change, but a commit that lands while it runs leaves the query behind
- again, so a source written more often than a rebuild takes keeps a `rebuild` query behind — and rebuilding about once a
- minute (BL-1149). Choose `current` for a source that never goes quiet. A restart rebuilds it if its
- source changed after its checkpoint, rather than folding the change forward. It is meant for a query over a table that
- takes its data in bursts — loads, batch jobs — where readers can wait for the burst to settle (DuckDB's "rebuild after the
- load"). It is **not yet the cheaper level on a bulk load** (**Lead S27c, 0.6.0**): one 1 M-row load into the six
- Equity trade results cost 59.1 CPU-s per million rows at `rebuild` against 36.4 at `current`, because a rebuild reads the
- source row by row and writes the whole result through the insert path (BL-1148).
- - A `:commit` that waits for its queries (`mqWaitMs`) does not wait for a `rebuild` query: its rebuild runs after the commit,
- when the source is quiet. A read that presents a token (`?at_least=`) to a `rebuild` query waits until the query is current,
- which takes the quiet period (2 s) plus the rebuild: with the default `waitMs` (250 ms) such a read right after a write answers
- `409 TOKEN_UNSATISFIED`, so give it a `waitMs` above that. `POST …/materialized-queries/{name}/query` still answers from the
- result while it is behind, with the token of what the result holds — honest, and between a change and its rebuild that is the
- normal state. `updateMode: "sync"` and `maxCoalesceMs` are refused beside `rebuild` (there is no incremental
- batch to shape). Declared in `aouda.schema.json` (`"currency": "rebuild"`) or `currency` on `POST …/materialized-queries`;
- the status reports it (`currency`). A change of level replaces the query.
- - (**BL-935, 0.3.0**) A change in place is durable and safe to run concurrently: the query's `definition.json` is
- written whole to a temp file of its own, fsynced and renamed into place, one writer at a time. Before, two changes of
- one query at once failed one of them, and a cancelled change could leave the definition empty — and the next open
- refused the database.
- - Measured: 150 commits of 10 rows into 5 groups wrote 134× fewer result rows with a 500 ms window; at 50,000 rows/s across the nine Equity queries a 100 ms window cut maintenance CPU by a third (111 → 76 CPU-s per million rows) and the worst staleness p99 from 23 s to 13 s.
+  - `current` (the default): maintained off each commit, as everything above describes.
+  - `rebuild`: **never maintained incrementally.** A commit to a source marks the query behind — `current: false`,
+    `isStale: true` with a `staleReason` naming its currency — and it is not routed to, so a read of the source is answered
+    from the source (never from a stale result). It is rebuilt, one scan of the source for every `rebuild` query over it,
+    once the source has been quiet for 2 s, after a bulk load into it (the load's pass rebuilds it rather than folding the load
+    in), or on `:refresh`. ⚠️ **Under a steady stream of writes it may never be current** (**Lead group 6 review, 0.6.0**):
+    a rebuild also starts at most 60 s after the first change, but a commit that lands while it runs leaves the query behind
+    again, so a source written more often than a rebuild takes keeps a `rebuild` query behind — and rebuilding about once a
+    minute (BL-1149). Choose `current` for a source that never goes quiet. A restart rebuilds it if its
+    source changed after its checkpoint, rather than folding the change forward. It is meant for a query over a table that
+    takes its data in bursts — loads, batch jobs — where readers can wait for the burst to settle (DuckDB's "rebuild after the
+    load"). It is **not yet the cheaper level on a bulk load** (**Lead S27c, 0.6.0**): one 1 M-row load into the six
+    Equity trade results cost 59.1 CPU-s per million rows at `rebuild` against 36.4 at `current`, because a rebuild reads the
+    source row by row and writes the whole result through the insert path (BL-1148).
+  - A `:commit` that waits for its queries (`mqWaitMs`) does not wait for a `rebuild` query: its rebuild runs after the commit,
+    when the source is quiet. A read that presents a token (`?at_least=`) to a `rebuild` query waits until the query is current,
+    which takes the quiet period (2 s) plus the rebuild: with the default `waitMs` (250 ms) such a read right after a write answers
+    `409 TOKEN_UNSATISFIED`, so give it a `waitMs` above that. `POST …/materialized-queries/{name}/query` still answers from the
+    result while it is behind, with the token of what the result holds — honest, and between a change and its rebuild that is the
+    normal state. `updateMode: "sync"` and `maxCoalesceMs` are refused beside `rebuild` (there is no incremental
+    batch to shape). Declared in `aouda.schema.json` (`"currency": "rebuild"`) or `currency` on `POST …/materialized-queries`;
+    the status reports it (`currency`). A change of level replaces the query.
+  - (**BL-935, 0.3.0**) A change in place is durable and safe to run concurrently: the query's `definition.json` is
+    written whole to a temp file of its own, fsynced and renamed into place, one writer at a time. Before, two changes of
+    one query at once failed one of them, and a cancelled change could leave the definition empty — and the next open
+    refused the database.
+  - Measured: 150 commits of 10 rows into 5 groups wrote 134× fewer result rows with a 500 ms window; at 50,000 rows/s across the nine Equity queries a 100 ms window cut maintenance CPU by a third (111 → 76 CPU-s per million rows) and the worst staleness p99 from 23 s to 13 s.
 - Maintenance off the commit (**WorkloadCore S09, 0.3.0**): every commit — insert, upsert, update, delete, merge — hands its change
- batch to its queries' maintainers at the commit, in the table's commit order and without waiting, and they apply it in
- the background. A query is current for a reader only once its maintainer has applied every commit the reader may see
- ([the one rule](#routing-a-read-to-a-maintained-result)), so right after an insert returns its queries may be a moment
- behind: read with the insert's consistency token (`token` / `X-Aouda-Token`) to wait for them, as for any other write.
- A lagging query's batches are not dropped: what its queue cannot take waits in a backlog charged on the memory budget,
- and only past the backlog's bound (64 MiB an update lane) is the query marked behind (`isStale`, reason "Maintenance
- backlog past its bound …") and rebuilt. Before, an update waited 250 ms for room in a full queue and was then dropped,
- leaving the query stale until a rebuild (BL-427). This replaces maintenance inside the insert's commit (**ColumnarMerge
- S11, 0.2.0**), in which an insert wrote its table's aggregate and latest/first-per-key queries before it returned —
- current at the acknowledgement, paid for in the insert's own latency and in one commit at a time per table.
+  batch to its queries' maintainers at the commit, in the table's commit order and without waiting, and they apply it in
+  the background. A query is current for a reader only once its maintainer has applied every commit the reader may see
+  ([the one rule](#routing-a-read-to-a-maintained-result)), so right after an insert returns its queries may be a moment
+  behind: read with the insert's consistency token (`token` / `X-Aouda-Token`) to wait for them, as for any other write.
+  A lagging query's batches are not dropped: what its queue cannot take waits in a backlog charged on the memory budget,
+  and only past the backlog's bound (64 MiB an update lane) is the query marked behind (`isStale`, reason "Maintenance
+  backlog past its bound …") and rebuilt. Before, an update waited 250 ms for room in a full queue and was then dropped,
+  leaving the query stale until a rebuild (BL-427). This replaces maintenance inside the insert's commit (**ColumnarMerge
+  S11, 0.2.0**), in which an insert wrote its table's aggregate and latest/first-per-key queries before it returned —
+  current at the acknowledgement, paid for in the insert's own latency and in one commit at a time per table.
 - Resident state (**ColumnarMerge S10, 0.2.0**): an aggregate's and a latest/first-per-key query's result rows
- stay in RAM between commits, so a commit takes the rows it changes from memory instead of reading them back
- (up to 262,144 keys per query, charged to the memory governor; a refusal falls back to reading back, correct
- and slower). A group that is not held — new, or evicted — is looked up in the key map and read only if it exists.
- The copy is also given back when memory is needed (**WorkloadCore, 0.3.0**): the server drops whole copies, the
- query applied least recently first (never one whose update is running), and the next commit reads back the rows it
- needs. A top-N over another query's result keeps that result's rows resident the same way, and reloads them from the
- result after a release.
+  stay in RAM between commits, so a commit takes the rows it changes from memory instead of reading them back
+  (up to 262,144 keys per query, charged to the memory governor; a refusal falls back to reading back, correct
+  and slower). A group that is not held — new, or evicted — is looked up in the key map and read only if it exists.
+  The copy is also given back when memory is needed (**WorkloadCore, 0.3.0**): the server drops whole copies, the
+  query applied least recently first (never one whose update is running), and the next commit reads back the rows it
+  needs. A top-N over another query's result keeps that result's rows resident the same way, and reloads them from the
+  result after a release.
 - Routing decision:
- - Planner result that says "serve from MQ result table" or "scan base table."
+  - Planner result that says "serve from MQ result table" or "scan base table."
 - `GroupByExpression` (P28):
- - Either a plain column `{ column }` or a derived time-bucket expression `{ column, function }` where function is `TruncateToHour` or `TruncateToMinute`. Group keys for derived expressions are stored as Int64 epoch milliseconds so candle result tables remain first-class time-series tables (range-queryable, partitionable).
- - **A null group is a group of its own (**BL-691, 0.2.0**).** Grouping by a nullable column gives the rows with a null value their own result row, whose key reads back as `null` — it no longer shares a row (or a key) with the rows whose value is `0` / the type's default. A result created before this release keeps a non-nullable key column; drop and re-create it to get the null group.
+  - Either a plain column `{ column }` or a derived time-bucket expression `{ column, function }` where function is `TruncateToHour` or `TruncateToMinute`. Group keys for derived expressions are stored as Int64 epoch milliseconds so candle result tables remain first-class time-series tables (range-queryable, partitionable).
+  - **A null group is a group of its own (**BL-691, 0.2.0**).** Grouping by a nullable column gives the rows with a null value their own result row, whose key reads back as `null` — it no longer shares a row (or a key) with the rows whose value is `0` / the type's default. A result created before this release keeps a non-nullable key column; drop and re-create it to get the null group.
 - `FIRST`/`LAST` aggregate (P28):
- - Aggregate function that returns the value of `column` at the row with the minimum (`FIRST`/ascending) or maximum (`LAST`/descending) value of `orderByColumn`. The aggregate maintainer tracks the running extreme value of `orderByColumn` alongside each group's aggregate state. This enables OHLC candle patterns: Open = `FIRST(bid, orderBy=time asc)`, Close = `LAST(bid, orderBy=time asc)`.
+  - Aggregate function that returns the value of `column` at the row with the minimum (`FIRST`/ascending) or maximum (`LAST`/descending) value of `orderByColumn`. The aggregate maintainer tracks the running extreme value of `orderByColumn` alongside each group's aggregate state. This enables OHLC candle patterns: Open = `FIRST(bid, orderBy=time asc)`, Close = `LAST(bid, orderBy=time asc)`.
 - Shadow-build rebuild (P31):
- - When `RefreshMaterializedQueryAsync` is called, a new maintainer is constructed from scratch and the result table is rebuilt via a full source-table scan. The old result table remains readable (with stale data) throughout. After rebuild, the new maintainer atomically replaces the old one and state transitions to `Ready`. Errors transition to `Error`; the rebuild window is never left as `Rebuilding` on any code path.
+  - When `RefreshMaterializedQueryAsync` is called, a new maintainer is constructed from scratch and the result table is rebuilt via a full source-table scan. The old result table remains readable (with stale data) throughout. After rebuild, the new maintainer atomically replaces the old one and state transitions to `Ready`. Errors transition to `Error`; the rebuild window is never left as `Rebuilding` on any code path.
 
 Invariants:
 
 - Result-table writes must not recursively re-trigger the maintainer pipeline.
 - Name collisions are checked in both directions:
- - table create cannot reuse existing MQ name,
- - MQ create cannot reuse existing table name.
+  - table create cannot reuse existing MQ name,
+  - MQ create cannot reuse existing table name.
 - Auto-routing only applies when a matching MQ is found, `Ready` and current; otherwise the query reads its table. A routed
- answer is the table's answer, to the last cell ([routing](#routing-a-read-to-a-maintained-result)).
+  answer is the table's answer, to the last cell ([routing](#routing-a-read-to-a-maintained-result)).
 
 ### Routing a read to a maintained result
 
 (**ColumnarRead S18, 0.3.0**) A question a materialized query already holds the answer to is answered from its result
-table — on **every** read: `ToListAsync` / `ToResultAsync`, `ToColumnarAsync`, `GroupAggregateAsync`, a bare `Count`
+table — on **every** read: `ToListAsync` / `ToResultAsync`, `ToColumnarAsync`, `GroupAggregateAsync`, a bare `Count()`
 through `AggregateAsync`, `Distinct`, `LatestPerKey` / `FirstPerKey` (embedded API only: the query message has no per-key
 collapse — **BL-801**), and over HTTP (`POST …/query`, rows, columns, frames, `aggregates` / `groupBy`, and
 `…/query/count`). Before, only `ToResultAsync` routed, only to a filter result, and not with
@@ -608,9 +608,11 @@ rows as they were, and once its watermark moved past the change a routed read an
 a dropped column's old values under a new column of the same name.
 DROP COLUMN, RENAME COLUMN and a changed column default mark the results stale **before** the change and rebuild them
 after it, so a crash in between cannot bring the old column back (**BL-810, 0.3.0**). A new expression for a derived
-column, and a column's new type, do the same: both rewrite stored values no change event carries. (**0.3.0**) A **primary-key change** of the source — a key cleared, changed or gained through a schema apply — marks every result of the table stale and rebuilds it too, because a result's identity follows its source's. A `filter` whose source loses its key rebuilds key-less (rows are then identified by their content), and a key column the result lacks is added. A change that would leave a `topNPerGroup` result without a source key is **refused** with `MATERIALIZED_QUERY_NEEDS_SOURCE_KEY` (a `Failed` entry in a schema apply, whose `reason` starts with the code; the code has no HTTP status of its own): no retry satisfies it — drop the `topNPerGroup` queries first, or keep a primary key.
+column, and a column's new type, do the same: both rewrite stored values no change event carries. (**0.3.0**)
 
-The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the.NET API,
+A **primary-key change** of the source — a key cleared, changed or gained through a schema apply — marks every result of the table stale and rebuilds it too, because a result's identity follows its source's. A `filter` whose source loses its key rebuilds key-less (rows are then identified by their content), and a key column the result lacks is added. A change that would leave a `topNPerGroup` result without a source key is **refused** with `MATERIALIZED_QUERY_NEEDS_SOURCE_KEY` (a `Failed` entry in a schema apply, whose `reason` starts with the code; the code has no HTTP status of its own): no retry satisfies it — drop the `topNPerGroup` queries first, or keep a primary key.
+
+The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
 `stats.routedTo` over HTTP (JSON, and the frame response's end frame — **Lead S09, 0.6.0**: it was the `X-Aouda-Stats` header), `ClientQueryStats.RoutedTo` in the C# SDK,
 `result.stats.routedTo` in the TypeScript SDK.
 `ExplainRoutingAsync` gives the decision with its reason, every candidate's included.
@@ -627,26 +629,26 @@ High-level flow:
 4. Source-table commits emit row changes.
 5. Subscription manager routes changes to maintainers (`Sync` immediate or `Async` queue).
 6. Reads use either:
- - direct result-table query (`engine.TableAsync(queryName)`), or
- - auto-routed base query.
+   - direct result-table query (`engine.TableAsync(queryName)`), or
+   - auto-routed base query.
 
 Token-bearing HTTP reads of an MQ wait on the MQ **maintenance watermark**, not the node's WAL position. A fully caught-up replica can still be stale through an MQ that has not incorporated the write (ADR 0042 `D-9`). Status and query JSON `token` is that watermark. See [Freshness](freshness.md#mq-watermark).
 
 Key implementation anchors:
 
 - Definition + status + runtime state:
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryDefinition.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryStatus.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryCatalog.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryDefinition.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryStatus.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryCatalog.cs`
 - Creation and pattern helpers:
- - `src/Aouda.Engine.Api/AoudaEngine.cs`
+  - `src/Aouda.Engine.Api/AoudaEngine.cs`
 - Result table lifecycle:
- - `src/Aouda.Engine.Storage/Materialized/MaterializedResultTableManager.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedResultTableManager.cs`
 - Incremental update path:
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQuerySubscriptionManager.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQuerySubscriptionManager.cs`
 - Planner routing:
- - `src/Aouda.Engine.Query/MaterializedQueryMatcher.cs`
- - `src/Aouda.Engine.Api/TableQuery.cs`
+  - `src/Aouda.Engine.Query/MaterializedQueryMatcher.cs`
+  - `src/Aouda.Engine.Api/TableQuery.cs`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
@@ -654,92 +656,96 @@ Key implementation anchors:
 
 1. Entry point: `AoudaEngine.CreateAggregateQueryAsync(...)`.
 2. Validation:
- - validates name/source table/grouping/aggregate definitions,
- - validates numeric source columns for `SUM` and `AVG`,
- - runs BL-021 name-collision checks.
+   - validates name/source table/grouping/aggregate definitions,
+   - validates numeric source columns for `SUM` and `AVG`,
+   - runs BL-021 name-collision checks.
 3. State and persistence:
- - registers definition in catalog/store,
- - scans base table,
- - creates result table via `MaterializedResultTableManager`,
- - creates maintainer and registers with catalog + subscription manager,
- - updates state to `Ready` and updates row count.
+   - registers definition in catalog/store,
+   - scans base table,
+   - creates result table via `MaterializedResultTableManager`,
+   - creates maintainer and registers with catalog + subscription manager,
+   - updates state to `Ready` and updates row count.
 4. Observability:
- - materialized query counters and pattern counters in `Perf`.
+   - materialized query counters and pattern counters in `Perf`.
 5. Tests:
- - `AggregateApiTests.cs`
- - storage materialized tests (`AggregateMaintainerTests.cs`).
+   - `AggregateApiTests.cs`
+   - storage materialized tests (`AggregateMaintainerTests.cs`).
 
 ### Walk-through B: Incremental update routing after source write
 
 1. Entry point: source table change event -> `MaterializedQuerySubscriptionManager.OnChangeEvent(...)`.
 2. Validation/branching:
- - converts event to row payload and routes through `OnRowsCommitted`,
- - exits early if event table is itself an MQ result table (`_catalog.Exists(tableName)` guard).
+   - converts event to row payload and routes through `OnRowsCommitted`,
+   - exits early if event table is itself an MQ result table (`_catalog.Exists(tableName)` guard).
 3. State mutation:
- - finds maintainers subscribed to source table,
- - if `Sync`, applies immediately,
- - if `Async`, enqueues for background processing.
+   - finds maintainers subscribed to source table,
+   - if `Sync`, applies immediately,
+   - if `Async`, enqueues for background processing.
 4. Observability:
- - `SubscriptionUpdatesEnqueued`, `SubscriptionUpdatesProcessed`,
- - `SubscriptionQueueDepth`, `SubscriptionLagMs`, update error/drop counters.
+   - `SubscriptionUpdatesEnqueued`, `SubscriptionUpdatesProcessed`,
+   - `SubscriptionQueueDepth`, `SubscriptionLagMs`, update error/drop counters.
 5. Tests:
- - `IncrementalUpdateSubscriptionTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Materialized/MaterializedQuerySubscriptionManager*.cs`.
+   - `IncrementalUpdateSubscriptionTests.cs`
+   - `tests/Aouda.Engine.Storage.Tests/Materialized/MaterializedQuerySubscriptionManager*.cs`.
 
 ### Walk-through C: Auto-routing query to MQ result table
 
 1. Entry point: every read terminal — `ToListAsync` / `ToResultAsync`, `ToColumnarAsync`, `GroupAggregateAsync`, a bare
- `Count` through `AggregateAsync`, `Distinct`, `LatestPerKey` / `FirstPerKey` — and HTTP `POST …/query` and
- `…/query/count` (**ColumnarRead S18, 0.3.0**; before, `ToResultAsync` only).
+   `Count()` through `AggregateAsync`, `Distinct`, `LatestPerKey` / `FirstPerKey` — and HTTP `POST …/query` and
+   `…/query/count` (**ColumnarRead S18, 0.3.0**; before, `ToResultAsync()` only).
 2. Routing check:
- - unless `WithDirectScan` was used, `MaterializedQueryMatcher.Route(...)` runs before the scan, with the WAL position
- the read must cover.
+   - unless `WithDirectScan()` was used, `MaterializedQueryMatcher.Route(...)` runs before the scan, with the WAL position
+     the read must cover.
 3. Branching:
- - a current result that holds the answer -> read the result table and record the routed decision,
- - no such result (none matches, or the match is stale, has work queued or is behind the WAL position) -> record the
- not-routed reason and scan the table.
+   - a current result that holds the answer -> read the result table and record the routed decision,
+   - no such result (none matches, or the match is stale, has work queued or is behind the WAL position) -> record the
+     not-routed reason and scan the table.
 4. Observability:
- - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`.
+   - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`.
 5. Tests:
- - `MaterializedQueryAutoRoutingTests.cs`
- - `MaterializedQueryMatcherTests.cs`.
+   - `MaterializedQueryAutoRoutingTests.cs`
+   - `MaterializedQueryMatcherTests.cs`.
 
 ### Walk-through D: Subscription to MQ via standard table API
 
 1. Entry point:
- -.NET: `client.GetTable(queryName).SubscribeAsync` pattern in client tests,
- - TypeScript: `client.table(queryName).subscribe(...)`.
+   - .NET: `client.GetTable(queryName).SubscribeAsync()` pattern in client tests,
+   - TypeScript: `client.table(queryName).subscribe(...)`.
 2. Protocol path:
- - standard streaming subscribe message with `target = queryName`.
+   - standard streaming subscribe message with `target = queryName`.
 3. Runtime behavior:
- - snapshot sent first,
- - incremental changes follow when result-table rows change,
- - (**Horizon, 0.5.0**) for a windowed result the snapshot is its stored part and carries its horizon, and a `horizon`
- message follows each advance ([2.11e](#window-subscriptions)).
+   - snapshot sent first,
+   - incremental changes follow when result-table rows change,
+   - (**Horizon, 0.5.0**) for a windowed result the snapshot is its stored part and carries its horizon, and a `horizon`
+     message follows each advance ([2.11e](#window-subscriptions)).
 4. Observability:
- - standard streaming subsystem counters/events, plus MQ update counters.
+   - standard streaming subsystem counters/events, plus MQ update counters.
 5. Tests:
- - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
- - `../aouda-client-ts/tests/streaming/subscription.test.ts`.
+   - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
+   - `../aouda-client-ts/tests/streaming/subscription.test.ts`.
 
 ### Walk-through E: Full rebuild of an Aggregate MQ (shadow-build)
 
-1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` — the scan-fed path, also used on fallback. A bulk load with `PostLoadMqBehavior.Auto` does **not** take this path for queries the table's pass can fold or apply A read that began before the swap answers the previous generation or the new one, whole; the previous generation's files are kept until the reads holding them end. A read whose query is dropped as it starts fails with the not-found error.
+1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` — the scan-fed path, also used on fallback. A bulk load with `PostLoadMqBehavior.Auto` does **not** take this path for queries the table's pass can fold or apply (**WorkloadCore S10, 0.3.0**; before, it accumulated during ingest and published the same shadow swap at commit); the rest are rebuilt this way, by a background rebuild job the pass schedules once it has finished (**WorkloadCore S17, 0.3.0**; the pass used to rebuild them itself, inline).
+2. State transition:
+   - MQ state immediately changes to `Rebuilding`.
+   - The current result table remains readable throughout with stale data.
+   - A read that began before the swap answers the previous generation or the new one, whole; the previous generation's files are kept until the reads holding them end. A read whose query is dropped as it starts fails with the not-found error.
 3. Shadow build:
- - A new `MaterializedQueryMaintainer` is constructed from scratch.
- - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and a fallback rebuild). A query an `Auto` bulk load's pass folds or applies never opens this scan.
+   - A new `MaterializedQueryMaintainer` is constructed from scratch.
+   - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and a fallback rebuild). A query an `Auto` bulk load's pass folds or applies never opens this scan.
 4. Atomic swap:
- - New maintainer atomically replaces the old one.
- - MQ state transitions to `Ready`.
+   - New maintainer atomically replaces the old one.
+   - MQ state transitions to `Ready`.
 5. Error handling:
- - If the rebuild fails, state transitions to `Error`. A rebuild **refused memory** is the exception: the queries stay `Ready`, marked stale and deferred (**IngestAtSpeed S03, 0.1.40**; see 2.11c).
- - The rebuild window is never left in `Rebuilding` on any code path.
+   - If the rebuild fails, state transitions to `Error`. A rebuild **refused memory** is the exception: the queries stay `Ready`, marked stale and deferred (**IngestAtSpeed S03, 0.1.40**; see 2.11c).
+   - The rebuild window is never left in `Rebuilding` on any code path.
 6. Observability:
- - `BulkLoadJobHandle.MqRebuildStatus` tracks rebuild state.
- - `BulkLoadJobHandle.MqRebuildCompleted` task resolves on completion.
+   - `BulkLoadJobHandle.MqRebuildStatus` tracks rebuild state.
+   - `BulkLoadJobHandle.MqRebuildCompleted` task resolves on completion.
 7. Tests:
- - `BulkLoadMqRefreshTests.cs` (12 tests, `tests/Aouda.Engine.Api.Tests/BulkLoad/`)
- - `BulkLoadReplicaCoordinatorMqTests.cs` (6 tests)
+   - `BulkLoadMqRefreshTests.cs` (12 tests, `tests/Aouda.Engine.Api.Tests/BulkLoad/`)
+   - `BulkLoadReplicaCoordinatorMqTests.cs` (6 tests)
 
 ## 2.9 Why Aouda is different (differentiators)
 
@@ -755,31 +761,31 @@ Key implementation anchors:
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `MaterializedQueryDefinition.Type` | enum | none (required) | `LatestPerKey`, `FirstPerKey`, `Aggregate`, `Filter`, `TopNPerGroup` |.NET definition/helper APIs | Only `LatestPerKey`/`Aggregate`/`Filter` are shipped end-to-end |
-| `MaterializedQueryDefinition.ConfigJson` | JSON string | none (required) | type-specific schema |.NET definition/helper APIs | Serialized pattern config |
-| `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` |.NET definition/helper APIs | (**WorkloadCore S09, 0.3.0**) No longer changes how updates are fed: both are queued at the commit and never dropped below the backlog's bound. A `Sync` query ignores `maxCoalesceMs` |
+| `MaterializedQueryDefinition.Type` | enum | none (required) | `LatestPerKey`, `FirstPerKey`, `Aggregate`, `Filter`, `TopNPerGroup` | .NET definition/helper APIs | Only `LatestPerKey`/`Aggregate`/`Filter` are shipped end-to-end |
+| `MaterializedQueryDefinition.ConfigJson` | JSON string | none (required) | type-specific schema | .NET definition/helper APIs | Serialized pattern config |
+| `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | (**WorkloadCore S09, 0.3.0**) No longer changes how updates are fed: both are queued at the commit and never dropped below the backlog's bound. A `Sync` query ignores `maxCoalesceMs` |
 | `MaterializedQueryDefinition.MaxCoalesceMs` (`maxCoalesceMs`) | int | `0` | `0`–`60000` | `aouda.schema.json`; `SetMaterializedQueryMaxCoalesceMsAsync` | **ColumnarMerge S10, 0.2.0.** Batches of an `Async` query coalesce this long before one apply |
 | `window` (`keep`, `column`) | object | none (no window) | `keep`: `<n>m` / `h` / `d` / `w`, a multiple of the bucket; `column`: the window column | `aouda.schema.json`; `window` beside `config` on `POST …/materialized-queries`; both SDKs | (**Horizon, 0.5.0**) `aggregate` with a time bucket and `topNPerGroup` only; part of the definition, so changing it replaces the query. [2.11e](#windows) |
-| `currency` | string | `current` | `current`, `rebuild` | `aouda.schema.json`; `currency` on `POST …/materialized-queries`; the.NET `Create*Async` helpers' `currency` | (**Lead S27b, 0.6.0**) `rebuild`: never maintained incrementally; rebuilt once its sources are quiet, after a load, or on `:refresh`; routed only when current. Not with `Sync` or `maxCoalesceMs`. Part of the definition, so changing it replaces the query |
-| `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` |.NET definition/helper APIs | Optional override; else defaults by type |
+| `currency` | string | `current` | `current`, `rebuild` | `aouda.schema.json`; `currency` on `POST …/materialized-queries`; the .NET `Create*Async` helpers' `currency` | (**Lead S27b, 0.6.0**) `rebuild`: never maintained incrementally; rebuilt once its sources are quiet, after a load, or on `:refresh`; routed only when current. Not with `Sync` or `maxCoalesceMs`. Part of the definition, so changing it replaces the query |
+| `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` | .NET definition/helper APIs | Optional override; else defaults by type |
 | `SubscriptionManagerOptions.MaxLag` | `TimeSpan` | `1s` | positive | Engine wiring | Lag threshold/backpressure signal |
 | `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound; past it, a lane's backlog (**WorkloadCore S09, 0.3.0**) |
 | `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | long | `64 MiB` | positive | Engine wiring | (**WorkloadCore S09, 0.3.0**) Per update lane; charged on the memory budget. Past it a commit's batch is lost and the query is marked stale and rebuilt |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | int | `100` | positive | Engine wiring | Async queue processing granularity |
-| `TableQuery.WithDirectScan` | query option | off | enabled/disabled per query |.NET query API | Disables auto-routing for a query |
+| `TableQuery.WithDirectScan()` | query option | off | enabled/disabled per query | .NET query API | Disables auto-routing for a query |
 | `TablesController includeSystemTables` | query flag | `false` | `true/false` | HTTP table list request | MQ result tables hidden by default |
 
 Configuration precedence and operational notes:
 
 - Precedence:
- - Explicit definition fields (for type/config/update/storage) override type-derived defaults.
+  - Explicit definition fields (for type/config/update/storage) override type-derived defaults.
 - Dynamic vs restart-required:
- - MQ create/drop/list/status operations are dynamic at runtime.
- - Subscription manager options are engine construction-time concerns.
+  - MQ create/drop/list/status operations are dynamic at runtime.
+  - Subscription manager options are engine construction-time concerns.
 - Safety-gated:
- - BL-021 name-collision checks prevent ambiguous namespace behavior.
+  - BL-021 name-collision checks prevent ambiguous namespace behavior.
 - Deprecated/reserved:
- - No public "deprecated" MQ settings currently; reserved types (`FirstPerKey`, `TopNPerGroup`) are not fully wired.
+  - No public "deprecated" MQ settings currently; reserved types (`FirstPerKey`, `TopNPerGroup`) are not fully wired.
 
 ### Declare in `aouda.schema.json`
 
@@ -793,14 +799,14 @@ Admin HTTP `POST /api/databases/{db}/materialized-queries` remains; schema apply
 
 ```json
 "materializedQueries": {
- "latest_quote": {
- "type": "latestPerKey",
- "sourceTable": "EquityQuote",
- "groupBy": ["ticker"],
- "orderBy": "eventTime",
- "descending": true,
- "storage": { "storageTemperature": "ColdPreferred" }
- }
+  "latest_quote": {
+    "type": "latestPerKey",
+    "sourceTable": "EquityQuote",
+    "groupBy": ["ticker"],
+    "orderBy": "eventTime",
+    "descending": true,
+    "storage": { "storageTemperature": "ColdPreferred" }
+  }
 }
 ```
 
@@ -815,49 +821,49 @@ See [Schema Management](schema-management.md).
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-###.NET example (create + query + status + routing control)
+### .NET example (create + query + status + routing control)
 
 ```csharp
 await engine.CreateLatestPerKeyAsync(
- name: "latest_order_per_customer",
- sourceTable: "orders",
- groupByColumn: "customer_id",
- orderByColumn: "created_at",
- descending: true);
+    name: "latest_order_per_customer",
+    sourceTable: "orders",
+    groupByColumn: "customer_id",
+    orderByColumn: "created_at",
+    descending: true);
 
 var status = await engine.GetMaterializedQueryStatusAsync("latest_order_per_customer");
 var routed = await (await engine.TableAsync("orders"))
-.Where("customer_id", "eq", "c-1")
-.ToResultAsync;
+    .Where("customer_id", "eq", "c-1")
+    .ToResultAsync();
 
 var direct = await (await engine.TableAsync("orders"))
-.WithDirectScan
-.Where("customer_id", "eq", "c-1")
-.ToResultAsync;
+    .WithDirectScan()
+    .Where("customer_id", "eq", "c-1")
+    .ToResultAsync();
 ```
 
 Expected result: MQ is created and eventually `Ready`; default query may route to MQ result, while direct-scan bypasses routing.
 
 Common mistake: assuming `CreateMaterializedQueryAsync` alone builds maintainers for all enum types; only implemented pattern paths are fully functional.
 
-###.NET example (OHLC candle aggregate MQ with time-bucket group-by — P28)
+### .NET example (OHLC candle aggregate MQ with time-bucket group-by — P28)
 
 ```csharp
 // AggregateConfig v2: derived time-bucket group-by + FIRST/LAST aggregate functions
 var config = new AggregateConfig
 {
- GroupByColumns = new
- {
- GroupByExpression.Column("symbol"),
- GroupByExpression.TimeBucket("time", PartitionFunction.TruncateToHour)
- },
- Aggregates = new
- {
- new AggregateDefinition { Function = AggregateFunction.First, Column = "bid", OrderByColumn = "time", Descending = false },
- new AggregateDefinition { Function = AggregateFunction.Last, Column = "bid", OrderByColumn = "time", Descending = false },
- new AggregateDefinition { Function = AggregateFunction.Min, Column = "bid" },
- new AggregateDefinition { Function = AggregateFunction.Max, Column = "bid" },
- }
+    GroupByColumns = new[]
+    {
+        GroupByExpression.Column("symbol"),
+        GroupByExpression.TimeBucket("time", PartitionFunction.TruncateToHour)
+    },
+    Aggregates = new[]
+    {
+        new AggregateDefinition { Function = AggregateFunction.First, Column = "bid", OrderByColumn = "time", Descending = false },
+        new AggregateDefinition { Function = AggregateFunction.Last,  Column = "bid", OrderByColumn = "time", Descending = false },
+        new AggregateDefinition { Function = AggregateFunction.Min,   Column = "bid" },
+        new AggregateDefinition { Function = AggregateFunction.Max,   Column = "bid" },
+    }
 };
 await engine.CreateAggregateQueryAsync("candles_bid_1h", "quotes", config);
 ```
@@ -870,26 +876,26 @@ An aggregate materialized query may declare `computed` columns — physical, alw
 
 ```json
 "barsWithChange": {
- "type": "aggregate",
- "sourceTable": "trades",
- "groupBy": [{ "column": "ticker" }, { "column": "ts", "function": "truncateToHour" }],
- "aggregates": [
- { "function": "first", "outputName": "open", "sourceColumn": "price", "orderByColumn": "ts" },
- { "function": "last", "outputName": "close", "sourceColumn": "price", "orderByColumn": "ts" }
- ],
- "computed": [
- {
- "outputName": "changePct",
- "type": "Double",
- "expr": {
- "type": "arithmetic", "op": "/",
- "left": { "type": "arithmetic", "op": "-",
- "left": { "type": "colRef", "col": "close" },
- "right": { "type": "colRef", "col": "open" } },
- "right": { "type": "colRef", "col": "open" }
- }
- }
- ],
+  "type": "aggregate",
+  "sourceTable": "trades",
+  "groupBy": [{ "column": "ticker" }, { "column": "ts", "function": "truncateToHour" }],
+  "aggregates": [
+    { "function": "first", "outputName": "open",  "sourceColumn": "price", "orderByColumn": "ts" },
+    { "function": "last",  "outputName": "close", "sourceColumn": "price", "orderByColumn": "ts" }
+  ],
+  "computed": [
+    {
+      "outputName": "changePct",
+      "type": "Double",
+      "expr": {
+        "type": "arithmetic", "op": "/",
+        "left":  { "type": "arithmetic", "op": "-",
+                   "left": { "type": "colRef", "col": "close" },
+                   "right": { "type": "colRef", "col": "open" } },
+        "right": { "type": "colRef", "col": "open" }
+      }
+    }
+  ],
 }
 ```
 
@@ -904,7 +910,7 @@ The aggregates themselves: `sum` of a `Decimal(p,s)` column is an exact `Decimal
 refused as an overflow (*A Decimal sum does not fit Decimal(18,s).*), the same as in a query; `min`, `max`, `first` and
 `last` are exact at the column's scale; `avg` is a `Double`.
 
-###.NET example (wait for bulk-load materialization — P31 / P46)
+### .NET example (wait for bulk-load materialization — P31 / P46)
 
 ```csharp
 // Explicit on-demand rebuild (a scan). Use this when you changed the definition,
@@ -927,20 +933,20 @@ import { createAoudaClient } from "@aouda/client";
 import { MaterializedQueryType } from "@aouda/client";
 
 const client = createAoudaClient({
- serverUrl: "http://localhost:5000",
- database: "appdb",
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
 });
 
 // Create a latest-per-key MQ (type 1 = LatestPerKey)
 await client.materializedQueries.create({
- name: "latest_order_per_customer",
- sourceTable: "orders",
- type: 1,
- config: {
- groupByColumn: "customer_id",
- orderByColumn: "created_at",
- descending: true,
- },
+  name: "latest_order_per_customer",
+  sourceTable: "orders",
+  type: 1,
+  config: {
+    groupByColumn: "customer_id",
+    orderByColumn: "created_at",
+    descending: true,
+  },
 });
 
 // Check status (state: 0=Building, 1=Ready, 2=Rebuilding, 3=Error)
@@ -948,7 +954,7 @@ const status = await client.materializedQueries.status("latest_order_per_custome
 console.log(status.state, status.rowCount);
 
 // List all materialized queries for the database
-const all = await client.materializedQueries.list;
+const all = await client.materializedQueries.list();
 
 // Execute a query directly against the MQ result set
 const result = await client.materializedQueries.query("latest_order_per_customer");
@@ -963,7 +969,7 @@ await client.materializedQueries.refresh("candles_bid_1h", { await: true });
 
 Expected result: MQ is created, transitions to `state: 1` (Ready), and the result set is queryable directly or as a normal table.
 
-For the OHLC candle aggregate MQ create pattern, pass `type: 3` (Aggregate) with a v2 `configJson` that includes `groupByColumns` as an array of objects and `aggregates` with `FIRST`/`LAST` entries. See the.NET example above for the full config structure; serialize it to JSON for the `configJson` field.
+For the OHLC candle aggregate MQ create pattern, pass `type: 3` (Aggregate) with a v2 `configJson` that includes `groupByColumns` as an array of objects and `aggregates` with `FIRST`/`LAST` entries. See the .NET example above for the full config structure; serialize it to JSON for the `configJson` field.
 
 The `MaterializedQueryType` constant object maps names to their numeric wire values: `{ LatestPerKey: 1, FirstPerKey: 2, Aggregate: 3, Filter: 4, TopNPerGroup: 5 }`. Only `LatestPerKey` (1), `Aggregate` (3), and `Filter` (4) are fully shipped end-to-end. Passing `FirstPerKey` (2) or `TopNPerGroup` (5) creates a definition record but no maintainer is wired.
 
@@ -971,18 +977,18 @@ The `MaterializedQueryType` constant object maps names to their numeric wire val
 
 ```typescript
 const client = createAoudaClient({
- serverUrl: "http://localhost:5000",
- database: "appdb",
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
 });
 
 const mqResult = await client
-.table("latest_order_per_customer")
-.where("customer_id", "=", "c-1")
-.execute;
+  .table("latest_order_per_customer")
+  .where("customer_id", "=", "c-1")
+  .execute();
 
 const sub = client.table("latest_order_per_customer").subscribe({
- onSnapshot: (rows) => console.log("snapshot", rows.length),
- onChange: (evt) => console.log("change", evt.op, evt.version),
+  onSnapshot: (rows) => console.log("snapshot", rows.length),
+  onChange: (evt) => console.log("change", evt.op, evt.version),
 });
 ```
 
@@ -999,11 +1005,11 @@ POST /api/databases/appdb/materialized-queries
 Content-Type: application/json
 
 {
- "version": 1,
- "name": "latest_order_per_customer",
- "sourceTable": "orders",
- "type": 1,
- "configJson": "{\"groupByColumn\":\"customer_id\",\"orderByColumn\":\"created_at\",\"descending\":true}"
+  "version": 1,
+  "name": "latest_order_per_customer",
+  "sourceTable": "orders",
+  "type": 1,
+  "configJson": "{\"groupByColumn\":\"customer_id\",\"orderByColumn\":\"created_at\",\"descending\":true}"
 }
 ```
 
@@ -1028,7 +1034,7 @@ Content-Type: application/json
 {}
 ```
 
-The answer is column arrays — `{ "columns": [...], "data": [[...],...], "rowCount": N, "stats": {...}, "token": "..." }`, one array
+The answer is column arrays — `{ "columns": [...], "data": [[...], ...], "rowCount": N, "stats": {...}, "token": "..." }`, one array
 per column in the result's declared order (**Lead S12, 0.6.0; breaking**: it was `"rows": [{…}]`, one object per row). See the
 [HTTP reference](../reference/http-api.md#materialized-query-endpoints).
 
@@ -1039,14 +1045,14 @@ POST /api/databases/appdb/query
 Content-Type: application/json
 
 {
- "database": "appdb",
- "table": "latest_order_per_customer",
- "where": {
- "and": [
- { "column": "customer_id", "op": "eq", "value": "c-1" }
- ]
- },
- "limit": 100
+  "database": "appdb",
+  "table": "latest_order_per_customer",
+  "where": {
+    "and": [
+      { "column": "customer_id", "op": "eq", "value": "c-1" }
+    ]
+  },
+  "limit": 100
 }
 ```
 
@@ -1054,9 +1060,9 @@ Content-Type: application/json
 
 ```json
 {
- "type": "subscribe",
- "id": "sub-1",
- "target": "latest_order_per_customer"
+  "type": "subscribe",
+  "id": "sub-1",
+  "target": "latest_order_per_customer"
 }
 ```
 
@@ -1080,8 +1086,8 @@ POST /api/databases/appdb/bulk-load:begin
 Content-Type: application/json
 
 {
- "table": "quotes",
- "postLoadMqBehavior": "skip"
+  "table": "quotes",
+  "postLoadMqBehavior": "skip"
 }
 ```
 
@@ -1089,17 +1095,17 @@ The `mqRebuildStatus` field is returned in `GET /api/databases/appdb/bulk-load/{
 
 ### A) API coverage matrix
 
-| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Create latest-per-key MQ | `CreateLatestPerKeyAsync(...)` | `client.materializedQueries.create(spec)` with `type: 1` | `POST /api/databases/{db}/materialized-queries` | Implemented | TS and HTTP management surfaces shipped in P16 |
 | Create aggregate MQ | `CreateAggregateQueryAsync(...)` | `client.materializedQueries.create(spec)` with `type: 3` | Same endpoint | Implemented | TS and HTTP shipped in P16 |
 | Create filter MQ | `CreateFilterQueryAsync(...)` | `client.materializedQueries.create(spec)` with `type: 4` | Same endpoint | Implemented | TS and HTTP shipped in P16 |
 | Declare MQs in schema file | `schema apply` of `materializedQueries` | `npx @aouda/client schema apply` (raw JSON) | `POST /schema/diff` and `/schema/apply` | Implemented (BL-174) | Name identity; omit map = unmanaged; `{}` drops all; replace is drop+create |
 | Generic create/drop/list/status | `CreateMaterializedQueryAsync`, `DropMaterializedQueryAsync`, `ListMaterializedQueriesAsync`, `GetMaterializedQueryStatusAsync` | `client.materializedQueries.create/drop/list/status` | `GET/POST/DELETE /api/databases/{db}/materialized-queries[/{name}]` | Implemented | Full TS + HTTP surface shipped in P16 |
-| Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute` or `client.materializedQueries.query(name)` | `POST /api/databases/{db}/query` or `POST /api/databases/{db}/materialized-queries/{name}/query` | Implemented | Two paths: normal table query or dedicated MQ query endpoint. The MQ endpoint reads the whole result: it is refused past `Aouda:Query:MaxResultRows` or the read budget (`503`, **BL-776, 0.3.0**) — filter large results through `/query` |
-| Subscribe MQ results | `GetTable(queryName).SubscribeAsync` pattern in client tests | `client.table(queryName).subscribe(...)` | standard `subscribe` message `target=queryName` | Implemented | No MQ-specific target type |
-| Auto-routing base query to MQ | `TableQuery` matcher + `WithDirectScan`; `ClientQueryStats.RoutedTo` | No bypass; `result.stats.routedTo` reports a route | `POST …/query` and `…/query/count` route automatically; `stats.routedTo` (**ColumnarRead S18, 0.3.0**) | Partial | Routing logic is server-side engine behavior; no route flag to bypass it over HTTP |
-| Explain routing decision | `ExplainRoutingAsync(...)` | Missing | Missing | Partial |.NET diagnostic API only |
+| Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute()` or `client.materializedQueries.query(name)` | `POST /api/databases/{db}/query` or `POST /api/databases/{db}/materialized-queries/{name}/query` | Implemented | Two paths: normal table query or dedicated MQ query endpoint. The MQ endpoint reads the whole result: it is refused past `Aouda:Query:MaxResultRows` or the read budget (`503`, **BL-776, 0.3.0**) — filter large results through `/query` |
+| Subscribe MQ results | `GetTable(queryName).SubscribeAsync()` pattern in client tests | `client.table(queryName).subscribe(...)` | standard `subscribe` message `target=queryName` | Implemented | No MQ-specific target type |
+| Auto-routing base query to MQ | `TableQuery` matcher + `WithDirectScan()`; `ClientQueryStats.RoutedTo` | No bypass; `result.stats.routedTo` reports a route | `POST …/query` and `…/query/count` route automatically; `stats.routedTo` (**ColumnarRead S18, 0.3.0**) | Partial | Routing logic is server-side engine behavior; no route flag to bypass it over HTTP |
+| Explain routing decision | `ExplainRoutingAsync(...)` | Missing | Missing | Partial | .NET diagnostic API only |
 | Explicit on-demand MQ rebuild | `engine.RefreshMaterializedQueryAsync(name, ct)` | `client.materializedQueries.refresh(name, {await})` | `POST /api/databases/{db}/materialized-queries/{name}:refresh?await=true/false` | Implemented (P31) | Shadow-build; result readable throughout with stale data |
 | OHLC `FIRST`/`LAST` aggregate | `AggregateConfig` with `AggregateFunction.First/Last` + `OrderByColumn` | `client.materializedQueries.create(spec)` with v2 config JSON | Same `POST /api/databases/{db}/materialized-queries` | Implemented (P28) | `configJson` must use v2 schema (array of `groupByColumns` objects) |
 | Derived time-bucket group-by | `GroupByExpression.TimeBucket(column, function)` | `client.materializedQueries.create(spec)` with v2 config JSON | Same endpoint | Implemented (P28) | `TruncateToHour` / `TruncateToMinute`; keys as Int64 epoch ms |
@@ -1110,7 +1116,7 @@ The `mqRebuildStatus` field is returned in `GET /api/databases/appdb/bulk-load/{
 |---|---|---|---|---|
 | Distinct not-ready subscription error | No `MATERIALIZED_QUERY_NOT_READY` protocol/server code | Current `TABLE_NOT_FOUND` handling | `docs/BACKLOG.md` BL-053 | Low |
 | JOIN-based MQ definitions | No query/API support for JOIN materialization | Build denormalized source table first | `docs/BACKLOG.md` BL-010 (depends BL-009) | Medium |
-| Rich routed-query controls in TS | No TS equivalent of.NET `WithDirectScan` | Use query shape changes / backend controls | Future query API parity work | Medium |
+| Rich routed-query controls in TS | No TS equivalent of .NET `WithDirectScan()` | Use query shape changes / backend controls | Future query API parity work | Medium |
 
 ## 2.11a Refreshing several queries at once (pooled refresh)
 
@@ -1202,18 +1208,18 @@ quiet table starts its pass at its commit as before. On a 2 GB server loading 15
 ran at 253 k rows/s (67 k on 0.3.0) and all 13 queries were current 440.5 s after it started (650 s on 0.3.0).
 
 - Every query over the loaded table is **behind** — readable by name (not routed to while behind, **ColumnarRead S18**),
- `isStale: true` with a `staleReason`, `pendingDeferredJobs` at least 1, `current: false` — and rebuilt at startup if the
- server restarts first. (**WorkloadCore S11, 0.3.0**) Not rebuilt any more: a query that owes a load is restored from its
- checkpoint at startup with the load still owed, and the table's pass brings the load in once the database is open. (**WorkloadCore S10, 0.3.0**) It is **owed work, not holed**: the query is not marked stale
- the way a `Skip` load leaves it, so `staleOnly` does not select it, and the reason reads "N bulk load(s) into its source
- are pending the table's pass…" (before: "A bulk load committed with PostLoadMqBehavior.Deferred; its rows are pending the
- deferred pass…"). `currentLag` counts from the commit of the oldest load it owes.
+  `isStale: true` with a `staleReason`, `pendingDeferredJobs` at least 1, `current: false` — and rebuilt at startup if the
+  server restarts first. (**WorkloadCore S11, 0.3.0**) Not rebuilt any more: a query that owes a load is restored from its
+  checkpoint at startup with the load still owed, and the table's pass brings the load in once the database is open. (**WorkloadCore S10, 0.3.0**) It is **owed work, not holed**: the query is not marked stale
+  the way a `Skip` load leaves it, so `staleOnly` does not select it, and the reason reads "N bulk load(s) into its source
+  are pending the table's pass…" (before: "A bulk load committed with PostLoadMqBehavior.Deferred; its rows are pending the
+  deferred pass…"). `currentLag` counts from the commit of the oldest load it owes.
 - The job is recorded as **pending**: which load, which table, which segments. Those segments are not
- merged by compaction while the job is pending, so the rows a query still owes stay where the load put
- them.
+  merged by compaction while the job is pending, so the rows a query still owes stay where the load put
+  them.
 - `:refresh` on a query brings it current now. An **update, delete or upsert** of the table first brings
- its queries current, because applying that change to a result that does not yet hold the rows it
- changes would be wrong.
+  its queries current, because applying that change to a result that does not yet hold the rows it
+  changes would be wrong.
 - A load that aborts records nothing.
 
 **The deferred pass** (**BatchFirst S09, 0.1.40**). The engine brings a table's queries current in
@@ -1252,7 +1258,9 @@ reserved nothing, so the governor never saw it. A refusal does not fail the pass
 and every wave after it is half the size, down to a sixteenth. (**WorkloadCore S10, 0.3.0**) An `Auto` load's
 pass folds in the same waves: the fold an `Auto` load used to build as its segments were written — reserved the same way,
 given up when refused or spilled, and past 256 MB on an embedded engine with no governor — is gone, and the load holds no
-materialized-query memory while it streams. The wave's reservation is made **before** it folds, from what the earlier waves measured; a refusal shrinks that wave before it folds (down to a sixteenth, which still runs), and what the fold holds beyond its reservation is charged after it. A result whose key map the budget refuses is still written at full speed: the pass reads the result's cold segments once per wave, and a refused key-map load is retried only after the memory ledger is resampled (about every 10 s).
+materialized-query memory while it streams.
+
+The wave's reservation is made **before** it folds, from what the earlier waves measured; a refusal shrinks that wave before it folds (down to a sixteenth, which still runs), and what the fold holds beyond its reservation is charged after it. A result whose key map the budget refuses is still written at full speed: the pass reads the result's cold segments once per wave, and a refused key-map load is retried only after the memory ledger is resampled (about every 10 s).
 
 (**WorkloadCore S09, 0.3.0**) **Maintenance asks for its memory before it takes a lock** (BL-859). Each maintenance unit — a queued
 apply, an ingest-fed drain (gone in **WorkloadCore S10**), a deferred pass — asks the memory budget for a grant (a queued apply in the `Streaming` class,
@@ -1292,12 +1300,12 @@ Response — `200` when the wait completed, `202` when it is still running:
 
 ```json
 {
- "status": "complete",
- "sourceGroups": 1,
- "results": [
- { "name": "EquityTradeOhlc1H", "state": 1 },
- { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
- ]
+  "status": "complete",
+  "sourceGroups": 1,
+  "results": [
+    { "name": "EquityTradeOhlc1H", "state": 1 },
+    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
+  ]
 }
 ```
 
@@ -1322,17 +1330,17 @@ refreshing is safe to repeat.
 
 ```csharp
 var result = await client.MaterializedQueries.RefreshTableAsync(
- sourceTable: "EquityTrade", staleOnly: true, awaitCompletion: true);
+    sourceTable: "EquityTrade", staleOnly: true, awaitCompletion: true);
 
 foreach (var entry in result.Results)
 {
- if (entry.State == MaterializedQueryState.Error)
- Console.WriteLine($"{entry.Name}: {entry.Error}");
+    if (entry.State == MaterializedQueryState.Error)
+        Console.WriteLine($"{entry.Name}: {entry.Error}");
 }
 
 // Or by explicit name:
 await client.MaterializedQueries.RefreshManyAsync(
- new { "EquityTradeOhlc1M", "EquityTradeOhlc1H" }, awaitCompletion: true);
+    new[] { "EquityTradeOhlc1M", "EquityTradeOhlc1H" }, awaitCompletion: true);
 ```
 
 `RefreshAsync(name)` is unchanged and still refreshes exactly one query.
@@ -1342,7 +1350,7 @@ await client.MaterializedQueries.RefreshManyAsync(
 ```bash
 aouda mq refresh --source-table EquityTrade --stale-only --await
 aouda mq refresh EquityTradeOhlc1M,EquityTradeOhlc1H --await
-aouda mq refresh EquityTradeOhlc1M --await # one name: the single-query route, as before
+aouda mq refresh EquityTradeOhlc1M --await     # one name: the single-query route, as before
 ```
 
 `--json` prints per-name outcomes. The command exits non-zero if any query ended in `Error`.
@@ -1377,8 +1385,8 @@ rebuild does not start: the query stays readable and behind, and the rebuild wai
 It **partitions and spills**, as often as it needs to, and finishes:
 
 1. An `aggregate`, `latestPerKey`, `firstPerKey` or `topNPerGroup` build splits its groups into `MaxPartitions` partitions
- (in place — nothing already read is read again) and writes the groups it holds to disk scratch (below). It carries on
- scanning; each time its groups outgrow the grant again, it writes them out again.
+   (in place — nothing already read is read again) and writes the groups it holds to disk scratch (below). It carries on
+   scanning; each time its groups outgrow the grant again, it writes them out again.
 2. At publish it folds **one partition at a time** — the partition's scratch and what it still holds — into the result.
 
 **A query is never retired for its size, and a build never starts over for memory.** Before this release a build was capped
@@ -1402,17 +1410,17 @@ query's own storage path:
 Four things are worth knowing about it, because it is disk you did not ask for:
 
 - **It is scratch and it is temporary.** A build deletes its own file when it finishes or fails, and
- an engine open deletes the whole `_build_runs` directory unconditionally before restoring
- anything. Nothing reads it back after the build that wrote it.
+  an engine open deletes the whole `_build_runs` directory unconditionally before restoring
+  anything. Nothing reads it back after the build that wrote it.
 - **One file per build** (**BL-620, 0.1.36**), however many times that build spills. Before this
- it was one file per partition eviction — a 15.3 M-row bulk load into a table carrying six
- materialized queries left about **152 000 files** behind, at a median of 9.4 KB each.
+  it was one file per partition eviction — a 15.3 M-row bulk load into a table carrying six
+  materialized queries left about **152 000 files** behind, at a median of 9.4 KB each.
 - **Only a rebuild spills** (**WorkloadCore S10, 0.3.0**). A bulk load does no materialized-query work while it streams; its rows
- are brought in by the table's pass, and a build that outgrows its memory grant (at most a quarter of the governed budget while
- the budget is enforced; uncapped under `Advisory`) partitions and writes runs to `_build_runs/` until it publishes. A chunked
- rebuild that is refused memory keeps its run file for its cursor (**BL-624, 0.15.0**).
+  are brought in by the table's pass, and a build that outgrows its memory grant (at most a quarter of the governed budget while
+  the budget is enforced; uncapped under `Advisory`) partitions and writes runs to `_build_runs/` until it publishes. A chunked
+  rebuild that is refused memory keeps its run file for its cursor (**BL-624, 0.15.0**).
 - **The volume is what the build's groups exceed its grant by** (**WorkloadCore S12, 0.3.0**: no longer an accumulator
- ceiling). It reads all of it back at publish.
+  ceiling). It reads all of it back at publish.
 
 ⚠️ **This directory is not a cache and is not a backup.** Do not back it up, and do not point a
 retention or archive tool at it — everything in it is mid-flight state for a build that is either
@@ -1480,7 +1488,9 @@ refusal line (`T27`), a rebuild's build writes are refused like any source write
 capacity refusals now: the query stays readable and behind, and its rebuild is requeued. A WAL-refused rebuild waits for the
 log to fall back under `T26` before it runs again, and does not double its memory ask. A **create** whose first build is
 refused this way (memory or WAL) succeeds: the definition is durable, so the query exists behind and is built once there is
-room — it used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists". A result's ordinary
+room — it used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists".
+
+A result's ordinary
 **maintenance** — the apply of a source's change, a deferred pass — is no longer refused there: its derived writes are admitted up to
 `MaxWalBytes`, so a result that is behind at a full WAL catches up by its apply, checkpoints, and releases the WAL it was pinning,
 without a rebuild; only a rebuild still waits.
@@ -1510,7 +1520,10 @@ memory, a `Skip` load, a maintenance apply that failed part-way. A later bulk lo
 adds exactly its own rows and does not repair that. It therefore **no longer clears the mark**.
 Before this release it did, and the query then read as current while missing whole loads. Only a
 rebuild that scans the source table clears it: `:refresh`, a fallback rebuild, or the automatic retry
-of a deferred query A query whose maintenance **failed to apply** a change is rebuilt by the engine, not left for `:refresh`: a memory or WAL refusal waits for room as a refused rebuild does, and any other failure is rebuilt at once, a bounded number of times. A rebuild that publishes but cannot clear a mark recorded under it is followed by a bounded rebuild; a query still stale after it logs "still stale after N rebuild attempt(s)" and needs a `:refresh`.
+of a deferred query (**WorkloadCore S10, 0.3.0**: the requeued rebuild, served when the memory budget has room). If a query stays stale after a load, that is the reason, and `:refresh` (pooled
+with `staleOnly`) is the remedy.
+
+A query whose maintenance **failed to apply** a change is rebuilt by the engine, not left for `:refresh`: a memory or WAL refusal waits for room as a refused rebuild does, and any other failure is rebuilt at once, a bounded number of times. A rebuild that publishes but cannot clear a mark recorded under it is followed by a bounded rebuild; a query still stale after it logs "still stale after N rebuild attempt(s)" and needs a `:refresh`.
 
 ## 2.11d What a query costs to maintain: the `amplification` object {#amplification}
 
@@ -1524,25 +1537,25 @@ actually run in, and the shape the remaining cost is worst on.
 
 ```json
 {
- "name": "candles_bid_1m",
- "state": 1,
- "rowCount": 41200,
- "amplification": {
- "sourceRowsIngested": 1000000,
- "keysPlanned": 1000000,
- "priorRowsRead": 958800,
- "applies": 512,
- "resultRowsUpserted": 1000000,
- "resultRowsDeleted": 0,
- "rebuildSourceRowsScanned": 0,
- "rebuildResultRowsWritten": 0,
- "sourceColumnsDecoded": 12000000,
- "sourceColumnsDeclared": 3000000,
- "resultRowsWritten": 1000000,
- "writeAmplification": 1.0,
- "readAmplification": 4.0,
- "isEmpty": false
- }
+  "name": "candles_bid_1m",
+  "state": 1,
+  "rowCount": 41200,
+  "amplification": {
+    "sourceRowsIngested": 1000000,
+    "keysPlanned": 1000000,
+    "priorRowsRead": 958800,
+    "applies": 512,
+    "resultRowsUpserted": 1000000,
+    "resultRowsDeleted": 0,
+    "rebuildSourceRowsScanned": 0,
+    "rebuildResultRowsWritten": 0,
+    "sourceColumnsDecoded": 12000000,
+    "sourceColumnsDeclared": 3000000,
+    "resultRowsWritten": 1000000,
+    "writeAmplification": 1.0,
+    "readAmplification": 4.0,
+    "isEmpty": false
+  }
 }
 ```
 
@@ -1583,14 +1596,14 @@ code, and so a future improvement is checkable.
 ### What it is not
 
 - ⚠️ **Not a process total, and not summable into one.** An eight-query fan-out reports eight of
- these. A process total cannot be divided back out, and it is the per-query figure an operator can
- act on.
+  these. A process total cannot be divided back out, and it is the per-query figure an operator can
+  act on.
 - ⚠️ **Not persisted, and not comparable across a restart.** Every counter is since **process
- start**. A restart zeroes them.
+  start**. A restart zeroes them.
 - ⚠️ **Not a rate.** These are monotonic totals plus two ratios over them. To get a rate, poll and
- difference.
+  difference.
 - 🔎 **Omitted entirely for a query that has done nothing**, so an idle query's response bytes are
- unchanged — treat an absent `amplification` as "no data yet", not as zero.
+  unchanged — treat an absent `amplification` as "no data yet", not as zero.
 
 ### What it does not change
 
@@ -1615,25 +1628,25 @@ query without a window returns. Choosing too short a window makes old ranges slo
 
 ```json
 "EquityTradeOhlc1M": {
- "type": "aggregate",
- "sourceTable": "EquityTrade",
- "groupBy": [ "Ticker", { "column": "Ts", "function": "truncateToMinute", "outputName": "Minute" } ],
- "aggregates": [ /* open, high, low, close, volume */ ],
- "window": { "keep": "7d" }
+  "type": "aggregate",
+  "sourceTable": "EquityTrade",
+  "groupBy": [ "Ticker", { "column": "Ts", "function": "truncateToMinute", "outputName": "Minute" } ],
+  "aggregates": [ /* open, high, low, close, volume */ ],
+  "window": { "keep": "7d" }
 }
 ```
 
 - **`keep`** is a whole number (1–100000, no leading zero) of minutes, hours, days or weeks: `"90m"`, `"36h"`, `"7d"`,
- `"2w"` — and a whole multiple of the query's bucket.
+  `"2w"` — and a whole multiple of the query's bucket.
 - **An `aggregate`** takes a window when its group-by has a time bucket: `truncateToMinute`, `truncateToHour`,
- `truncateToDay` or `truncateToWeek`. The window column is that bucket's output; with more than one bucket,
- `window.column` names the one the window sits on.
+  `truncateToDay` or `truncateToWeek`. The window column is that bucket's output; with more than one bucket,
+  `window.column` names the one the window sits on.
 - **A `topNPerGroup`** takes a window when its group-by includes a time column of its source (a `Timestamp` or `Date`);
- `window.column` is required and names it. A `Date` column needs a `keep` of whole days or weeks.
+  `window.column` is required and names it. A `Date` column needs a `keep` of whole days or weeks.
 - `schema export` writes the window. **Changing it changes the definition**: a replace (drop, then create), rebuilt for the
- new window. Nothing is migrated.
+  new window. Nothing is migrated.
 - A windowed result is **clustered by its window column alone** — an aggregate's window bucket even when another bucket comes
- first, a top-N's window column — so that each of its segments covers one stretch of time ([expiry](#window-expiry)).
+  first, a top-N's window column — so that each of its segments covers one stretch of time ([expiry](#window-expiry)).
 
 ### What is refused {#window-refusals}
 
@@ -1646,7 +1659,9 @@ Each of these is refused at create, with the reason in the error:
 | A `keep` that is not a whole number of `m` / `h` / `d` / `w`, or not a multiple of the bucket | The horizon sits on a bucket boundary, so that each group lies wholly on one side of it |
 | Two time buckets and no `window.column`, or a `window.column` that is not a bucket output; a `topNPerGroup` whose window column is missing, not in its group-by, or not a `Timestamp` / `Date` | No window column to apply the horizon to |
 | A query over a windowed result that declares **no** window, or a longer `keep` than its upstream's | Below its upstream's horizon the upstream ignores late rows and deletes, so a group kept there would go stale unseen. For the same reason a `filter`, `latestPerKey` or `firstPerKey` — which cannot declare a window — is refused over a windowed result |
-| A window over a source with **retention** (for a query over a windowed result: the first table up the chain that is not one) — and retention on a table that such a window computes from | A read below the window is computed from the source; once the source has dropped a range nothing can recompute it, and the window would change the answer ([below](#queries-over-a-table-with-retention)) | The window rule is checked again when an upstream is **created again** under queries that read it: an upstream re-created narrower than a dependant is refused (`400 INVALID_REQUEST`), not rebuilt to the new reach, and a schema apply that would break the rule is refused whole, before any change.
+| A window over a source with **retention** (for a query over a windowed result: the first table up the chain that is not one) — and retention on a table that such a window computes from | A read below the window is computed from the source; once the source has dropped a range nothing can recompute it, and the window would change the answer ([below](#queries-over-a-table-with-retention)) |
+
+The window rule is checked again when an upstream is **created again** under queries that read it: an upstream re-created narrower than a dependant is refused (`400 INVALID_REQUEST`), not rebuilt to the new reach, and a schema apply that would break the rule is refused whole, before any change.
 
 ### The horizon {#the-horizon}
 
@@ -1654,33 +1669,33 @@ Each of these is refused at create, with the reason in the error:
 down to the minute.
 
 - **The clock is the server's, not the data's.** A history loaded oldest-first does not drag the horizon through every year,
- and a row stamped in the future does not expire anything. Weekends and holidays are covered by `keep`'s margin and, past
- it, by the computed read.
+  and a row stamped in the future does not expire anything. Weekends and holidays are covered by `keep`'s margin and, past
+  it, by the computed read.
 - **Persisted, then published.** The first `H` is written to the catalog when the query is created, before anything is built
- into its result. A `horizon-advance` housekeeping job then raises it — every one slice / 8, at least every minute
- ([defaults](defaults-reference.md#horizons)) — and writes each new value to the catalog **before** any reader is given it.
- Readers use only that persisted value, so the result stores up to one tick beyond `keep` (for a `7d` window three hours,
- for `35d` 21 hours).
+  into its result. A `horizon-advance` housekeeping job then raises it — every one slice / 8, at least every minute
+  ([defaults](defaults-reference.md#horizons)) — and writes each new value to the catalog **before** any reader is given it.
+  Readers use only that persisted value, so the result stores up to one tick beyond `keep` (for a `7d` window three hours,
+  for `35d` 21 hours).
 - **It never moves back** — not for a clock stepped back, a crash, or a rebuild's table swap (the horizon follows the query's
- name). A clock that jumps forward expires early; for a windowed result that is only a cache miss.
+  name). A clock that jumps forward expires early; for a windowed result that is only a cache miss.
 - **Pinned per read.** A read uses the horizon of the snapshot it captured; an advance that lands while it plans does not
- change its answer.
+  change its answer.
 - A `topNPerGroup`'s horizon is floored to its `keep`'s unit (its groups carry the exact time). A query over a windowed result
- never has a horizon below its upstream's: it takes the higher of its own and its upstream's, raised to its own bucket — hour
- candles over minute candles have an hour-aligned horizon.
+  never has a horizon below its upstream's: it takes the higher of its own and its upstream's, raised to its own bucket — hour
+  candles over minute candles have an hour-aligned horizon.
 
 ### Maintenance builds nothing below the horizon {#window-maintenance}
 
 - A commit's rows whose bucket lies below `H` are dropped before the query computes. A delete or update of a row below it
- changes nothing in the result; an update that moves a row across it is the insert or the delete it is for the window.
+  changes nothing in the result; an update that moves a row across it is the insert or the delete it is for the window.
 - The deferred pass after a bulk load skips a loaded segment whose time column lies wholly below `H` without decoding it, and
- folds only the window's rows of the rest. Every rebuild — create, `:refresh`, the restart's — scans its source with
- `time ≥ H`, so segments, row groups and granules below it are not read.
+  folds only the window's rows of the rest. Every rebuild — create, `:refresh`, the restart's — scans its source with
+  `time ≥ H`, so segments, row groups and granules below it are not read.
 - So **a history load costs a windowed query only metadata.** On a Derive-shaped history load the three windowed queries'
- share fell from 39.7 to 0.0 CPU-seconds per million rows, and the whole load's from 51.0 to 11.1 — what it costs with
- those three queries left out (11.3).
+  share fell from 39.7 to 0.0 CPU-seconds per million rows, and the whole load's from 51.0 to 11.1 — what it costs with
+  those three queries left out (11.3).
 - A late row inside the window updates its group exactly. A row below it stays in the source table and is in the answer of
- any read of that range. A row whose window time is **null** is outside every window and answered the same way.
+  any read of that range. A row whose window time is **null** is outside every window and answered the same way.
 
 ### Every read is complete: the part below the horizon is computed {#reads-below-the-horizon}
 
@@ -1689,27 +1704,27 @@ a stream, `POST …/query`, `…/materialized-queries/{name}/query`, a named que
 one result:
 
 1. **At or after `H`, from the result table.** The read carries `window column ≥ H` (its snapshot's `H`), so a group still
- stored below it — built before the horizon last moved, waiting for expiry — is never returned.
+   stored below it — built before the horizon last moved, waiting for expiry — is never returned.
 2. **Below `H`, computed from the source** with the accumulator a rebuild uses, so a computed group is the group maintenance
- would have stored. The read's predicate is pushed to the source through the bucket (`Minute >= a` becomes `Ts >= a`
- rounded up to the minute; a ticker condition carries over), so one series' day below `H` reads that series' day. A
- condition on an aggregate output (`close > 100`) is applied to the computed groups. A read whose time bound lies at or
- after `H` computes nothing.
+   would have stored. The read's predicate is pushed to the source through the bucket (`Minute >= a` becomes `Ts >= a`
+   rounded up to the minute; a ticker condition carries over), so one series' day below `H` reads that series' day. A
+   condition on an aggregate output (`close > 100`) is applied to the computed groups. A read whose time bound lies at or
+   after `H` computes nothing.
 
 What it costs is the caller's question, and visible:
 
 - **`stats.windowCompletionRows`** on `POST …/query` and on the materialized-query endpoint is the number of source rows the
- computation read; it is absent when nothing was computed.
+  computation read; it is absent when nothing was computed.
 - **A read with no time bound computes the whole history below `H`** — it asked for everything.
 - **The computed groups are charged to the read's memory budget.** A part that fits half of what the read may still grow to is
- folded at once; a larger one is folded **in pieces** — bucket-aligned ranges of the source's time, all from one pinned view
- of the source, each scanned into the read's result and let go before the next — so a long history holds one piece at a
- time, as a stored read holds one segment. A single bucket that alone outgrows the read's ceiling is refused (`503` +
- `Retry-After`) as a stored read of that size is ([sizing](sizing.md#windowed-results)).
+  folded at once; a larger one is folded **in pieces** — bucket-aligned ranges of the source's time, all from one pinned view
+  of the source, each scanned into the read's result and let go before the next — so a long history holds one piece at a
+  time, as a stored read holds one segment. A single bucket that alone outgrows the read's ceiling is refused (`503` +
+  `Retry-After`) as a stored read of that size is ([sizing](sizing.md#windowed-results)).
 - **A read ordered by the window column with a `LIMIT`** (a keyset page) computes only the pieces it needs, in its own
- direction. An unordered `LIMIT` that the stored part satisfies computes nothing.
+  direction. An unordered `LIMIT` that the stored part satisfies computes nothing.
 - A windowed query over another windowed result computes its part below `H` from its upstream's answer, which is complete by
- the same rule.
+  the same rule.
 
 Measured on the Derive-shaped `lab` soak: one ticker's trading day of minute candles, three days below a `7d` horizon, was read
 in **38.1 ms p50** for the largest ticker and **15.7 ms** for the median — against 42.3 and 36.4 ms for the same day read from
@@ -1740,14 +1755,14 @@ writes two catalog records — the horizon's and the batch — however many rows
 - A segment with no time facts on the window column is kept and reported (unknown keeps).
 - A crash between the catalog batch and the files loses nothing and brings nothing back; the restart removes the leftover files.
 - **Replicas:** a windowed result's horizon on a replica is the primary's (**Horizon, 0.5.0**). A replica's result rows are
- the primary's, so the primary logs each advance (`AdvanceTableHorizon`, one catalog record) and a replica advances none on its
- own clock. (A table's [retention](retention.md#replicas) horizon still advances on each engine's own clock; an early expiry
- reaches replicas as a logged record.) An engine that is not a replica also logs every horizon once when it opens, so a horizon
- saved just before a crash still reaches replicas and point-in-time restores.
+  the primary's, so the primary logs each advance (`AdvanceTableHorizon`, one catalog record) and a replica advances none on its
+  own clock. (A table's [retention](retention.md#replicas) horizon still advances on each engine's own clock; an early expiry
+  reaches replicas as a logged record.) An engine that is not a replica also logs every horizon once when it opens, so a horizon
+  saved just before a crash still reaches replicas and point-in-time restores.
 - **What is stored:** the window, plus at most about one slice (a quarter of `keep`), plus whatever segments a pinned snapshot
- still holds. Measured at steady state: **1.140 ×** the groups in `keep` for `7d` minute candles, **1.028 ×** for a `1d`
- window — and 3.1 × and growing with expiry taken out. Retiring 120 segments took one catalog batch and about 30 ms; an hour
- of expiry on the real clock removed 92 files and wrote nothing beside a removal.
+  still holds. Measured at steady state: **1.140 ×** the groups in `keep` for `7d` minute candles, **1.028 ×** for a `1d`
+  window — and 3.1 × and growing with expiry taken out. Retiring 120 segments took one catalog batch and about 30 ms; an hour
+  of expiry on the real clock removed 92 files and wrote nothing beside a removal.
 - **Nothing to configure** — no slice width, no cadence ([defaults](defaults-reference.md#horizons)).
 
 Counters: `MqHorizonRowsDropped` and `MqHorizonSegmentsSkipped` (maintenance below `H`), `WindowCompletionPieces` and
@@ -1777,27 +1792,27 @@ A table can declare **retention** ([retention](retention.md)): its rows older th
 segments. A materialized query over such a table is **not** windowed — it **keeps its history** below the table's horizon:
 
 - **Expiry is not a change to the source**, so nothing is retracted from its results — the downsampling pattern: raw rows for
- 90 days, daily candles for ever. A `DELETE` before a time on such a table is an early expiry, and is treated the same way.
+  90 days, daily candles for ever. A `DELETE` before a time on such a table is an early expiry, and is treated the same way.
 - **A rebuild keeps the history.** It reads the table from its horizon, rounded up to the query's bucket, and copies the old
- result's groups below that cut into the new result as they were — across a `:refresh` and a restart's rebuild alike. A
- query's **first** build carries nothing: it computes every group from the rows the table holds, so a query created after the
- table has expired rows starts without them, and its group straddling the horizon counts only the rows at or after it.
+  result's groups below that cut into the new result as they were — across a `:refresh` and a restart's rebuild alike. A
+  query's **first** build carries nothing: it computes every group from the rows the table holds, so a query created after the
+  table has expired rows starts without them, and its group straddling the horizon counts only the rows at or after it.
 - **`TRUNCATE`** (**Horizon, 0.5.0**) empties the table; its results are rebuilt and keep their history below the cut, as
- every rebuild over the table does, and the group straddling the horizon is carried as it was (BL-1063, below), so it may still
- count truncated rows from between the horizon and the cut. The groups at or after the cut are recomputed from the empty table,
- so they are gone. An unfiltered `DELETE` instead retracts exactly the visible rows. Use `TRUNCATE` to empty the table and keep the
- history; no statement also clears a result's history — drop the query and create it again.
+  every rebuild over the table does, and the group straddling the horizon is carried as it was (BL-1063, below), so it may still
+  count truncated rows from between the horizon and the cut. The groups at or after the cut are recomputed from the empty table,
+  so they are gone. An unfiltered `DELETE` instead retracts exactly the visible rows. Use `TRUNCATE` to empty the table and keep the
+  history; no statement also clears a result's history — drop the query and create it again.
 - **Known limitation (BL-1060):** a query over such a table must split its groups by the retention column — an `aggregate`
- grouped by a time bucket of it (or by the column itself), or a `topNPerGroup` grouped by it; a `latestPerKey`, `firstPerKey`,
- `filter` or any other query is refused at create, and retention is refused on a table such a query reads. Incremental
- maintenance would keep their history and a rebuild drop it.
+  grouped by a time bucket of it (or by the column itself), or a `topNPerGroup` grouped by it; a `latestPerKey`, `firstPerKey`,
+  `filter` or any other query is refused at create, and retention is refused on a table such a query reads. Incremental
+  maintenance would keep their history and a rebuild drop it.
 - **Known limitation (BL-1063):** every rebuild over the table, whatever caused it, recomputes every group at or after the cut `K`
- (the horizon rounded up to the query's bucket) and carries every group below it — the one straddling the horizon included — as
- the old result held it (its rows below the horizon are gone, so it cannot be recomputed). A change to a carried group that only a
- rebuild picks up — a deleted minimum or maximum, a bulk load folded by the rebuild rather than incrementally, a `TRUNCATE` — is
- not reflected in it, its count and sum included. A straddling group exists only for a bucket coarser than a minute (an hour,
- day, week, month or year) when the horizon is not on its boundary. A result that is behind when it is rebuilt — it had not yet
- absorbed a change, such as a bulk load whose deferred pass had not run — loses below `K` whatever it had not absorbed.
+  (the horizon rounded up to the query's bucket) and carries every group below it — the one straddling the horizon included — as
+  the old result held it (its rows below the horizon are gone, so it cannot be recomputed). A change to a carried group that only a
+  rebuild picks up — a deleted minimum or maximum, a bulk load folded by the rebuild rather than incrementally, a `TRUNCATE` — is
+  not reflected in it, its count and sum included. A straddling group exists only for a bucket coarser than a minute (an hour,
+  day, week, month or year) when the horizon is not on its boundary. A result that is behind when it is rebuilt — it had not yet
+  absorbed a change, such as a bulk load whose deferred pass had not run — loses below `K` whatever it had not absorbed.
 - **Known limitation (BL-1061):** a read of a table with retention is not routed to a materialized result; it reads the table.
 - No window over such a table (refused, above): use raw retention plus **unwindowed** results.
 
@@ -1811,31 +1826,31 @@ a month back), and daily candles for everything longer. Its windows follow:
 
 ```json
 "materializedQueries": {
- "EquityTradeOhlc1M": {
- "type": "aggregate", "sourceTable": "EquityTrade",
- "groupBy": [ "Ticker", "Source", { "column": "Ts", "function": "truncateToMinute", "outputName": "DateTime" } ],
- "aggregates": [ /* open, high, low, close, volume */ ],
- "window": { "keep": "7d" }
- },
- "EquityTradeOhlc1H": {
- "type": "aggregate", "sourceTable": "EquityTrade",
- "groupBy": [ "Ticker", "Source", { "column": "Ts", "function": "truncateToHour", "outputName": "DateTime" } ],
- "aggregates": [ /* … */ ],
- "window": { "keep": "35d" }
- },
- "EquityTradeOhlc1D": {
- "type": "aggregate", "sourceTable": "EquityTrade",
- "groupBy": [ "Ticker", "Source", { "column": "Ts", "function": "truncateToDay", "outputName": "DateTime" } ],
- "aggregates": [ /* … */ ]
- }
+  "EquityTradeOhlc1M": {
+    "type": "aggregate", "sourceTable": "EquityTrade",
+    "groupBy": [ "Ticker", "Source", { "column": "Ts", "function": "truncateToMinute", "outputName": "DateTime" } ],
+    "aggregates": [ /* open, high, low, close, volume */ ],
+    "window": { "keep": "7d" }
+  },
+  "EquityTradeOhlc1H": {
+    "type": "aggregate", "sourceTable": "EquityTrade",
+    "groupBy": [ "Ticker", "Source", { "column": "Ts", "function": "truncateToHour", "outputName": "DateTime" } ],
+    "aggregates": [ /* … */ ],
+    "window": { "keep": "35d" }
+  },
+  "EquityTradeOhlc1D": {
+    "type": "aggregate", "sourceTable": "EquityTrade",
+    "groupBy": [ "Ticker", "Source", { "column": "Ts", "function": "truncateToDay", "outputName": "DateTime" } ],
+    "aggregates": [ /* … */ ]
+  }
 }
 ```
 
 - **Minute candles, `7d`:** five days of reads plus a weekend's margin; day slices, the horizon advanced every three hours. A
- chart that reaches further back is still answered — computed from the trades for the range it asks for.
+  chart that reaches further back is still answered — computed from the trades for the range it asks for.
 - **Hour candles, `35d`:** a month of reads plus margin; week slices, advanced every 21 hours.
 - **Daily candles: no window.** They answer every range longer than a month, so their whole history is read; a history load
- still folds into them.
+  still folds into them.
 
 A history migration into `EquityTrade` then builds no minute or hour candle older than its window.
 
@@ -1889,7 +1904,7 @@ Steps:
 1. Start `client.table(queryName).subscribe(...)`.
 2. Confirm initial snapshot arrives.
 3. Insert/update source-table rows.
-4. Ensure maintainer updates are flushed (`FlushSubscriptionsAsync` in.NET integration path).
+4. Ensure maintainer updates are flushed (`FlushSubscriptionsAsync` in .NET integration path).
 
 Expected checks:
 - Subscriber receives snapshot then incremental changes.
@@ -1904,117 +1919,117 @@ is the shape of "the latest curve per curve id":
 
 ```json
 {
- "tables": {
- "RateCurves": {
- "columns": {
- "CurveId": { "type": "Int32", "primaryKey": 1 },
- "AsOf": { "type": "Timestamp", "primaryKey": 2 },
- "Tenors": { "type": "Int32", "nullable": true },
- "Rates": { "type": "Double", "nullable": true }
- },
- "clusterColumns": ["AsOf"]
- }
- },
- "materializedQueries": {
- "LatestCurve": { "type": "latestPerKey", "sourceTable": "RateCurves", "groupBy": ["CurveId"], "orderBy": "AsOf" }
- }
+  "tables": {
+    "RateCurves": {
+      "columns": {
+        "CurveId": { "type": "Int32", "primaryKey": 1 },
+        "AsOf": { "type": "Timestamp", "primaryKey": 2 },
+        "Tenors": { "type": "Int32[]", "nullable": true },
+        "Rates": { "type": "Double[]", "nullable": true }
+      },
+      "clusterColumns": ["AsOf"]
+    }
+  },
+  "materializedQueries": {
+    "LatestCurve": { "type": "latestPerKey", "sourceTable": "RateCurves", "groupBy": ["CurveId"], "orderBy": "AsOf" }
+  }
 }
 ```
 
 - **An array column is never a key.** A `groupBy` / key, an `orderBy`, or an aggregate input on an array column is refused when
- the query is declared: at `schema apply` that entry is `Failed` with `ARRAY_COLUMN_UNSUPPORTED: column 'T.V' is Double; an
- array column cannot be a materialized query's group key …`, and `POST …/materialized-queries` answers `400`.
+  the query is declared: at `schema apply` that entry is `Failed` with `ARRAY_COLUMN_UNSUPPORTED: column 'T.V' is Double[]; an
+  array column cannot be a materialized query's group key …`, and `POST …/materialized-queries` answers `400`.
 - **A `filter` result over a table without a primary key cannot carry an array column**, because such a result identifies its
- rows by every column. Give the table a key, or leave the array out of `select`.
+  rows by every column. Give the table a key, or leave the array out of `select`.
 - **The values survive** the build, incremental maintenance, a rebuild and a restart, bit for bit.
 - **Reading it.** `POST …/materialized-queries/{name}/query` answers the result with a **`columnTypes`** object naming the array
- columns (`{"Tenors":"Int32","Rates":"Double"}`; absent when the result has none). (**BL-1402, 0.11.0**) It names `Timestamp`
- and `Date` columns too (`"Timestamp"`, `"Date"`), so a `latestPerKey` result, which always carries its ordering Timestamp, has it. A subscription to the result is an
- ordinary table subscription: its `snapshot` and `change` messages carry `column_types`, and a client treats a column not named
- there as a scalar. See [Array columns](array-columns.md#subscriptions-long-poll-and-materialized-queries).
+  columns (`{"Tenors":"Int32[]","Rates":"Double[]"}`; absent when the result has none). (**BL-1402, 0.11.0**) It names `Timestamp`
+  and `Date` columns too (`"Timestamp"`, `"Date"`), so a `latestPerKey` result, which always carries its ordering Timestamp, has it. A subscription to the result is an
+  ordinary table subscription: its `snapshot` and `change` messages carry `column_types`, and a client treats a column not named
+  there as a scalar. See [Array columns](array-columns.md#subscriptions-long-poll-and-materialized-queries).
 - **Latency of "the curve changed" to "the subscriber has it"** — *measured on `d03-aouda-kb`, 2026-10-29, by `Ar2CurveLatencyTests`:
- six curves, one row per curve per second (100 measured ticks each), each row 6.9 KB of arrays, written by a named mutation and
- delivered to a C# SDK subscription on a `latestPerKey` result over WebSocket JSON; loopback, the server pinned to four cores,
- shipped defaults*: from sending the insert to the push, **p50 21.4 ms, p99 29.6 ms, maximum 51.5 ms** (the insert's own
- acknowledgement took a p50 of 9.1 ms of that). The first calls after a server start take up to about 0.45 s while connections
- and the JIT warm up.
+  six curves, one row per curve per second (100 measured ticks each), each row 6.9 KB of arrays, written by a named mutation and
+  delivered to a C# SDK subscription on a `latestPerKey` result over WebSocket JSON; loopback, the server pinned to four cores,
+  shipped defaults*: from sending the insert to the push, **p50 21.4 ms, p99 29.6 ms, maximum 51.5 ms** (the insert's own
+  acknowledgement took a p50 of 9.1 ms of that). The first calls after a server start take up to about 0.45 s while connections
+  and the JIT warm up.
 - **A table with retention cannot feed a `latestPerKey`.** A `latestPerKey` (or `firstPerKey`, or `filter`) over a table that
- declares retention is refused when the query is created (BL-1060, a limit that is not specific to arrays):
+  declares retention is refused when the query is created (BL-1060, a limit that is not specific to arrays):
 
- ```text
- Materialized query 'Latest' reads 'Tick', which declares retention (keep 30d) on 'Time': a query over it keeps its history
- below the source's horizon, rebuilds included, which needs its groups split by that time … (ADR 0063 D-10).
- ```
+  ```text
+  Materialized query 'Latest' reads 'Tick', which declares retention (keep 30d) on 'Time': a query over it keeps its history
+  below the source's horizon, rebuilds included, which needs its groups split by that time … (ADR 0063 D-10).
+  ```
 
- So "keep 30 days of curves **and** a latest-curve view over the same table" cannot be declared today. Choose one: the view over
- a table without retention, or retention on the table and no view. Retention on its own works for a table with array columns,
- and drops whole segments as for any table.
+  So "keep 30 days of curves **and** a latest-curve view over the same table" cannot be declared today. Choose one: the view over
+  a table without retention, or retention on the table and no view. Retention on its own works for a table with array columns,
+  and drops whole segments as for any table.
 
 ## 2.13 Operations and observability
 
 Monitor first:
 
 - Lifecycle and pattern activity:
- - `MaterializedQueriesCreated`, `MaterializedQueriesDropped`, `MaterializedQueriesActive`
- - `LatestPerKeyQueries`, `AggregateQueries`, `FilterQueries`
+  - `MaterializedQueriesCreated`, `MaterializedQueriesDropped`, `MaterializedQueriesActive`
+  - `LatestPerKeyQueries`, `AggregateQueries`, `FilterQueries`
 - Incremental pipeline health:
- - `SubscriptionUpdatesEnqueued`, `SubscriptionUpdatesProcessed`, `SubscriptionDroppedUpdates`, `SubscriptionUpdateErrors`
- - `SubscriptionQueueDepth`, `SubscriptionLagMs`
+  - `SubscriptionUpdatesEnqueued`, `SubscriptionUpdatesProcessed`, `SubscriptionDroppedUpdates`, `SubscriptionUpdateErrors`
+  - `SubscriptionQueueDepth`, `SubscriptionLagMs`
 - Routing outcomes:
- - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`
+  - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`
 - A windowed query's reach — `window` and `horizon` on the status route (**Horizon, 0.5.0**); `stats.windowCompletionRows`
- on a read says what its part below the horizon read from the source. See [2.11e](#window-status).
+  on a read says what its part below the horizon read from the source. See [2.11e](#window-status).
 - Per-query cost — `amplification` on the status route, not a counter. `writeAmplification` and
- `readAmplification`, plus the totals behind them. See [2.11d](#amplification).
+  `readAmplification`, plus the totals behind them. See [2.11d](#amplification).
 - What the results are holding in RAM — `pinnedHotBytes` on `GET /api/server/memory` is the
- per-database total of declared residency pins, including any result table you declared `HotOnly`.
- See [2.3.1](#where-a-materialized-querys-result-lives).
+  per-database total of declared residency pins, including any result table you declared `HotOnly`.
+  See [2.3.1](#where-a-materialized-querys-result-lives).
 
 <a id="recovery-restart"></a>Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
 
 - Definitions are persisted and restored through catalog/store.
 - Result tables are normal catalog tables and survive restart. Their changes are logged as one batch per
- apply, and **those log records are for replicas**: a replica applies them and does not recompute.
+  apply, and **those log records are for replicas**: a replica applies them and does not recompute.
 - On the primary, a result is restored from its **checkpoint** — its content at a known position in the log,
- taken every 15 seconds while the query is current and at every clean shutdown — and the source's appends
- since then are folded in from the log. Recovery work is therefore proportional to what was written since the
- last checkpoint, not to the size of the source. (Measured: 200,000 rows since the checkpoint over a
- 400,000-row source, four queries — 5.7 s to open against 8.0 s rebuilding them.)
+  taken every 15 seconds while the query is current and at every clean shutdown — and the source's appends
+  since then are folded in from the log. Recovery work is therefore proportional to what was written since the
+  last checkpoint, not to the size of the source. (Measured: 200,000 rows since the checkpoint over a
+  400,000-row source, four queries — 5.7 s to open against 8.0 s rebuilding them.)
 - A query is **rebuilt from its source** instead when that cannot be exact: it has no checkpoint
- yet (created, or rebuilt, less than one checkpoint ago), it was behind when the server stopped, the source took
- a delete, a replacing upsert, a truncate, a bulk load or a schema change since the checkpoint, or the result's own
- stored rows changed since it (a compaction, or a stored row replaced since; (**WorkloadCore S11, 0.3.0**) a flush
- alone no longer counts — the checkpoint is retaken when the result's segments move). A query over another query's result
- is rebuilt from that result whenever its upstream took writes after the checkpoint. A database without a log restores
- results only after a clean shutdown. A `filter` over a table without a primary key
- is restored from its checkpoint only when its source took no write since it; otherwise it is rebuilt (its rows have no key, so
- they cannot be rewritten idempotently on a replica) (**ColumnarMerge S08, 0.2.0**).
+  yet (created, or rebuilt, less than one checkpoint ago), it was behind when the server stopped, the source took
+  a delete, a replacing upsert, a truncate, a bulk load or a schema change since the checkpoint, or the result's own
+  stored rows changed since it (a compaction, or a stored row replaced since; (**WorkloadCore S11, 0.3.0**) a flush
+  alone no longer counts — the checkpoint is retaken when the result's segments move). A query over another query's result
+  is rebuilt from that result whenever its upstream took writes after the checkpoint. A database without a log restores
+  results only after a clean shutdown. A `filter` over a table without a primary key
+  is restored from its checkpoint only when its source took no write since it; otherwise it is rebuilt (its rows have no key, so
+  they cannot be rewritten idempotently on a replica) (**ColumnarMerge S08, 0.2.0**).
 - (**WorkloadCore S11, 0.3.0**) **Opening a database never rebuilds a query.** Before, the open rebuilt every query it
- could not restore, one after another, before the database came up — so a restart took as long as scanning every
- source once per query. Now the open restores what it can and returns; the others come back **behind and `Building`**
- (`state: "Building"`, `current: false`, not routed; a read by name or a read with a consistency token answers
- `MQ_NOT_READY`) and are rebuilt **after** the open, one source table at a time (one scan per source for all its
- queries), each once memory for it is free. Watch `state` and `current` on the status endpoint; a client that needs the
- result waits for `current` (or passes a consistency token and retries `MQ_NOT_READY`).
+  could not restore, one after another, before the database came up — so a restart took as long as scanning every
+  source once per query. Now the open restores what it can and returns; the others come back **behind and `Building`**
+  (`state: "Building"`, `current: false`, not routed; a read by name or a read with a consistency token answers
+  `MQ_NOT_READY`) and are rebuilt **after** the open, one source table at a time (one scan per source for all its
+  queries), each once memory for it is free. Watch `state` and `current` on the status endpoint; a client that needs the
+  result waits for `current` (or passes a consistency token and retries `MQ_NOT_READY`).
 - (**WorkloadCore S11, 0.3.0**) **A query that owes a bulk load restores from its checkpoint** (the load's pending job
- says which rows it lacks) and the table's pass brings the load in after the open — instead of a rebuild.
+  says which rows it lacks) and the table's pass brings the load in after the open — instead of a rebuild.
 - (**WorkloadCore S11, 0.3.0**) **A rebuild of aggregate, latest-per-key and first-per-key queries resumes where it
- stopped.** It reads its source in chunks of about 2 million rows and records, after each, which source segments its
- partial state already holds. A rebuild interrupted by a crash, a shutdown or a memory refusal continues from its last
- chunk — provided none of those segments changed (a compaction that merged them, or a delete in them, starts it over). A
- group that includes a filter or a top-N query rebuilds from the start, as before.
+  stopped.** It reads its source in chunks of about 2 million rows and records, after each, which source segments its
+  partial state already holds. A rebuild interrupted by a crash, a shutdown or a memory refusal continues from its last
+  chunk — provided none of those segments changed (a compaction that merged them, or a delete in them, starts it over). A
+  group that includes a filter or a top-N query rebuilds from the start, as before.
 - (**BL-927, 0.3.0**) **A rebuild no longer loses source rows to a cold coalesce running under it.** A rebuild reads one
- pinned view of its source; segments a coalesce merges meanwhile keep their files until the rebuild's read ends. Before, when
- memory pressure had released the table's catalog shard and it was loaded again, those files could be deleted under the
- rebuild, which then published short and reported current. A read that finds a segment of its view with rows but no pages
- now fails instead of returning nothing.
+  pinned view of its source; segments a coalesce merges meanwhile keep their files until the rebuild's read ends. Before, when
+  memory pressure had released the table's catalog shard and it was loaded again, those files could be deleted under the
+  rebuild, which then published short and reported current. A read that finds a segment of its view with rows but no pages
+  now fails instead of returning nothing.
 - The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
- log is never pruned under it. (**BL-787, 0.3.0**) Only checkpoints that still exist and can be folded forward
- hold it. A query that goes stale, rebuilds or errors has its checkpoint dropped, and from the next round
- (15 seconds) it holds no log. A checkpoint that falls more than `T28` behind the log head is dropped too, so that
- query is rebuilt at the next startup instead. That is the bound every other WAL slot has. Before, a stale query's
- old position kept the whole log until the query was dropped, and could fill the WAL to its cap so that every
- bulk-load commit was refused.
+  log is never pruned under it. (**BL-787, 0.3.0**) Only checkpoints that still exist and can be folded forward
+  hold it. A query that goes stale, rebuilds or errors has its checkpoint dropped, and from the next round
+  (15 seconds) it holds no log. A checkpoint that falls more than `T28` behind the log head is dropped too, so that
+  query is rebuilt at the next startup instead. That is the bound every other WAL slot has. Before, a stale query's
+  old position kept the whole log until the query was dropped, and could fill the WAL to its cap so that every
+  bulk-load commit was refused.
 - A database created before this release has no checkpoints, so it rebuilds its results once, at the first open.
 
 Suggested tuning sequence:
@@ -2032,7 +2047,7 @@ Suggested tuning sequence:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| Query against MQ name returns table not found | MQ not created, not ready, or dropped; same error shape as missing table | Verify MQ status in.NET host and table presence in catalog |
+| Query against MQ name returns table not found | MQ not created, not ready, or dropped; same error shape as missing table | Verify MQ status in .NET host and table presence in catalog |
 | Base query does not auto-route | No compatible MQ, MQ not ready, or predicate/shape mismatch — or (**ColumnarRead S18, 0.3.0**) the MQ is stale, has updates queued, or has not yet incorporated the newest writes (under a continuous write load it often has not), or the database has no WAL | Use `ExplainRoutingAsync` and inspect matcher conditions; `stats.routedTo` says when a read was routed. A read that goes to the table returns the same answer |
 | MQ result update lag spikes | Async queue pressure or maintainer exceptions | Check queue/lag/error counters and consider `Sync` for critical flows |
 | Duplicate rows after compaction/flush on MQ result table | Known unresolved engine bug from P11 R8 | Track/fix through P11 handoff; do not relax correctness assertions |
@@ -2053,7 +2068,7 @@ Last verification date (UTC): `2026-03-31`.
 | Engine API MQ feature suites | `dotnet test tests/Aouda.Engine.Api.Tests --no-build --filter "FullyQualifiedName~MaterializedQueryApiTests|FullyQualifiedName~LatestPerKeyApiTests|FullyQualifiedName~AggregateApiTests|FullyQualifiedName~FilterApiTests|FullyQualifiedName~MaterializedQueryAutoRoutingTests|FullyQualifiedName~IncrementalUpdateSubscriptionTests" --verbosity minimal` | Pass (`99/99`) | 2026-03-31 | Covers create/build/update/routing flows |
 | Storage-layer MQ tests | `dotnet test tests/Aouda.Engine.Storage.Tests --no-build --filter "FullyQualifiedName~Materialized" --verbosity minimal` | Pass (`267/267`) | 2026-03-31 | Covers maintainers/catalog/store/subscription manager internals |
 | Query matcher/routing logic | `dotnet test tests/Aouda.Engine.Query.Tests --no-build --filter "FullyQualifiedName~MaterializedQueryMatcherTests" --verbosity minimal` | Pass (`21/21`) | 2026-03-31 | Confirms matcher contract and routing eligibility logic |
-|.NET client streaming MQ subscription tests | `dotnet test tests/Aouda.Client.Tests --no-build --filter "FullyQualifiedName~MaterializedQuerySubscriptionApiTests" --verbosity minimal` | Pass (`2/2`) | 2026-03-31 | Confirms standard table subscription path for MQ result names |
+| .NET client streaming MQ subscription tests | `dotnet test tests/Aouda.Client.Tests --no-build --filter "FullyQualifiedName~MaterializedQuerySubscriptionApiTests" --verbosity minimal` | Pass (`2/2`) | 2026-03-31 | Confirms standard table subscription path for MQ result names |
 | TypeScript streaming subscription tests | `npm test -- tests/streaming/subscription.test.ts` (in `../aouda-client-ts`) | Pass (`5/5`) | 2026-03-31 | Confirms TS subscribe flow behavior and message handling |
 | Known unresolved correctness issue | `tests/Aouda.Engine.Api.Tests/MaterializedQueryFlushIntegrationTests.cs` (tracked via P11 report) | Fail (known bug) | 2026-03-31 | Duplicate-row bug after flush; engine fix pending |
 
@@ -2076,110 +2091,110 @@ Last verification date (UTC): `2026-03-31`.
 |---|---|---|---|
 | No passing guardrail test for "no duplicate rows after flush" | Correctness regression risk on production read paths | Keep strict `MaterializedQueryFlushIntegrationTests` assertions and fix engine path | High |
 | No explicit end-to-end tests for reserved types (`FirstPerKey`, `TopNPerGroup`) failing clearly | Users can infer support from enum values | Add API validation tests that reject or clearly mark unsupported types | High |
-| No TS parity tests for route-control semantics | TS users cannot intentionally bypass routing like.NET `WithDirectScan` | Add tracked parity tests once API is introduced | Medium |
+| No TS parity tests for route-control semantics | TS users cannot intentionally bypass routing like .NET `WithDirectScan()` | Add tracked parity tests once API is introduced | Medium |
 | No HTTP API contract tests for MQ lifecycle endpoints | Management API gap remains opaque | Add server contract tests when endpoints are implemented | Medium |
 | Limited long-run stress tests for async queue saturation | Backpressure behavior can regress under bursty writes | Add deterministic load test asserting queue/lag/drop/error counters | Medium |
 
 ## 2.18 Known gaps and undone work
 
 - BL-019 (open):
- - MQ result-table query path can return duplicate rows after flush/compaction in specific scenarios.
- - User impact: strict correctness expectations for some flush-integration scenarios are not yet met.
+  - MQ result-table query path can return duplicate rows after flush/compaction in specific scenarios.
+  - User impact: strict correctness expectations for some flush-integration scenarios are not yet met.
 - BL-010 (open, depends BL-009):
- - JOIN-based materialized queries are not supported.
- - User impact: multi-table precomputation requires manual denormalized source table or other workarounds.
+  - JOIN-based materialized queries are not supported.
+  - User impact: multi-table precomputation requires manual denormalized source table or other workarounds.
 - BL-053 (open):
- - No distinct error code for MQ-not-ready subscriptions (`TABLE_NOT_FOUND` is used).
- - User impact: clients cannot distinguish "table missing" vs "MQ exists but not ready" from error code alone.
+  - No distinct error code for MQ-not-ready subscriptions (`TABLE_NOT_FOUND` is used).
+  - User impact: clients cannot distinguish "table missing" vs "MQ exists but not ready" from error code alone.
 - Windows and retention (**Horizon, 0.5.0**):
- - A question that reaches below a windowed result's horizon is not routed to it; a routed union across the horizon is not built.
- - Known limitation (BL-1060): only a query that splits its groups by the retention column may read a table with retention.
- - Known limitation (BL-1061): a read of a table with retention is not routed to a materialized result.
- - Known limitation (BL-1063): a rebuild over a table with retention recomputes only the groups at or after its cut and carries
- every group below it, the straddling one included, as the old result held it, so a change to a carried group that only a rebuild
- picks up (a deleted minimum or maximum, a bulk load folded by the rebuild, a `TRUNCATE`) is not reflected. See [2.11e](#queries-over-a-table-with-retention).
+  - A question that reaches below a windowed result's horizon is not routed to it; a routed union across the horizon is not built.
+  - Known limitation (BL-1060): only a query that splits its groups by the retention column may read a table with retention.
+  - Known limitation (BL-1061): a read of a table with retention is not routed to a materialized result.
+  - Known limitation (BL-1063): a rebuild over a table with retention recomputes only the groups at or after its cut and carries
+    every group below it, the straddling one included, as the old result held it, so a change to a carried group that only a rebuild
+    picks up (a deleted minimum or maximum, a bulk load folded by the rebuild, a `TRUNCATE`) is not reflected. See [2.11e](#queries-over-a-table-with-retention).
 - Reserved type support:
- - `FirstPerKey` and `TopNPerGroup` are represented in type enums but not fully shipped as end-to-end capabilities.
+  - `FirstPerKey` and `TopNPerGroup` are represented in type enums but not fully shipped as end-to-end capabilities.
 - Surface parity gap (reduced):
- - MQ lifecycle management HTTP and TypeScript surfaces were shipped in P16 (Epic H, H.3). The remaining parity gap is `.NET WithDirectScan` equivalent in TypeScript.
+  - MQ lifecycle management HTTP and TypeScript surfaces were shipped in P16 (Epic H, H.3). The remaining parity gap is `.NET WithDirectScan()` equivalent in TypeScript.
 - P31 deferred items:
- - Incremental MQ rebuild (segment-scoped): P31 implements full rebuild only; incremental approach is backlogged.
- - Cross-MQ dependency ordering: rebuilding an MQ whose source is another MQ result table is not handled.
- - WebSocket/SSE rebuild progress stream: callers currently poll `BulkLoadJobHandle.MqRebuildStatus` or HTTP status endpoint.
- - `REFRESH CONCURRENTLY` (swap without any stale-read window): post-v1 optimization, not yet scheduled.
+  - Incremental MQ rebuild (segment-scoped): P31 implements full rebuild only; incremental approach is backlogged.
+  - Cross-MQ dependency ordering: rebuilding an MQ whose source is another MQ result table is not handled.
+  - WebSocket/SSE rebuild progress stream: callers currently poll `BulkLoadJobHandle.MqRebuildStatus` or HTTP status endpoint.
+  - `REFRESH CONCURRENTLY` (swap without any stale-read window): post-v1 optimization, not yet scheduled.
 
 ## 2.19 References
 
 - ADRs:
- - `docs/decisions/0015-materialized-queries.md`
- - `docs/decisions/0020-real-time-streaming.md`
- - `docs/decisions/0036-bulk-load-mq-refresh.md` (P31 shadow-build rebuild)
+  - `docs/decisions/0015-materialized-queries.md`
+  - `docs/decisions/0020-real-time-streaming.md`
+  - `docs/decisions/0036-bulk-load-mq-refresh.md` (P31 shadow-build rebuild)
 - Tasks/reports:
- - `docs/tasks/P4/P4-EpicH-MaterializedQueries-Tasks.md`
- - `docs/tasks/P4/P4-EpicH-Task1-MaterializedQueryInfrastructure-Report.md`
- - `docs/tasks/P4/P4-EpicH-Task2-LatestPerKeyPattern-Report.md`
- - `docs/tasks/P4/P4-EpicH-Task4-FilterPattern-Report.md`
- - `docs/tasks/P4/P4-EpicH-Task5-IncrementalUpdateSubscription-Report.md`
- - `docs/tasks/P4/P4-EpicH-Refactoring-Completion.md`
- - `docs/tasks/P4/P4-EpicH-BL020-QueryPlannerAutoRouting-Report.md`
- - `docs/tasks/P4/P4-EpicH-BL021-UnifiedTableNamespace-Report.md`
- - `docs/tasks/P4/P4-EpicH-R10.4-QueryUnflushedHraTableData-Report.md`
- - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
- - `docs/tasks/P11/P11-Fix-R8-MaterializedQueryFlushIntegrationTests-Report.md`
- - `docs/tasks/P28/MarketData-Gaps-S2-MQ-OHLC-Candles.md` (P28 FIRST/LAST + derived group-by)
- - `docs/tasks/P28-COMPLETION.md`
- - `docs/tasks/P31/BulkLoad-MQ-Refresh-S1-Engine-Core.md`
- - `docs/tasks/P31/BulkLoad-MQ-Refresh-S2-HTTP-Clients-Docs.md`
- - `docs/tasks/P31-COMPLETION.md`
+  - `docs/tasks/P4/P4-EpicH-MaterializedQueries-Tasks.md`
+  - `docs/tasks/P4/P4-EpicH-Task1-MaterializedQueryInfrastructure-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Task2-LatestPerKeyPattern-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Task4-FilterPattern-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Task5-IncrementalUpdateSubscription-Report.md`
+  - `docs/tasks/P4/P4-EpicH-Refactoring-Completion.md`
+  - `docs/tasks/P4/P4-EpicH-BL020-QueryPlannerAutoRouting-Report.md`
+  - `docs/tasks/P4/P4-EpicH-BL021-UnifiedTableNamespace-Report.md`
+  - `docs/tasks/P4/P4-EpicH-R10.4-QueryUnflushedHraTableData-Report.md`
+  - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
+  - `docs/tasks/P11/P11-Fix-R8-MaterializedQueryFlushIntegrationTests-Report.md`
+  - `docs/tasks/P28/MarketData-Gaps-S2-MQ-OHLC-Candles.md` (P28 FIRST/LAST + derived group-by)
+  - `docs/tasks/P28-COMPLETION.md`
+  - `docs/tasks/P31/BulkLoad-MQ-Refresh-S1-Engine-Core.md`
+  - `docs/tasks/P31/BulkLoad-MQ-Refresh-S2-HTTP-Clients-Docs.md`
+  - `docs/tasks/P31-COMPLETION.md`
 - Backlog:
- - `docs/BACKLOG.md` (BL-019, BL-009, BL-010, BL-053, BL-003)
+  - `docs/BACKLOG.md` (BL-019, BL-009, BL-010, BL-053, BL-003)
 - Code paths:
- - `src/Aouda.Engine.Api/AoudaEngine.cs`
- - `src/Aouda.Engine.Api/AoudaEngine.MaterializedQuery.cs` (P31 refresh)
- - `src/Aouda.Engine.Api/AoudaEngine.BulkLoad.cs` (P31 auto-trigger)
- - `src/Aouda.Engine.Api/BulkLoadJobHandle.cs` (P31 `MqRebuildStatus`)
- - `src/Aouda.Engine.Api/TableQuery.cs`
- - `src/Aouda.Engine.Query/MaterializedQueryMatcher.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryDefinition.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryStatus.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryCatalog.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedQuerySubscriptionManager.cs`
- - `src/Aouda.Engine.Storage/Materialized/MaterializedResultTableManager.cs`
- - `src/Aouda.Engine.Storage/Materialized/AggregateMaintainer.cs` (P28 FIRST/LAST, time-bucket)
- - `src/Aouda.Engine.Replication/Replay/BulkLoadReplicaCoordinator.cs` (P31 replica hook)
- - `src/Aouda.Server/Controllers/TablesController.cs`
- - `src/Aouda.Server/Controllers/MaterializedQueriesController.cs` (P31 refresh endpoint)
- - `src/Aouda.Client/MaterializedQueriesApi.cs` (P31 C# client refresh)
- - `src/Aouda.Cli/Commands/MqCommand.cs` (P31 CLI)
- - `src/Aouda.Engine.Diagnostics/Perf.cs`
- - `../aouda-client-ts/src/query-builder.ts`
- - `../aouda-client-ts/src/streaming/subscription.ts`
- - `../aouda-client-ts/src/tables.ts`
- - `../aouda-client-ts/src/materialized.ts` (P31 TS refresh)
+  - `src/Aouda.Engine.Api/AoudaEngine.cs`
+  - `src/Aouda.Engine.Api/AoudaEngine.MaterializedQuery.cs` (P31 refresh)
+  - `src/Aouda.Engine.Api/AoudaEngine.BulkLoad.cs` (P31 auto-trigger)
+  - `src/Aouda.Engine.Api/BulkLoadJobHandle.cs` (P31 `MqRebuildStatus`)
+  - `src/Aouda.Engine.Api/TableQuery.cs`
+  - `src/Aouda.Engine.Query/MaterializedQueryMatcher.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryDefinition.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryStatus.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryCatalog.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedQuerySubscriptionManager.cs`
+  - `src/Aouda.Engine.Storage/Materialized/MaterializedResultTableManager.cs`
+  - `src/Aouda.Engine.Storage/Materialized/AggregateMaintainer.cs` (P28 FIRST/LAST, time-bucket)
+  - `src/Aouda.Engine.Replication/Replay/BulkLoadReplicaCoordinator.cs` (P31 replica hook)
+  - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Server/Controllers/MaterializedQueriesController.cs` (P31 refresh endpoint)
+  - `src/Aouda.Client/MaterializedQueriesApi.cs` (P31 C# client refresh)
+  - `src/Aouda.Cli/Commands/MqCommand.cs` (P31 CLI)
+  - `src/Aouda.Engine.Diagnostics/Perf.cs`
+  - `../aouda-client-ts/src/query-builder.ts`
+  - `../aouda-client-ts/src/streaming/subscription.ts`
+  - `../aouda-client-ts/src/tables.ts`
+  - `../aouda-client-ts/src/materialized.ts` (P31 TS refresh)
 - Tests:
- - `tests/Aouda.Engine.Api.Tests/MaterializedQueryApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/LatestPerKeyApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/AggregateApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/FilterApiTests.cs`
- - `tests/Aouda.Engine.Api.Tests/MaterializedQueryAutoRoutingTests.cs`
- - `tests/Aouda.Engine.Api.Tests/IncrementalUpdateSubscriptionTests.cs`
- - `tests/Aouda.Engine.Api.Tests/MaterializedQueryFlushIntegrationTests.cs`
- - `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadMqRefreshTests.cs` (P31 — 12 tests)
- - `tests/Aouda.Engine.Replication.Tests/BulkLoadReplicaCoordinatorMqTests.cs` (P31 — 6 tests)
- - `tests/Aouda.Engine.Storage.Tests/Materialized/`
- - `tests/Aouda.Engine.Query.Tests/MaterializedQueryMatcherTests.cs`
- - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
- - `../aouda-client-ts/tests/streaming/subscription.test.ts`
- - `../aouda-client-ts/tests/materialized.test.ts` (P31 — 27 tests)
+  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/LatestPerKeyApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/AggregateApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/FilterApiTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryAutoRoutingTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/IncrementalUpdateSubscriptionTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryFlushIntegrationTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadMqRefreshTests.cs` (P31 — 12 tests)
+  - `tests/Aouda.Engine.Replication.Tests/BulkLoadReplicaCoordinatorMqTests.cs` (P31 — 6 tests)
+  - `tests/Aouda.Engine.Storage.Tests/Materialized/`
+  - `tests/Aouda.Engine.Query.Tests/MaterializedQueryMatcherTests.cs`
+  - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
+  - `../aouda-client-ts/tests/streaming/subscription.test.ts`
+  - `../aouda-client-ts/tests/materialized.test.ts` (P31 — 27 tests)
 
 ## 2.20 What is missing from this document? (meta completeness)
 
 _Updated 2026-06-23 after P28 + P31 completion._
 
 - This document does not include full serialized `ConfigJson` schema examples for every pattern permutation; it documents the callable surfaces and behavior boundaries. See the `.NET example (OHLC candle aggregate MQ)` in §2.11 for the v2 `AggregateConfig` structure.
-- ~~This document does not claim HTTP/TypeScript lifecycle APIs for MQ management because those surfaces are not shipped.~~ — ✅ **Resolved (P16 Epic H, task H.3)**: TypeScript client now provides `client.materializedQueries.list`, `.create(spec)`, `.drop(name)`, `.status(name)`, `.query(name, queryOptions)`. Full reference: `docs/dev/Functionality-TypeScript-Client.md` §13. Server-side routes for materialized query endpoints implemented as part of P16 SH2.
+- ~~This document does not claim HTTP/TypeScript lifecycle APIs for MQ management because those surfaces are not shipped.~~ — ✅ **Resolved (P16 Epic H, task H.3)**: TypeScript client now provides `client.materializedQueries.list()`, `.create(spec)`, `.drop(name)`, `.status(name)`, `.query(name, queryOptions)`. Full reference: `docs/dev/Functionality-TypeScript-Client.md` §13. Server-side routes for materialized query endpoints implemented as part of P16 SH2.
 - ~~Studio has no materialized query UI~~ — ✅ **Resolved (P16 Epic D, task D.16)**: Studio materialized queries browser lists queries with freshness status, allows querying results and dropping queries. See `docs/dev/Functionality-Studio.md` §11.
 - This document intentionally keeps the P11 duplicate-row bug visible as unresolved; once fixed, `2.4`, `2.15`, `2.16`, and `2.18` must be updated together.
-- ~~No MQ refresh surface (engine, HTTP, C# client, TypeScript, CLI)~~ — ✅ **Resolved (P31)**: `RefreshMaterializedQueryAsync`, `POST.../materialized-queries/{name}:refresh`, `client.MaterializedQueries.RefreshAsync`, `client.materializedQueries.refresh`, `aouda mq refresh` all shipped. See §2.11 and §2.8.1 Walk-through E.
+- ~~No MQ refresh surface (engine, HTTP, C# client, TypeScript, CLI)~~ — ✅ **Resolved (P31)**: `RefreshMaterializedQueryAsync`, `POST .../materialized-queries/{name}:refresh`, `client.MaterializedQueries.RefreshAsync`, `client.materializedQueries.refresh()`, `aouda mq refresh` all shipped. See §2.11 and §2.8.1 Walk-through E.
 - ~~No OHLC/candle aggregate support~~ — ✅ **Resolved (P28)**: `FIRST`/`LAST` aggregate functions with `orderByColumn`, derived time-bucket group-by, `AggregateConfig` v2. See §2.11 and §2.7.
 - The `2.16 Test coverage matrix` does not yet include P28 and P31 test entries; this is a gap for a future documentation pass.
