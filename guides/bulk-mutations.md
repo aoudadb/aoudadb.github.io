@@ -236,8 +236,11 @@ does not log individual row deletions.
 
 ```ts
 // TypeScript
-await client.table('auditLog').truncate;
+await client.table('auditLog').truncate();
 ```
+
+`truncate()` is the whole table: on a query with a condition, a `limit` or any other narrowing the TypeScript client refuses it, sending nothing
+(**BL-1788, next train**). Use `delete()` for some of the rows.
 
 ```csharp
 //.NET
@@ -295,7 +298,7 @@ Use branches if you need a safety net:
 ```ts
 // Create a branch before truncating in production
 await client.branches.create({ name: 'pre-truncate-backup', parentBranch: 'main' });
-await client.table('auditLog').truncate;
+await client.table('auditLog').truncate();
 ```
 
 ### TRUNCATE vs DELETE … WHERE
@@ -540,15 +543,15 @@ This is useful when different subsets of rows need different transformations:
 await client.table('products')
 .batch([
  {
- where: { column: 'tier', op: 'eq', value: 'gold' },
+ where: (q) => q.where('tier', '=', 'gold'),
  update: { price: { $mul: 0.8 } }, // 20% off for gold tier
  },
  {
- where: { column: 'tier', op: 'eq', value: 'silver' },
+ where: (q) => q.where('tier', '=', 'silver'),
  update: { price: { $mul: 0.9 } }, // 10% off for silver tier
  },
  {
- where: { column: 'expiresAt', op: 'lt', value: new Date.toISOString },
+ where: (q) => q.where('expiresAt', '<', new Date().toISOString()),
  delete: true, // purge expired products
  },
  ]);
@@ -556,15 +559,18 @@ await client.table('products')
 
 ### TypeScript client
 
+Each operation's `where` is a callback that adds conditions and nothing else; a delete's `limit` and `orderBy` are members of the operation, and
+anything `batch()` would not carry is refused before it is sent (**BL-1788, next train**; [what each call carries](../clients/typescript.md#update)).
+
 ```ts
 const result = await client.table('orders')
 .batch([
  {
- where: { column: 'status', op: 'eq', value: 'pending' },
- update: { status: 'processing', processedAt: new Date.toISOString },
+ where: (q) => q.where('status', '=', 'pending'),
+ update: { status: 'processing', processedAt: new Date().toISOString() },
  },
  {
- where: { column: 'status', op: 'eq', value: 'processing' },
+ where: (q) => q.where('status', '=', 'processing'),
  update: { attempts: { $inc: 1 } },
  },
  ]);
@@ -861,7 +867,7 @@ alongside physical column selection:
 // Increment view count for a page without read → compute → write
 await client.table('pageViews')
 .where('pageId', '=', pageId)
-.update({ viewCount: { $inc: 1 }, lastViewedAt: new Date.toISOString });
+.update({ viewCount: { $inc: 1 }, lastViewedAt: new Date().toISOString() });
 ```
 
 No race condition: the increment is evaluated server-side as an atomic read-modify-write on
@@ -892,16 +898,16 @@ for (const session of result.rows) {
 await client.table('prices')
 .batch([
  {
- where: { column: 'segment', op: 'eq', value: 'vip' },
- update: { price: { $mul: 0.70 }, updated: new Date.toISOString }, // 30% off
+ where: (q) => q.where('segment', '=', 'vip'),
+ update: { price: { $mul: 0.70 }, updated: new Date().toISOString() }, // 30% off
  },
  {
- where: { column: 'segment', op: 'eq', value: 'loyal' },
- update: { price: { $mul: 0.85 }, updated: new Date.toISOString }, // 15% off
+ where: (q) => q.where('segment', '=', 'loyal'),
+ update: { price: { $mul: 0.85 }, updated: new Date().toISOString() }, // 15% off
  },
  {
- where: { column: 'segment', op: 'eq', value: 'new' },
- update: { price: { $mul: 0.95 }, updated: new Date.toISOString }, // 5% off
+ where: (q) => q.where('segment', '=', 'new'),
+ update: { price: { $mul: 0.95 }, updated: new Date().toISOString() }, // 5% off
  },
  ]);
 ```
