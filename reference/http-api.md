@@ -4890,15 +4890,14 @@ global, and it is not a resource the client has to garbage-collect.
 
 #### `re_auth`
 
-Re-authenticate an existing WebSocket session with a refreshed JWT (or keys) **without** tearing down subscriptions. Not valid as the first message — the first message remains `auth`.
+Re-authenticate an open session with a new token of the **same principal** (a refreshed JWT, the token of a repeat sign-in or exchange, or a key) **without** tearing down subscriptions. Not valid as the first message — the first message remains `auth`. Over long-poll it is sent with `/send`, and its answer (`auth_ok` or `auth_error`) comes with the next poll.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Always `"re_auth"` |
-| `token` | string | Yes | Refreshed bearer JWT or keys |
-| `token` | string | Yes | The caller's own credential. A second credential field is `400 INVALID_REQUEST`. |
+| `token` | string | Yes | The caller's own credential, of the principal the session is for. A second credential field is refused with `INVALID_REQUEST`. |
 
-A **failed** `re_auth` still closes the session (fail-closed). A successful refresh does **not** re-snapshot. Without `re_auth`, JWT expiry closes the socket (`AUTH_TOKEN_EXPIRED`) and every browser re-snapshots.
+A **failed** `re_auth` answers `auth_error` and closes the socket (fail-closed). So does another principal's token (`AUTH_CREDENTIAL_INVALID`: "The principal cannot change on re_auth"): when the user changes, open a new connection, and do not resume on it what the earlier user subscribed to. Over long-poll a failed `re_auth` answers `auth_error` in the poll and does not end the session (**BL-1859**, open): end it yourself with `DELETE`. A successful one does **not** re-snapshot. Without `re_auth`, the token's expiry ends the session (`AUTH_CREDENTIAL_EXPIRED`) and every browser re-snapshots.
 
 ```json
 { "type": "re_auth", "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }

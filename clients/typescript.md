@@ -191,11 +191,66 @@ the client holds, and a call in flight belongs to the session it was made in:
  session changed (the last failure is thrown). A call that was waiting for a refresh when another session was stored is rejected with
  `AUTH_REFRESH_SUPERSEDED`, unsent. Make it again if it is meant for the new session.
 - An insert whose binary body the server refused (`415`) is not sent again as JSON in another session: it is rejected with
- `AUTH_REFRESH_SUPERSEDED`, and nothing was inserted. `bulkLoadJobs` begins each of its jobs in the session held then; a job belongs to the
- principal that began it, and the server refuses another's `:append`.
-- An open realtime connection is **not** replaced by a sign-in, **nor closed by `signOut()`** (**BL-1854**, open): its subscriptions and write
- streams, **and new ones made after the next sign-in**, go on as the earlier user until the server ends the signed-out session (within one
- heartbeat, 20 s by default). When the user changes, `await client.disconnect()` and make a new client for the new user.
+ `AUTH_REFRESH_SUPERSEDED`, and nothing was inserted.
+- A `bulkLoadJobs` sequence is the user's who made the call (**BL-1854, next train**; or, when nobody was signed in, the user's who is when its
+ first job begins). Once another user is signed in, or nobody, nothing more is sent for it — no further job, and no rows, commit or abort of
+ the one under way: it ends, after every earlier job's handle, with an `AoudaSessionReplacedError` whose `code` is `AUTH_SESSION_REPLACED`.
+ The rest of one `bulkLoad` whose job has begun is the same. The server ends such a job, uncommitted, at its idle timeout; until then it
+ holds its tables' load locks. A request already on its way goes on as the user it was sent as: if it commits the job, the rows are loaded.
+
+**When the user changes** (**BL-1854, next train**) everything realtime of the earlier user ends, at once and by name, on the WebSocket and on
+long-poll, open or not (connecting, falling back, waiting to reconnect). It ends when another principal's session replaces the one held
+(`signIn`, `signUp`, `exchangeCode`, `exchangeOidcToken`), and when the session ends (`signOut()`, `signOut({ scope: 'global' })`, a refresh the
+server refuses for good):
+
+- A subscription's `onError` gets an `AoudaSessionReplacedError` (`code` `AUTH_SESSION_REPLACED`; its message says whether the session was
+ replaced or ended), and its iterator throws it. Events it had queued and you had not read are **not** handed out. It is not resumed.
+- A write stream's `write()` and `close()` reject with an `AoudaWriteStreamError` whose `code` is `AUTH_SESSION_REPLACED` (`cause`: the error
+ above); `lastAcknowledgedSeq` and `unacknowledgedFrames` say what is known of its frames, as for a lost connection.
+- A subscription that was still connecting ends the same way, and an `openWriteStream` that was rejects with the same code.
+- A node's log stream (`admin.node.streamLogs`) throws the same `AoudaSessionReplacedError`; entries not handed out are dropped.
+- What you make from then on — in that `onError`, in an `onTokensChanged` listener, after the `signIn` — is on a new connection, as the user
+ signed in then, and shares nothing with what there was. After a sign-out, with nobody signed in, it is refused as any realtime call without
+ a credential is (`AUTH_CREDENTIAL_MISSING`).
+
+Rows your callbacks and queries already gave you are yours to clear. The code is not an authentication failure — nothing was refused — so do not
+answer it by signing the user out: subscribe again if somebody is signed in. When the server ends the session first (it checks an open
+connection every heartbeat, 20 s by default, so it can during a `signOut()`), the code is its own, `AUTH_CREDENTIAL_REVOKED`: handle both.
+
+```typescript
+import { AUTH_SESSION_REPLACED, type Subscription } from '@aouda/client';
+
+let orders: Subscription | null = null;
+
+function bind(): void {
+ orders = client.table('orders').subscribe({
+  onSnapshot: show,
+  onChange: apply,
+  onError: (err) => {
+   const code = (err as { code?: string }).code;
+   if (code !== AUTH_SESSION_REPLACED && code !== 'AUTH_CREDENTIAL_REVOKED') return report(err);
+   orders = null;
+   clear(); // the earlier user's rows
+  },
+ });
+}
+
+// The subscription has ended before any listener hears of the change. A repeat sign-in of the same user leaves it running.
+client.auth.onTokensChanged(({ reason }) => {
+ if (reason === 'signedIn' && orders === null) bind();
+});
+```
+
+**The same user's new token keeps the connection** (**BL-1858, next train**): after a refresh, a repeat sign-in or an OIDC exchange of the same
+principal (the same issuer and subject), and after `signOut({ scope: 'others' })`, subscriptions and streams go on, and the connection — the
+WebSocket and long-poll alike — is re-authenticated with the new token. Before, only a refresh over the WebSocket did that: after a repeat
+sign-in or an exchange, and always over long-poll, everything ended when the token the connection was opened with expired.
+
+Before this, an open connection was neither replaced by a sign-in nor closed by `signOut()`: the earlier user's subscriptions, and new ones
+made after the next sign-in, delivered the earlier user's rows and their streams wrote as that user, until the connection was lost; then the
+earlier user's subscriptions resumed as the next one. On those versions, `await client.disconnect()` and make a new client when the user changes
+— once the first connect has ended: with the long-poll fallback on (the default), a `disconnect()` during it fell back to long-poll and went on
+(**BL-1862, next train**).
 
 **Native sign-in through the browser** (**NativeClients, 0.4.0**): `createPkcePair` (needs `crypto.getRandomValues` — on
 React Native, `react-native-get-random-values`; see [React Native](#react-native-nativeclients-040)), then
