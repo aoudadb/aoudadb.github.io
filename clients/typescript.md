@@ -1930,8 +1930,8 @@ const status = await client.materializedQueries.status('active_users_summary');
 //   status.currentLagMs  — how long it has BEEN behind, in whole milliseconds; null exactly when isStale
 //                          is not true (BL-1477, next train)
 // A caught-up idle query reports currentLagMs === null forever, not a growing number, so
-// null means "current", never "unknown". See reference/http-api.md, "Is this query
-// current?". Polling state alone is how twelve of thirteen queries on one production
+// null on a Ready query means "current", never "unknown" (one that is Building, Rebuilding or in
+// Error says so in state). See reference/http-api.md, "Is this query current?". Polling state alone is how twelve of thirteen queries on one production
 // deployment reported Ready while holding 1.7 % of their source (BL-642, 0.1.38).
 //
 // For "how fresh is it", read status.stalenessMs (server 0.2.0, @aouda/client 0.2.0): the age in

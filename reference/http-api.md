@@ -2014,9 +2014,9 @@ otherwise the table answers, with the same rows as ever. Its currency is reporte
 |---|---|
 | `isStale` | `true` when the result is readable and **not current**: work is queued and unfinished, a bulk load into its source is owed, the query it is built on is behind, an update was lost before it reached the maintainer or a maintenance apply failed part-way, or its `currency` is `rebuild` and a source has changed. **Omitted when `false`.** (**WorkloadCore S09, 0.3.0**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). (**BL-989, 0.4.0**) A query built on another query's result is also `isStale` while that query is behind — its `staleReason` names it ("The query it is built on, 'x', is behind…") and its own `pendingDeferredJobs` stays `0`; before, it read `isStale: false` with `current: false`. |
 | `staleReason` | Why, in a sentence meant for a human. Present exactly when `isStale` is. |
-| `currentLagMs` | (**BL-1477, next train**) How long the query has **been behind** without a break, in whole milliseconds. **`null` exactly when `isStale` is not `true`** — including for a caught-up query that has been idle for days; `0` is "behind, for less than a millisecond", never "current". A query that is stale by its mark (a `"skip"` load, a lost update, currency `rebuild`) has a lag too: how long ago it was marked. Until this release it read `isStale: true` beside a `null` lag. A query behind only through the query it is built on has at least that one's lag. |
-| `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is: the freshness number. Omitted when `0`. |
-| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. (A query behind only because the query it is built on is behind reports `isStale` too since **BL-989, 0.4.0**.) |
+| `currentLagMs` | (**BL-1477, next train**) How long the query has **been behind** without a break, in whole milliseconds. **`null` exactly when `isStale` is not `true`** — including for a caught-up query that has been idle for days; `0` is "behind, for less than a millisecond", never "current". A query that is stale by its mark (a `"skip"` load, a lost update, currency `rebuild`) has a lag too: how long ago it was marked. Until this release it read `isStale: true` beside a `null` lag. A query built on another query has at least that one's lag while that one is behind, also when it has queued work of its own: the period does not restart each time the query it is built on hands it an update. |
+| `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is: the freshness number. Omitted when `0`. (**BL-1477, next train**) A change the query it is built on still owes counts whether or not this query has queued work of its own. |
+| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, while a bulk load into any table of the database is accepted and not visible yet, or while the query is not `Ready`. (A query behind only because the query it is built on is behind reports `isStale` too since **BL-989, 0.4.0**.) |
 
 These describe a *readable* result. A query that is `Building`, `Rebuilding` or `Error` says so in `state` and `errorMessage`; its
 `isStale` may be absent, which is not a claim that it can be read.
@@ -2029,8 +2029,8 @@ rows a second and applying each batch promptly reports a `currentLagMs` of minut
 low hundreds.
 
 ⚠️ **`currentLagMs` is not "time since the result was last updated".** A caught-up idle query reports
-`null`, not a number that grows forever. If you are computing freshness, `null` means *current*, not
-*unknown*.
+`null`, not a number that grows forever. If you are computing freshness of a `Ready` query, `null` means *current*,
+not *unknown*.
 
 **This matters because the previous behaviour was silence (BL-642, 0.1.38).** Before it,
 the lag was `null` on every response — the field existed on the wire and was never populated.
