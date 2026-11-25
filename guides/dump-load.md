@@ -86,13 +86,25 @@ tabular tables, **edge tables** and **`Vector` columns**. Materialized queries a
 
 **Not carried**:
 
-- **Passwords** (a person's own; `EXPORT_PASSWORDS_OMITTED`), and **branches** (`DUMP_BRANCH_NOT_DUMPED`).
+- **Passwords** (a person's own; `EXPORT_PASSWORDS_OMITTED`).
 - **Runtime principals and roles** of an auth database are in the exported file but are never adopted by a declaration
   (`EXPORT_RUNTIME_NOT_ADOPTED`): start the new server from the dump's files, or delete the runtime objects and reload.
 - **Internal tables**, and the server's own state.
 - An **`MdVector`** column's values: its schema only. A **vector index** (IVF centroids) is trained again at the target's flushes, so with more than
   one cell an approximate search can rank differently on the target while the vectors are equal.
-- A dump taken from a server **older than this release** refuses its edge tables and vector columns (the route that exports vectors is new).
+- **Edge tables and vector columns of a server at 0.16 or older** (data-directory format 19 and below; 0.17 carries both): that server
+  cannot export them, and the dump is refused **whole**, not table by table.
+  - A database that holds an **edge table** is refused (`DUMP_TABLE_UNSUPPORTED`, exit 1, the table named), `--tables` with its other
+    tables too; `--database` with the other databases works.
+  - A **vector column** anywhere on the server fails every dump of it, whatever `--database` or `--tables` says: the old server answers its
+    declaration export with `500` (`INTERNAL_ERROR`, exit 69; the table is not named).
+
+  To carry the rest: stop the old server, start its build on a **copy** of the data directory, drop those tables there, and dump the copy.
+  Their rows do not cross: keep the old data directory and its backups, which only the old build reads, and write those rows
+  again from their source.
+- **A branch's rows.** Each branch is noted (`DUMP_BRANCH_NOT_DUMPED`) and not dumped. A [backup](backup.md) carries branches and an exact restore
+  brings them back, but only a build of the same data-directory format reads it: before an upgrade that changes the format, copy what you
+  need out of a branch into its parent.
 
 **Load refusals** that name what to do: `LOAD_TABLE_NOT_EMPTY` (the target table holds rows that are not the dumped ones),
 `LOAD_DATABASE_DIFFERS` (the database exists with other options), `LOAD_SCHEMA_DIFFERS` (the target's schema differs and a table the difference
