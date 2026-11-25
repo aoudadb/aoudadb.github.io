@@ -66,11 +66,15 @@ nothing is lost, a named test in the repository proves it.
   closes the damaged segment at its next write; until a checkpoint moves the replay's start past the damaged frame (the rows after it
   written out of the write buffer), a later open — after a crash, or after a clean close that wrote nothing out — can refuse the
   database again: salvage it again. **Two cases the check cannot tell from a torn tail**, so "a damaged frame refuses the open" is
-  not absolute: (1) damage in the very last frame written, or a length prefix damaged in more than one bit so that the frame seems to run past
-  the last written byte, is trimmed as a torn tail; (2) a damaged frame followed by a whole 512-byte block of zeros (a sector that is zero
-  because it was never written, or because it was zeroed) reads as a torn tail and the frames after it are not read. Both are trimmed with a
-  warning in the log and counted; neither is refused. The log does not yet record how far each write reached, which would settle both
-  (BL-1749). Watch the log of every open for the warning; a database that must prove an unbroken log should be restored from a backup instead.
+  not absolute: (1) damage in the very last frame written, or a length prefix damaged in more than one bit so that the frame seems to run
+  past the last written byte; (2) a damaged frame followed, before the last written byte, by a whole aligned 512-byte block of zeros (a
+  payload that holds one, for example), or one that starts one to three bytes before a block boundary and whose length's bytes there are
+  zero. In both, the damaged frame **and every frame after it** are trimmed as a torn tail, and the database opens without them:
+  acknowledged writes can be among them. The log does not record how far each write reached, which would settle both (BL-1749). Case 2
+  logs a warning at the open (`[WAL] The active segment … ends in a torn write with an unwritten sector … trimmed at position …`); case 1
+  logs one, as every trimmed tail does, in the **next train** (Durability-1 S27), and nothing before it. After a crash such a line is
+  expected, because a write that was cut off and never acknowledged reads the same; after a clean shutdown it is not: restore from a
+  backup.
 - **The `os` power-loss statement is proved against a model of power loss**, not on a real disk. On a real disk the kernel can write some files
   back out of order; one such case (an `os` mark or a load file reaching the disk ahead of the log) is an open card (BL-1705): it can keep
   an UPDATE's delete of the old row and lose the new row — half a statement, which the model does not show. If you cannot lose
