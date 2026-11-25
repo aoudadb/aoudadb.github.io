@@ -89,6 +89,22 @@ def check_file(path: str, text: str, validator: Draft202012Validator) -> list[st
     return findings
 
 
+def _check_row_condition(node: object, pointer: str, findings: list[str], where: str) -> None:
+    """A row condition is lists named `and`, `or`, `groups`; a group is one again; a condition in a list names its `column`."""
+    if not isinstance(node, dict) or not node or not set(node) <= _WHERE:
+        findings.append(f"{where}: {pointer} is not a row condition: its members are and, or, groups")
+        return
+    for member, items in node.items():
+        if not isinstance(items, list) or not items:
+            findings.append(f"{where}: {pointer}/{member} is not a list of at least one")
+            continue
+        for index, item in enumerate(items):
+            if member == "groups":
+                _check_row_condition(item, f"{pointer}/groups/{index}", findings, where)
+            elif not isinstance(item, dict) or "column" not in item:
+                findings.append(f"{where}: {pointer}/{member}/{index} is not a condition: it names no column")
+
+
 def _walk_actions(node: object, pointer: str, findings: list[str], where: str) -> None:
     """What the server's reader refuses and the published schema does not: an action outside the six (plus `*`), and a `where`
     that is a bare condition (aouda BL-1867: the access chapter's own examples were, and a plan refuses them)."""
@@ -102,9 +118,8 @@ def _walk_actions(node: object, pointer: str, findings: list[str], where: str) -
                         f"{where}: {pointer}/actions/{index} {action!r} is not one of "
                         "read, write, delete, execute, manage, set-identity"
                     )
-            row_condition = node.get("where")
-            if isinstance(row_condition, dict) and not (set(row_condition) & _WHERE and set(row_condition) <= _WHERE):
-                findings.append(f"{where}: {pointer}/where is not a row condition: its members are and, or, groups")
+            if "where" in node:
+                _check_row_condition(node["where"], f"{pointer}/where", findings, where)
         for key, value in node.items():
             _walk_actions(value, f"{pointer}/{key}", findings, where)
     elif isinstance(node, list):

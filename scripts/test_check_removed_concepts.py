@@ -156,6 +156,18 @@ class RemovedConceptsTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertIn("guides/a.md:2: the same line 3 times", findings[0])
 
+    def test_a_line_once_each_in_four_pages_is_refused_and_in_three_is_not(self) -> None:
+        line = "Who may do it is decided by the statements of the caller, as everywhere else."
+        pages = {f"guides/{name}.md": f"# {name}\n\n{line}\n" for name in "abcd"}
+        findings = crc.scan_across_pages(pages)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("the same line in 4 pages", findings[0])
+        self.assertEqual(crc.main(["--root", _repo(pages), "--no-vocabulary"]), 1)
+        del pages["guides/d.md"]
+        self.assertEqual(crc.scan_across_pages(pages), [])
+        template = {f"guides/{name}.md": "## A heading of the template that every one of the pages has\nIf this is your question, then here is where to jump to:\n" for name in "abcde"}
+        self.assertEqual(crc.scan_across_pages(template), [])
+
     def test_code_tables_and_paths_may_repeat(self) -> None:
         page = (
             "```csharp\nawait using var server = await AoudaTestServer.StartAsync(new AoudaTestServerOptions());\n```\n" * 4
@@ -178,14 +190,17 @@ class RemovedConceptsTests(unittest.TestCase):
     def test_no_published_page_holds_one(self) -> None:
         repo = os.path.dirname(_HERE)
         findings = []
+        pages = {}
         for rel in crc.tracked_files(repo):
             if crc.exempt(rel) or not rel.endswith((".md", ".txt")):
                 continue
             full = os.path.join(repo, *rel.split("/"))
             if os.path.isfile(full):
                 with open(full, encoding="utf-8-sig", newline="") as handle:
-                    findings.extend(crc.scan_stand_ins(rel, handle.read()))
-        self.assertEqual(findings, [])
+                    pages[rel] = handle.read()
+                findings.extend(crc.scan_stand_ins(rel, pages[rel]))
+        self.assertGreater(len(pages), 50)
+        self.assertEqual(findings + crc.scan_across_pages(pages), [])
 
 
 class TheRewrite(unittest.TestCase):

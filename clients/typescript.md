@@ -1478,12 +1478,13 @@ A client older than this ignores both messages, so its rows include ones the ser
 
 #### Embargoed tables (**BL-418, 0.9.0**)
 
-A credential whose role carries an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090)
-on a table reads it on a delay: queries return only rows at least N seconds old, and a subscription's changes arrive as they come of
+A principal whose `read` statements on a table all carry [`embargoSeconds`](../auth/authorization.md#embargo)
+reads it on a delay: queries return only rows at least N seconds old, and a subscription's changes arrive as they come of
 age. Nothing changes in the calls you make. Two error codes are exported for it:
 
-- `AUTH_EMBARGO_UNSUPPORTED` — thrown as an `AoudaApiError` (`403`) by a write, a materialized query, graph traversal, vector search
-  or a branch query on the embargoed table. Retrying with the same credential gets the same answer.
+- `AUTH_EMBARGO_UNSUPPORTED` — thrown as an `AoudaApiError` (`403`) by a read that cannot be cut by a row time: a materialized
+  result, graph traversal, vector search, and a named mutation whose `execute` statements are all embargoed. An embargo refuses no write
+  (**BL-1464, 0.16.0**): an insert needs a `write` statement, as always. Retrying with the same credential gets the same answer.
 - `SUBSCRIPTION_EMBARGO_RESET` — the server ended the subscription: it held back more changes than its limit, or the credential's
   embargo changed. The `Subscription` **resubscribes fresh by itself** (a new snapshot, no `resume_from`) and your `onSnapshot`
   receives it. A second reset before that snapshot arrives goes to `onError`, as any other subscription error does.
@@ -1492,10 +1493,10 @@ age. Nothing changes in the calls you make. Two error codes are exported for it:
 import { AoudaApiError, AUTH_EMBARGO_UNSUPPORTED } from '@aouda/client';
 
 try {
-  await client.table('quotes').insert({ symbol: 'AAPL', price: 191.2 });
+  await client.table('latest_quote').execute(); // a materialized result
 } catch (err) {
   if (err instanceof AoudaApiError && err.code === AUTH_EMBARGO_UNSUPPORTED) {
-    // This credential reads `quotes` on a delay and cannot write it.
+    // This principal reads `latest_quote` on a delay only, and a result cannot be cut by one caller's delay.
   }
 }
 ```

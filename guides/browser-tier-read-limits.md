@@ -13,7 +13,7 @@ A **browser-tier** caller is `anonymous` (no credential) or an end user's sessio
 
 Enumerable tables below are generated from the validators that enforce them. If a table and the engine disagree, the engine wins and this page is stale — pinned by `BrowserTierReadLimitsDocsTests`.
 
-**Related:** [How to build apps effortlessly with Aouda](build-apps.md) · [Named queries](named-queries.md) · [Direct client access](direct-client-access.md) · [Partitioning](partitioning.md) · [Access-surface diff](../auth/authorization.md#audit)
+**Related:** [How to build apps effortlessly with Aouda](build-apps.md) · [Named queries](named-queries.md) · [Direct client access](direct-client-access.md) · [Partitioning](partitioning.md) · [Policy](../auth/authorization.md)
 
 ---
 
@@ -244,13 +244,13 @@ Do not point a 10 Hz last-price grid at an insert-only table plus default `confl
 
 ---
 
-## `schema diff --access` is C# CLI only (BL-176)
+## There is no access gate in `schema diff`
 
-**Rule.** The access-surface CI gate (`aouda schema diff --access`) exists on the **.NET** CLI and as `POST …/schema/diff?access=true` on the **admin** listener. `npx @aouda/client schema diff --access` is **not shipped**.
+**Rule.** `aouda schema diff --access` and `POST …/schema/diff?access=true` are removed (**BL-1464, 0.16.0**); the second is refused `400 INVALID_REQUEST`. Nothing fails a build because a change widens what a browser may read.
 
-**Why.** The computation lives in the engine. The TypeScript CLI has `diff` / `apply` / `export` without `--access`.
+**Why.** A table carries no security, so a schema change cannot open a row to anyone. What a browser may read is a statement in `aouda.json` (the rows) and a named query's `select` (the columns).
 
-**Instead:** `dotnet tool install --global Aouda.Cli` in CI (any pipeline that already restores `Aouda.*` from the aoudadb feed), or the admin HTTP call. Do not skip the gate because the TS CLI cannot run it. See [Access-surface diff](../auth/authorization.md#audit).
+**Instead:** review both diffs. `schema diff` (both CLIs) reports a changed named query as `UpdateNamedQuery`; `aouda plan` and `aouda policy explain` (the C# tool) check the declaration. See [Schema CI/CD](schema-cicd.md).
 
 ---
 

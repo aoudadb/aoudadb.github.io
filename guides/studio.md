@@ -907,5 +907,5 @@ Tables with derived columns, checks, or transforms reject `:begin` unless the cl
 | P16 Epic G | Natural language cluster operations | `aouda-studio/docs/tasks/P16-SG2-*` |
 | P34 | Hosted Studio at `studio.aouda.com` (Vercel), Connect-to-Server dialog, localStorage persistence, first-run detection, CORS for `studio.aouda.com`, `/_studio/config` endpoint, `Aouda.Setup` cross-platform installer | `aouda/docs/tasks/P34/StudioDist-*` |
 | P36 | Column evolution UI (alter type/null/encoder/references, PK, reorder, Toggle AutoId via `alterColumn`) | `aouda-studio/docs/tasks/P36-*` |
-| P37 | Access-surface on branch review; data-plane 404 connect copy | `aouda-studio` P37 slices |
+| P37 | Data-plane 404 connect copy | `aouda-studio` P37 slices |
 | P39 | Operator parity: named artifacts, insert-time compute, route/tee, named-query subscribe, schema-file MQ maps, identity-insert, bulk-load intent copy | `aouda-studio/docs/tasks/P39/` |

@@ -129,9 +129,9 @@ Access refusals follow a stable machine-readable contract:
 ```json
 {
   "error": "AUTH_CREDENTIAL_EXPIRED",
-  "message": "The session has expired.",
+  "message": "The session token has expired.",
   "requestId": "00000000000000000000000000000000",
-  "remedy": { "kind": "renew" }
+  "remedy": { "kind": "renew", "expiredAt": "2026-11-25T09:30:00+00:00" }
 }
 ```
 
@@ -167,6 +167,6 @@ For full capability details see [AI Agents](index.md).
 - [Auth for AI agents](index.md#212-scenario-playbooks-minimum-three) — bootstrap, acting for a user, attributes and row conditions
 - [HTTP API reference](../reference/http-api.md) — all endpoints
 - [Named queries](../guides/named-queries.md) — execute by name; a browser does not compose ad-hoc queries
-- [Direct client access](../guides/direct-client-access.md) — data-plane vs admin. PKCE is not shipped.
+- [Direct client access](../guides/direct-client-access.md) — data-plane vs admin. A hosted OAuth login page is not shipped.
 - [.NET client](../clients/dotnet.md) — full `Aouda.Client` reference, including column batches and bulk load
 - [TypeScript client](../clients/typescript.md) — full SDK reference

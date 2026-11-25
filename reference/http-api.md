@@ -340,8 +340,11 @@ The route table is the action and resource each route asks. A principal is allow
 | Route family | Action | Resource |
 |---|---|---|
 | `GET` rows, query, count, aggregate, export, subscribe, graph read, vector read | `read` | `<db>/table/<table>` |
-| `POST` rows, update, upsert, bulk load | `write` | `<db>/table/<table>` |
-| `DELETE` rows | `delete` | `<db>/table/<table>` |
+| `POST` rows, update, upsert, `rows/batch` | `write` | `<db>/table/<table>` |
+| Bulk load, seed, a branch insert, `POST …/edge-tables` | `write` | `<db>/table/*`: a statement naming one table does not cover it |
+| List tables, `GET /api/databases/{db}`, schema diff, export and history, list branches, materialized queries and jobs | `read` | `<db>/table/*`: a statement naming one table does not cover it |
+| Schema apply, table and column DDL, materialized-query create / drop / refresh, branch create / delete / merge | `manage` | `<db>` |
+| `DELETE` rows, truncate (a `delete` with no `where`) | `delete` | `<db>/table/<table>` |
 | Named query, including batch slots and subscribe-by-name | `execute` | `<db>/query/<name>` |
 | Named mutation | `execute` | `<db>/mutation/<name>` |
 | `/admin/*`, `/api/admin/*`, `/api/server/*`, `POST /api/databases` | `manage` | `server` |
@@ -506,8 +509,6 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation name is unknown. On the **data-plane listener**, a caller who may not `execute` it also uses this code. On the admin listener that refusal is `403 AUTH_POLICY_DENIED`; no credential there is `401 AUTH_CREDENTIAL_MISSING`. A table `write` does not `execute` the artifact (**BL-1464, 0.16.0**). |
 | `NAMED_MUTATION_BIND_FAILED` | 400 | Named-mutation argument bind failed |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows`; the call fails closed (no `rowsTruncated`) |
-| `ACCESS_SURFACE_TOO_MANY_IDENTITIES` | 400 | Access-surface diff posted more than 32 fixture identities |
-| `AUTH_IDENTITY_INVALID` | 400 | ``aouda.json`` / posted identities document failed validation |
 | `SNAPSHOT_TOO_LARGE` | 400 | Subscribe snapshot would exceed `MaxSnapshotRows` (default 100 000) |
 | `SNAPSHOT_OVERFLOW` | 400 | Change-event buffer overflowed while paging the snapshot; subscribe fails (not a mid-snapshot `gap`) |
 | `BULK_LOAD_TRANSFORM_INTENT_REQUIRED` | 400 | Bulk load into a table with derived columns, checks, or transforms without `applyTransforms` or `preTransformed` |
@@ -563,7 +564,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_GRANT_INVALID` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_GRANT_NOT_APPLICABLE` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
-| `AUTH_EMBARGO_UNSUPPORTED` | 403 / WS error | The caller holds an embargo on the table and the surface cannot apply its cutoff: a write (insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, bulk-load `:begin` and every `:append`, a write stream's `stream_rows`), a materialized query (its query endpoint, a `/query` or named query that reads it, a subscription to it), graph traversal, or vector `:nearest`. A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused (**BL-1161, BL-1298, 0.9.0**). A write that names no table (a schema seed, a branch insert) is refused for any embargo holder. Not retryable with the same credential (**BL-418, 0.9.0**) |
+| `AUTH_EMBARGO_UNSUPPORTED` | 403 / WS error | Every statement that admits the caller carries `embargoSeconds`, and the surface cannot apply its cutoff: a materialized result (its query endpoint, a `/query` or named query that reads it, a subscription to it, a branch query of it), graph traversal, vector `:nearest`, or a named mutation whose `execute` statements are all embargoed. A read of a table is cut, not refused (a branch query of a base table too; **BL-1161, BL-1298, 0.9.0**). **A write is not refused** (**BL-1464, 0.16.0**; up to 0.15 it was): it is the `write` or `delete` statement's question. Another statement without an embargo lifts the refusal. Not retryable with the same credential (**BL-418, 0.9.0**) |
 | `AUTH_GRANT_DIMENSION_CAP` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_RESOLVER_INVALID` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
@@ -1562,7 +1563,7 @@ A named-mutation name in `queries`:
 { "code": "NAMED_QUERY_BATCH_MUTATION", "error": "Named query batch must not include a named-mutation name." }
 ```
 
-(**BL-1417, 0.12.0**) The route needs an authenticated caller and nothing else; each slot is authorised separately, and a slot the caller may not execute (no `named-query` `execute` row for its name) is that slot's `NAMED_QUERY_NOT_FOUND` on both listeners, the same as an unknown name. A caller who may execute none gets HTTP 200 with every slot masked, not a 403. An unsigned data-plane caller keeps the **request-level 404** `NAMED_QUERY_NOT_FOUND`, and the admin listener keeps 401 for it. (**BL-1417 review, 0.13.0**) When no slot is admitted the response is `{ "results": [ …NAMED_QUERY_NOT_FOUND slots… ], "token": "" }`; a slot naming a mutation is `NAMED_QUERY_BATCH_MUTATION` only for a caller that may execute that mutation, and an unknown slot for anyone else.
+(**BL-1417, 0.12.0**) The route needs a credential and nothing else (`anonymous` cannot run a batch, whatever it may `execute` one at a time); each slot is authorised separately, and a slot the caller may not execute (no `execute` statement for its name) is that slot's `NAMED_QUERY_NOT_FOUND` on both listeners, the same as an unknown name. A caller who may execute none gets HTTP 200 with every slot masked, not a 403. An unsigned data-plane caller keeps the **request-level 404** `NAMED_QUERY_NOT_FOUND`, and the admin listener keeps 401 for it. (**BL-1417 review, 0.13.0**) When no slot is admitted the response is `{ "results": [ …NAMED_QUERY_NOT_FOUND slots… ], "token": "" }`; a slot naming a mutation is `NAMED_QUERY_BATCH_MUTATION` only for a caller that may execute that mutation, and an unknown slot for anyone else.
 
 `INVALID_FORMAT` when the request names `?format=` at all (**Lead S12, 0.6.0**: every slot is column arrays; it used to choose `columnar` or `rows`).
 
@@ -1676,12 +1677,12 @@ except an upsert row that replaces a key a read returns: it is logged and buffer
 flush (the key disappears from reads), and counted in `rowsUpdated` **and** in `expiredRows`. The two counts overlap only for such a
 row, so `rowsInserted + rowsUpdated + expiredRows` can exceed the rows sent.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget now, nothing changed; **BL-817, 0.3.0**), `STATEMENT_TOO_LARGE` (400, no `Retry-After` — a DELETE / UPDATE whose matches alone exceed the read path's ceiling, which no retry can satisfy; nothing changed; narrow the statement), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending row index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget now, nothing changed; **BL-817, 0.3.0**), `STATEMENT_TOO_LARGE` (400, no `Retry-After` — a DELETE / UPDATE whose matches alone exceed the read path's ceiling, which no retry can satisfy; nothing changed; narrow the statement), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, a caller with no `execute` statement for the name (`anonymous` included) gets 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); the admin listener answers 401 / 403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending row index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Schema and branches
 
-`apply` and the branch create, delete and merge need `manage` on the database; `diff`, `export` and the branch reads need `read` on
-`<db>/table/*`.
+`apply` and the branch create, delete and merge need `manage` on the database; `diff`, `export` and the list, get and diff of branches need `read` on
+`<db>/table/*` (a statement that names one table does not cover it); a branch query needs `read` on the table, a branch insert `write` on `<db>/table/*`.
 
 #### `POST /api/databases/{db}/schema/apply`
 
@@ -2138,9 +2139,9 @@ A table may carry `absent` as any write body does; a cell left absent is not par
 
 **Response:** `200 OK` — `SeedApplyResult` with per-table `insertedCount` and `skippedCount` (existing primary keys skipped).
 
-**Authorization.** An unconditional `write` statement (no `where`) on every table the document names (**BL-1227, 0.9.0; BL-1464, 0.16.0**): a seed of
-those tables is not a per-row write — their rows pass no row check. Otherwise the answer is `403 AUTH_POLICY_DENIED` naming every refused table,
-with the statement to grant as its `remedy`, and nothing from the document is written. A table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A
+**Authorization.** A `write` statement on **`<db>/table/*`** — one that names single tables does not open this route — and, for every table the document
+names, a `write` with no `where` (**BL-1227, 0.9.0; BL-1464, 0.16.0**): a seed of those tables is not a per-row write, so their rows pass no row check. An
+unconditional `write` on `<db>/table/*` is both. Otherwise the answer is `403 AUTH_POLICY_DENIED` with the statement to grant as its `remedy`, and nothing from the document is written. A table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A
 seed over a table other statements restrict writes one `unconditional_access` row per table and statement (operation `seed`) before the first row. (**BL-1304, 0.9.0**)
 A transform that lands on any other table is the caller's per-row insert check, on the target row after derived columns. Seed does
 not stamp identity, so a stamp column is not filled before that check. A refusal is the same `403` and code as
@@ -3439,7 +3440,7 @@ write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtables
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
 | `rlsColumn` | string? | No | Adds a nullable `String` column (for example `org`), for a statement's `where` to compare. |
 
-Needs an unconditional `write` statement on the table it creates. `400 INVALID_REQUEST` for a missing field, `400 SCHEMA_UNKNOWN_MEMBER` for a security
+Needs an unconditional `write` statement on `<db>/table/*` (the table is named in the body, so a statement on that one table does not cover it). `400 INVALID_REQUEST` for a missing field, `400 SCHEMA_UNKNOWN_MEMBER` for a security
 member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the name is taken.
 
 ```json
@@ -5515,7 +5516,7 @@ All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append`
 | `GET` | `/api/databases/{db}/bulk-load/{jobId}` | Get session status and progress. (Listed as `{jobId}:status` until **WorkloadCore, 0.3.0**; the route has always been `{jobId}`.) |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:abort` | Abort the session. The beginning credential only (**BL-1278, BL-1170, 0.9.0**). |
 | `GET` | `/api/databases/{db}/bulk-load:list` | List the sessions this credential began (**BL-1278, BL-1170, 0.9.0**). |
-| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. The beginning credential, or a database admin who also holds `bulkload` (**BL-1278, BL-1170, 0.9.0**). (Listed under `{jobId}` until **WorkloadCore, 0.3.0**; the route has always been this.) |
+| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. The principal that began the job, or one that holds `manage` on the database (**BL-1278, BL-1170, 0.9.0**). (Listed under `{jobId}` until **WorkloadCore, 0.3.0**; the route has always been this.) |
 
 ---
 
@@ -5538,8 +5539,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
-| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness — except a formula table's (a table with an Expression column), whose keys are checked at
-every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way — except an absent cell of a column with a default, which takes the default at either level (only a null is refused there) — and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness — except a formula table's (a table with an Expression column), whose keys are checked at every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way — except an absent cell of a column with a default, which takes the default at either level (only a null is refused there) — and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
 | `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
@@ -5624,7 +5624,7 @@ Content-Type: application/json
 }
 ```
 
-**Authorization (**BL-1464, 0.16.0**).** `:begin`, every `:append` and `:commit` require an unconditional `write` (a statement with no `where`) on every table the load writes — the tables in the request, plus transform targets when `applyTransforms` is set. A statement with a `where` admits none of the load: no row check sees the rows. The refusal is `403 AUTH_POLICY_DENIED`, naming each refused table, with remedy `grant` of that unconditional statement (`none` when a credential limit refused it). `AUTHORIZATION_DENIED` is not produced. A table that is gone is `404 TABLE_NOT_FOUND`. A statement with no `where` on a table another statement restricts is audited as [unconditional access](#audit).
+**Authorization (**BL-1464, 0.16.0**).** Every bulk-load route requires a `write` statement on **`<db>/table/*`**: one that names single tables does not open it. `:begin`, every `:append` and `:commit` require besides an unconditional `write` (a statement with no `where`; on `<db>/table/*` it is both) on every table the load writes — the tables in the request, plus transform targets when `applyTransforms` is set. A statement with a `where` admits none of the load: no row check sees the rows. The refusal is `403 AUTH_POLICY_DENIED`, naming each refused table, with remedy `grant` of that unconditional statement (`none` when a credential limit refused it). `AUTHORIZATION_DENIED` is not produced. A table that is gone is `404 TABLE_NOT_FOUND`. A statement with no `where` on a table another statement restricts is audited as [unconditional access](#audit).
 
 ---
 
@@ -5897,7 +5897,7 @@ Content-Type: application/json
 
 ### `POST {jobId}:commit`
 
-Commit the session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is committed (**BL-1278, BL-1170, 0.9.0**). All sealed segments become queryable. (**Lead S21b, 0.6.0**) A job whose last body is column-batch frames
+Commit the session. The beginning principal only: another is `403 AUTH_POLICY_DENIED` with remedy `none` and nothing is committed (**BL-1278, BL-1170, 0.9.0**). All sealed segments become queryable. (**Lead S21b, 0.6.0**) A job whose last body is column-batch frames
 can [commit in that body's end frame](#a-body-that-commits-its-job-lead-s21b-060) instead, with the same options and the same
 answer; `:commit` is for a job whose last rows went as JSON, a resumed job whose bodies the server already holds, or an empty job.
 A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED`, if the job it follows did not commit.
@@ -6005,7 +6005,7 @@ load again: its rows are in the table, and a second load would add them twice.
 
 _The route is `GET /api/databases/{db}/bulk-load/{jobId}` (no `:status` suffix)._
 
-Get current session state and progress. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the body has no `token`, including a committed job whose session is gone (**BL-1278, BL-1170, 0.9.0**).
+Get current session state and progress. The beginning principal only: another is `403 AUTH_POLICY_DENIED` with remedy `none` and the body has no `token`, including a committed job whose session is gone (**BL-1278, BL-1170, 0.9.0**).
 
 (**Lead S30, 0.6.0**) **Query parameter `waitMs`** (`0`–`60000`, default `0`; outside that `400 BULK_LOAD_INVALID_OPTIONS`):
 for a job whose commit is running — `committing`, or `accepted` — the answer waits up to that long for the job to settle (committed,
@@ -6056,11 +6056,11 @@ List the sessions this credential began. Another credential's job is omitted, no
 
 ### `POST {jobId}:abort`
 
-Abort an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). A missing job is `404 BULK_LOAD_JOB_NOT_FOUND`.
+Abort an in-flight session. The beginning principal only: another is `403 AUTH_POLICY_DENIED` with remedy `none` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). A missing job is `404 BULK_LOAD_JOB_NOT_FOUND`.
 
 ### `POST {jobId}:force-abort`
 
-Operator abort of an in-flight session. The beginning credential, or a database admin who also holds `bulkload`. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). Releases table locks and records the abort reason in the WAL.
+Operator abort of an in-flight session. The beginning principal, or one that holds `manage` on the database. Anyone else is `403 AUTH_POLICY_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). Releases table locks and records the abort reason in the WAL.
 
 **Request body:**
 

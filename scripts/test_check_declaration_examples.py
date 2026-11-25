@@ -90,6 +90,23 @@ class DeclarationExampleTests(unittest.TestCase):
         listed = _BARE_WHERE.replace('{ "column": "source", "op": "eq", "value": "x" }', '{ "and": [ { "column": "source", "op": "eq", "value": "x" } ] }')
         self.assertEqual(cde.main(["--root", _repo(listed)]), 0)
 
+    def test_a_where_is_read_to_its_conditions(self) -> None:
+        def found(row_condition: str) -> list[str]:
+            page = _BARE_WHERE.replace('{ "column": "source", "op": "eq", "value": "x" }', row_condition)
+            return cde.check_file("a.md", page, cde.Draft202012Validator({}))
+
+        one = '{ "column": "source", "op": "eq", "value": "x" }'
+        self.assertEqual(found(f'{{ "groups": [ {{ "and": [ {one} ] }}, {{ "or": [ {one}, {one} ] }} ] }}'), [])
+        for broken in (
+            f'{{ "and": {one} }}',  # not a list
+            '{ "and": [] }',
+            f'{{ "groups": [ {one} ] }}',  # a group is a row condition, not a condition
+            f'{{ "and": [ {{ "or": [ {one} ] }} ] }}',  # a nested one is in groups
+            '{}',
+            '"source"',
+        ):
+            self.assertEqual(len(found(broken)), 1, broken)
+
     def test_valid_block_passes(self) -> None:
         root = _repo(_VALID)
         self.assertEqual(cde.main(["--root", root]), 0)

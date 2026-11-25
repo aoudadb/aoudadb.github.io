@@ -313,26 +313,25 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 | Subscribe attempts: refill per second (**BL-1383, 0.11.0**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
 | The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
-| Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
+| Changes held back for one [embargoed](../auth/authorization.md#embargo) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
 
 The identity quota and the subscription caps are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
 quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch
 envelope or one named-mutation execute; a subscribe attempt spends **no** permit (**BL-1383, 0.11.0**; before it, a subscribe spent one,
 and a reconnect replay of 60 subscriptions exhausted the window). A heartbeat every 30 s is 2 permits a minute per device, so
-three devices heartbeating spend 6 of the default 60 — leave room for page loads (batch them) and typing indicators, and
+three devices heartbeating spend 6 of the default 60 (each **key** of a principal has a window of its own; `anonymous` one per remote address) — leave room for page loads (batch them) and typing indicators, and
 measure before raising.
 
 A subscribe is bounded by its own **token bucket per identity** (**BL-1383, 0.11.0**): every attempt costs one token, one the server then refuses for another reason included; an attempt the bucket itself refuses costs nothing and is told when to retry,
 on both listeners and on long-poll `/send`, and `Aouda:IdentityQuota:Enabled=false` does not switch it off.
 Over the bound the server answers `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` (a `Retry-After` header on a long-poll
 `/send`). The connection limit counts WebSocket and long-poll sessions together and refuses inside the handshake with
-`IDENTITY_CONNECTION_LIMIT_EXCEEDED`. The identity is the principal, whatever credential it presents; `anonymous` is counted per visitor's
-remote address, so anonymous visitors of one app do not share these limits. **Behind a reverse proxy** the visitor's address
+`IDENTITY_CONNECTION_LIMIT_EXCEEDED`. For these socket limits the identity is the principal, whatever credential it presents (`anonymous` opens no socket). The request quota counts
+`anonymous` per visitor's remote address, so anonymous visitors of one app do not share it. **Behind a reverse proxy** the visitor's address
 is known only if `Aouda:ForwardedHeaders` is configured: without it every anonymous visitor shares the proxy's address, so
-one connection budget, one subscription cap and one subscribe bucket. Configure it before relying on per-visitor limits.
+one window. Configure it before relying on per-visitor limits.
 The server refuses to start on a cap below 1, a burst below 1 or a negative refill. `auth_ok.limits` reports `0` for a limit
-that does not apply (a no-auth database has no per-identity limit). The numbers `16`, `64`, `512` and `32` and the
-service-key subscription cap are the current defaults and are provisional. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
+that does not apply. The numbers `16`, `512` and `32` are the current defaults and are provisional. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
 in no guide before).
 
 ## Runtime: GC and thread pool

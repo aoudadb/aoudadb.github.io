@@ -99,7 +99,6 @@ Apply rejects unknown ops and caller-supplied values for derived columns (`TRANS
 `derived` is either a `ScalarExprNode` **or** `{ "identity": "subject" }` — a sibling, not `type: "identity"`. The engine stamps the validated principal (`ClaimTypes.NameIdentifier` / JWT `sub`) on insert/upsert/bulk-load `applyTransforms`.
 
 | Caller | Omits the column | Supplies the column |
-| Caller | Omits the column | Supplies the column |
 |---|---|---|
 | No `set-identity` on the table (an end user) | Stamped as that principal | `TRANSFORM_DERIVED_READONLY` (400) |
 | An unconditional [`set-identity`](../auth/authorization.md#actions) statement on the table (a backend that imports rows; the role `admin` holds it) | Stamped as that principal | Stored as supplied; a `null` is `IDENTITY_STAMP_REQUIRED` (400) |

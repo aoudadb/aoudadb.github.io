@@ -23,8 +23,8 @@ that checksum. A placeholder that fails the checksum is not a hit.
 
 A fourth rule (aouda BL-1867) rejects a **stand-in**: a line that a rewrite left where a line that
 named a removed concept was. The sentences of the two commits that did it are refused wherever
-they are, code included; and any prose line that a page holds three times or more is refused,
-because a sentence that fits three places says what none of them was saying. A removed concept is
+they are, code included; and any prose line that a page holds three times or more, or that stands in more than three pages,
+is refused, because a sentence that fits three places says what none of them was saying. A removed concept is
 not retired by replacing its lines with one sentence: write what each place was saying, or delete
 the line and repair the sentence, list or table around it.
 """
@@ -122,6 +122,8 @@ STAND_INS_PENDING: dict[str, str] = {
 _REPEAT_LENGTH = 45
 _REPEAT_WORDS = 5
 _REPEAT_LIMIT = 2
+# The same line, once each, in at most this many pages (three pages share the replication notice today).
+_PAGES_LIMIT = 3
 
 EXEMPT_FILES = {"auth/migrating-from-0-14.md", "CHANGELOG.md"}
 EXEMPT_PREFIX = "_review/"
@@ -254,6 +256,22 @@ def scan_stand_ins(path: str, text: str) -> list[str]:
     return findings
 
 
+def scan_across_pages(pages: dict[str, str]) -> list[str]:
+    """The fourth rule across pages: one sentence put once in each of many pages. A heading and a lead-in (`...:`) are a template's."""
+    held: dict[str, list[str]] = {}
+    for path, text in pages.items():
+        for line in dict.fromkeys(line for _, line in _prose_lines(text)):
+            if line.startswith("#") or line.endswith(":") or _is_stand_in(line):
+                continue
+            if len(line) >= _REPEAT_LENGTH and len(re.findall(r"[A-Za-z]{2,}", re.sub(r"`[^`]*`", "", line))) >= _REPEAT_WORDS:
+                held.setdefault(line, []).append(path)
+    return [
+        f"{paths[0]}: the same line in {len(paths)} pages ({', '.join(paths[:4])}) — say what each place is about: {line[:70]}"
+        for line, paths in held.items()
+        if len(paths) > _PAGES_LIMIT
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
@@ -262,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = os.path.abspath(args.root)
     findings: list[str] = []
+    prose: dict[str, str] = {}
     for rel in tracked_files(root):
         if exempt(rel) or not _selected(rel, args.paths):
             continue
@@ -276,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
         findings.extend(scan_text(rel, text, vocabulary=not args.no_vocabulary))
         if rel.endswith((".md", ".txt")):
             findings.extend(scan_stand_ins(rel.replace("\\", "/"), text))
+            prose[rel.replace("\\", "/")] = text
+    findings.extend(scan_across_pages(prose))
     for line in findings:
         print(line)
     return 1 if findings else 0

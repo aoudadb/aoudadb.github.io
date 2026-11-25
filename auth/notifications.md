@@ -379,8 +379,8 @@ No provider key or from-address is required for capture. `InviteUrl` / `Password
 | `GET` | `/admin/notifications/outbox?channel=&limit=` | Newest first; `channel` = `email` \| `sms` |
 | `DELETE` | `/admin/notifications/outbox` | Clears all entries |
 
-Every `/admin/notifications` route needs `admin` on the server auth database (a server admin's JWT or a server admin key); any other
-credential gets **403** `AUTHORIZATION_DENIED` (**BL-1466, 0.13.1**). The outbox holds one-time codes, so treat access to it as admin
+Every `/admin/notifications` route needs `manage` on `server` (an operator's session or key); any other
+credential gets **403** (`AUTH_POLICY_DENIED`, or `AUTH_WRONG_AUTH_DATABASE` for a principal of an application auth database) (**BL-1466, 0.13.1**). The outbox holds one-time codes, so treat access to it as admin
 access.
 
 Each entry includes `id`, `channel`, `kind` (`password_reset` \| `invite` \| `mfa_otp` \| `test`), `to`, `subject` (email), `body`, `otp`, `createdAtUtc`.

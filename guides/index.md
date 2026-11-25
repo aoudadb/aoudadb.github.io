@@ -90,7 +90,7 @@ Use this mapping as the baseline when planning doc updates:
 | **Plan a declaration** (`aouda plan`; replaced `aouda schema check` and `aouda keys check`) | BL-1463 | `guides/plan.md` |
 | **Declare a deployment** (one complete set: databases, keys, roles, feeder, compose, plan, wipe-and-start, reload; the declaration file; reload-or-restart table) | 0.15.0 | `guides/declare-a-deployment.md`, `guides/server-configuration.md` |
 | **Upgrading and the data-directory format** (`DATA_DIRECTORY_FORMAT_REFUSED`) | BL-1420 | `guides/upgrading.md` |
-| **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `auth/authorization.md`, `guides/browser-tier-read-limits.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
+| **Named queries, data-plane listener, transforms** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `auth/authorization.md`, `guides/browser-tier-read-limits.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
 | **Freshness and replica consistency** | P38 | `guides/freshness.md` — token, `AtLeast`, alias `freshness`, caveats; wire in `reference/http-api.md` § Consistency tokens. Same user-guide rules as the P37 cluster |
 | **How to build an application on Aouda** (the flagship entry point) | Cross-phase (P37, P40) | `guides/build-apps.md` — canonical build path for new applications; `guides/adoption.md` is its existing-application branch. Same user-guide rules as the P37 cluster |
 | Studio management console | P5, P6, P9, P12, P16 | `docs/dev/Functionality-Studio.md` |
@@ -129,7 +129,7 @@ The template for writing functionality docs is now maintained separately:
 
 - `docs/dev/Functionality-Document-Template.md`
 
-That template is intentionally extensive and is **required for engine-repo `docs/dev/Functionality-*` rewrites** (implementer-facing). It is **not** required for aouda-docs user guides — including the P37 pages (`named-queries`, `direct-client-access`, `division-of-responsibility`, `insert-transforms`, `access-surface`). Those follow §1 and §4 of this file (defaults, availability, honesty, troubleshooting) without the 2.1–2.18 audit skeleton.
+That template is intentionally extensive and is **required for engine-repo `docs/dev/Functionality-*` rewrites** (implementer-facing). It is **not** required for aouda-docs user guides — including the P37 pages (`named-queries`, `direct-client-access`, `division-of-responsibility`, `insert-transforms`). Those follow §1 and §4 of this file (defaults, availability, honesty, troubleshooting) without the 2.1–2.18 audit skeleton.
 
 It includes:
 

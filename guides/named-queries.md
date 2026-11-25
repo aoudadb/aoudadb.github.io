@@ -85,15 +85,15 @@ The strong arguments:
 
 Editing the body under the same name changes behaviour for every deployed frontend at apply time. That is deliberate — a consumer of "the current version" should get the current version. Coexistence, when you need it, is **two names** (`quoteByTicker` + `quoteByTickerV2`).
 
-The mitigation is not a compatibility shim. It is a **review-time signal**: the access-surface diff reports `named_query_body_changed` (`widen`) when the body under a name changes, plus the `V2` pattern. See [Access-surface diff](../auth/authorization.md#audit).
+The mitigation is not a compatibility shim. It is a **review-time signal**: `schema diff` reports `UpdateNamedQuery` when the body under a name changes, plus the `V2` pattern. Nothing fails CI by itself: a reviewer reads it. See [Schema CI/CD](schema-cicd.md).
 
 ---
 
 ## Declared freshness
 
-Optional `freshness` lives on the **named query**. Budget-only edits do not fire `named_query_body_changed`. Fail-safe (primary-only + `readYourWrites`) applies when that **name** has no `freshness` block.
+Optional `freshness` lives on the **named query**. A budget-only edit is `UpdateNamedQueryFreshness` in `schema diff`, not `UpdateNamedQuery`. Fail-safe (primary-only + `readYourWrites`) applies when that **name** has no `freshness` block.
 
-Call sites may **tighten** (`?maxStalenessMs=500` on a 2 s named query). Loosening is 400 `FRESHNESS_LOOSENED`. A branch that loosens a budget is `freshness` / `widen` on `aouda schema diff --access` and fails CI; a tightening is `narrow` and does not.
+Call sites may **tighten** (`?maxStalenessMs=500` on a 2 s named query). Loosening is 400 `FRESHNESS_LOOSENED`. A change that loosens a budget and one that tightens it are both `UpdateNamedQueryFreshness`; neither fails CI by itself.
 
 There is no `?alias=` / header / body `alias`. Full contract, caveats, and SDK examples: [Freshness and replica consistency](freshness.md).
 
@@ -186,7 +186,7 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
 Notes:
 
 - A **joined** definition writes its `select`, `orderBy` and `orderByChoices` as `Table.Column`, as the join's result names its columns; column names are case-sensitive. `schema apply` checks every column a definition names the way the engine reads it at execute — against the table its clause binds to, a join's table and key columns existing and comparable (`JOIN_KEY_TYPE_MISMATCH`), and a sort column of a type the engine orders — and refuses what cannot execute with `NAMED_QUERY_COLUMN_INVALID`, naming the clause and the spelling to use. A joined parameter is typed by its own table's column.
-- `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](../auth/authorization.md#audit).
+- `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` shows it to every caller who may execute the query, and **nothing but the review stops it**: `schema diff` reports it as `UpdateNamedQuery` ([Schema CI/CD](schema-cicd.md)).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top. **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still a required param. Write `"required": false` explicitly for optional args (and always when pairing with `whenParamPresent`).
 - A table needs no opt-in to be read by a named query, on either listener, and neither does a materialized-query result table. Who may run the definition is an `execute` statement; the removed opt-in member of a table is refused `SCHEMA_UNKNOWN_MEMBER`.
 - **The `where` of the caller's `execute` statement scopes the definition's primary table** (its `table`). **A joined table is read as the definition wrote it** (**BL-1464, 0.16.0**): the caller's table statements play no part, so put the condition that matters on the primary table, or in the definition. `crossPartitionAccess` is not carried to a joined table. For `anonymous` and sign-up principals the joined tables count: an unconditional `execute` that reaches a table other statements restrict is refused `AUTH_PUBLIC_UNRESTRICTED` ([Public reach](../auth/authorization.md#public-reach)).
@@ -501,7 +501,7 @@ HTTP **200** means the envelope was accepted. A missing name, a name the caller 
 
 Envelope **400** (no `results`): empty array, more than 32 elements, or a **named-mutation** name (`NAMED_QUERY_BATCH_MUTATION`).
 
-**Permission (BL-1417, 0.12.0).** Each slot is checked for its own `execute` statement; a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND`, exactly like an unknown name, on both listeners. A caller who may execute none of the slots therefore gets HTTP 200 with every slot masked, where before 0.12.0 a caller holding only table rights got a route-level 403. (**BL-1417 review, 0.13.0**) In that case the envelope carries `"token": ""`, not a live consistency token.
+**Permission (BL-1417, 0.12.0).** The route needs a credential (a key or a session), and nothing else: `anonymous` cannot run a batch, whatever it may `execute` one at a time. With no credential the whole request is the masked `404 NAMED_QUERY_NOT_FOUND` on the data-plane listener and `401 AUTH_CREDENTIAL_MISSING` on admin, so before sign-in a page executes its queries one by one. Each slot is checked for its own `execute` statement; a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND`, exactly like an unknown name, on both listeners. A caller who may execute none of the slots therefore gets HTTP 200 with every slot masked, where before 0.12.0 a caller holding only table rights got a route-level 403. (**BL-1417 review, 0.13.0**) In that case the envelope carries `"token": ""`, not a live consistency token.
 
 ```typescript
 const slots = await client.namedQueries.batch([
@@ -916,7 +916,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in
-- [Access-surface diff](../auth/authorization.md#audit) — CI gate on widening (including `named_query_body_changed` and `freshness` loosen)
+- [Schema CI/CD](schema-cicd.md) and [Plan](plan.md) — reviewing a changed query body, a freshness budget, and who may execute
 - [Freshness and replica consistency](freshness.md) — token, `AtLeast`, named-query `freshness`, caveats
 - [HTTP API](../reference/http-api.md)
 - [TypeScript client](../clients/typescript.md)

@@ -609,7 +609,7 @@ Replication is not supported yet, so run one node; see [Single-node deployment](
 
 ### Creating Databases via API
 
-Once the server is running, create databases via HTTP. **List and create** (`GET` / `POST /api/databases`) need `manage` on `server`, which only a `_serverauth` principal can hold (the role `admin` does). A service's key does not list or create databases — it checks existence with `GET /api/databases/{name}`. Declaring the databases in `aouda.json` needs no call at all.
+Once the server is running, create databases via HTTP. **List and create** (`GET` / `POST /api/databases`) need `manage` on `server`, which only a `_serverauth` principal can hold (the role `admin` does). A service's key does not list or create databases — it checks existence with `GET /api/databases/{name}` (`read` on `<name>/table/*`). Declaring the databases in `aouda.json` needs no call at all.
 
 ```bash
 # Create a database
@@ -920,7 +920,7 @@ var client = new AoudaClient(new AoudaClientOptions
 
 **Insert without AutoCreateSchema (server mode):** If `AutoCreateSchema` is `false` (the default in `AoudaClientOptions`) and the table does not exist, inserting throws `AoudaNotFoundException`. Either create the table explicitly first, or set `AutoCreateSchema = true`.
 
-**Missing auth token:** If server auth is enabled and no token is provided, the server returns HTTP 401 with `AUTH_TOKEN_MISSING`. See [Section 8](#8-server-authentication--securing-database-access) for the full error code table.
+**Missing auth token:** If server auth is enabled and no token is provided, the server returns HTTP 401 with `AUTH_CREDENTIAL_MISSING`. See [Section 8](#8-server-authentication--securing-database-access) for the full error code table.
 
 ### Engine-Level Fluent Queries (Embedded)
 

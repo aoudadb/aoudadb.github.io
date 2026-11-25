@@ -83,7 +83,7 @@ do is its statements, whichever credential it sends:
 
 | Caller | May call | Listener |
 |---|---|---|
-| No credential (`anonymous`) | Sign-up, sign-in, refresh; the named queries and mutations `anonymous` has an `execute` statement for. A subscription needs a credential | Data-plane. On admin → `401 AUTH_CREDENTIAL_MISSING` |
+| No credential (`anonymous`) | Sign-up, sign-in, refresh; the named queries and mutations `anonymous` has an `execute` statement for, one per request. A batch and a subscription need a credential | Data-plane. On admin → `401 AUTH_CREDENTIAL_MISSING` |
 | A session of an end user | Named query / mutation / subscribe, as its statements allow | Data-plane |
 | A key of a backend's principal | What its statements allow: tables, named artifacts, admin routes with `manage` | Either; **ad-hoc query only on admin** (data-plane `/query` is 404 for everyone) |
 | A session or key of a `_serverauth` principal (Studio operator) | Ad-hoc + admin | Admin |
@@ -144,7 +144,7 @@ change of statements, so it is in the diff of `aouda.json`; a public statement o
 default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not the device, so a user on a browser, a desktop
 agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
 minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
-subscriptions. Two more per-identity bounds apply (**BL-1383, 0.11.0**): a **connection limit** (`MaxConnectionsPerIdentity`, default 16; WebSocket and long-poll sessions together; refused inside the handshake with `IDENTITY_CONNECTION_LIMIT_EXCEEDED`, which a client must treat as final rather than reconnect in a loop) and a **subscribe-rate bucket** (`Aouda:WebSocket:SubscribeRate`, burst 512, 32 per second; `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`). The identity is the principal, whatever credential it presents: every key and session of one principal shares the limits, a backend's as a user's. For `anonymous` it is the visitor's remote address — **provided the server sees the visitor's address**: behind a reverse proxy, configure `Aouda:ForwardedHeaders`, or every visitor shares one quota. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
+subscriptions. Two more per-identity bounds apply (**BL-1383, 0.11.0**): a **connection limit** (`MaxConnectionsPerIdentity`, default 16; WebSocket and long-poll sessions together; refused inside the handshake with `IDENTITY_CONNECTION_LIMIT_EXCEEDED`, which a client must treat as final rather than reconnect in a loop) and a **subscribe-rate bucket** (`Aouda:WebSocket:SubscribeRate`, burst 512, 32 per second; `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`). For the subscription and connection limits the identity is the principal, whatever credential it presents: every key and session of one principal shares them, a backend's as a user's. For the request quota (`PermitLimit`) a user's sessions share one window, and each **key** has a window of its own. For `anonymous` it is the visitor's remote address — **provided the server sees the visitor's address**: behind a reverse proxy, configure `Aouda:ForwardedHeaders`, or every visitor shares one quota. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
 (**NativeClients, 0.4.0**).
 
 **Server clock.** Every response carries a `Date` header that a browser can read cross-origin; the SDKs keep the offset from it (`serverClockOffsetMs` / `ServerClockOffset`) so a client can judge a
@@ -246,9 +246,10 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | Symptom | Cause | Action |
 |---|---|---|
 | Studio connect 404 | URL is the data-plane | Point Studio at the **admin** port |
+| A named-query **batch** is `404 NAMED_QUERY_NOT_FOUND` before sign-in, though each query runs on its own | The batch route needs a credential; `anonymous` has none | Sign in first, or execute the queries one by one |
 | `AUTH_CREDENTIAL_MISSING` from a browser | The admin URL, with no credential; or a subscribe before sign-in | Use the data-plane URL for named queries; sign in before subscribing |
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
-| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | 16 connections per identity (public key: per remote address) | Close unused sockets; terminal for the handshake |
+| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | 16 connections per identity (the principal) | Close unused sockets; terminal for the handshake |
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | Subscribe bucket empty | Wait `retry_after_ms` / `Retry-After` |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
 | Data-plane named-query 404 with no credential | Listed-route non-disclosure: `anonymous` has no `execute` statement for the name. The admin listener answers 401 | Give `anonymous` the statement, or sign in |
@@ -264,7 +265,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 - A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
   browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
-- Subscriptions with no credential (`anonymous` runs named queries and mutations over HTTP).
+- Subscriptions and named-query batches with no credential (`anonymous` runs named queries and mutations over HTTP, one per request).
 
 ---
 
