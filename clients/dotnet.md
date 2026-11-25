@@ -720,7 +720,7 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 | `IdentityInsert` | `false` | Store explicit `autoIncrement` values as they are; every row must give them. |
 | `Durability` | `null` (the database's level for a load) | (**Lead S26c, 0.6.0**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os` (`Strict` when every table of the job names `strict`), `Strict` everywhere else. A multi-table job, or one into an edge or vector table, needs `Strict` in an `os` database. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
 | `ApplyTransforms` / `PreTransformed` | `false` / `false` | A table with derived columns, checks or transforms needs exactly one of them. |
-| `ConflictPolicy` | `BulkLoadConflictPolicy.Block` | `FailFast` fails at once when another load holds the table. |
+| `ConflictPolicy` | `BulkLoadConflictPolicy.Block` | `Block` waits for a table another load holds, at most 30 s; `FailFast` does not wait. (**BL-1743, next train**) Either way a load that cannot have it throws `BulkLoadTableLockedException`, while its rows are sent or committed. |
 | `Progress` | none | An `IProgress<BulkLoadProgress>` called after each `:append` and at commit. `BulkLoadProgress` carries deferred-work counters, not rows: the per-`:append` report is empty, so count rows in your source. |
 
 The handle reports `RowsLoaded`, `PerTableRowCounts`, `SegmentsCreated`, `ExpiredRows`, `WasResumed`, `Token` (the commit's
@@ -1165,7 +1165,7 @@ Bulk load adds its own (namespace `Aouda.Client.Exceptions`):
 | Exception | When |
 |---|---|
 | `BulkLoadAppendFailedException` | An `:append` failed in transit (a connection error, a timeout, a `503`). Resume with its `IdempotencyKey` (§8). |
-| `BulkLoadTableLockedException` | Another load holds a table and `ConflictPolicy` is `FailFast`. `Tables`, `ActiveJobId`. |
+| `BulkLoadTableLockedException` | Another load holds a table: at once with `ConflictPolicy` `FailFast`, after 30 s with `Block`. `Tables` (the locked one), `ActiveJobId`. Nothing of the load was committed; run it again. (**BL-1743, next train**) Thrown from `:append`, a committing body and `:commit` (`409 BULK_LOAD_TABLE_LOCKED`), by `BulkLoadAsync` and `BulkLoadJobsAsync`; before, the server answered `500` or `BULK_LOAD_INVALID_STATE` there and this was never thrown. |
 | `BulkLoadDuplicatePkException` | Duplicate primary keys under `PkUniquenessMode.Strict`; nothing is committed. |
 | `BulkLoadAbortedException` | The job is no longer open (`409 BULK_LOAD_INVALID_STATE` on `:append`): an operator force-aborted it, it failed, or a reconnect with the same key superseded this call. |
 | `BulkLoadMissingDiscriminatorException` | A multi-table load's row has no `_table`. |

@@ -5592,7 +5592,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 
 | Field | Type | Default | Allowed values | Description |
 |---|---|---|---|---|
-| `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
+| `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits for it, at most 30 s; `"failFast"` does not wait. A job that cannot have a table is refused `409 BULK_LOAD_TABLE_LOCKED` (**BL-1743, next train**) at its next `:append` or its `:commit` — never at `:begin`, which does not wait for the table: see [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
 | `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness — except a formula table's (a table with an Expression column), whose keys are checked at every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way — except an absent cell of a column with a default, which takes the default at either level (only a null is refused there) — and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
 | `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
@@ -5634,7 +5634,7 @@ A table with no write-time compute needs neither flag.
 | Setting | Default | What it governs |
 |---|---|---|
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` | `600000` (10 min) | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. `0` disables the deadline on them. |
-| `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
+| `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away: (**BL-1743, next train**) an abandoned job releases its tables **at most this long plus one sweep interval (60 s) after its last activity — 11 minutes by default**. `0` disables idle aborts. |
 | `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` runs in. It does **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. (**Lead S18a, 0.6.0**) `:commit` is on no lane, so it never waits behind `:append`s gated on the job it would finish; keep the loaders into one table at or below this setting (**BL-1117**). (**Lead S21b, 0.6.0**) A body that commits its job keeps its permit until its commit answers; a pipelined loader has one job sending rows and one committing, and four such loaders into one table finish on the default lane while no job's queue fills. (**Lead S31, 0.6.0**) An `:append` waiting for room in its job's queue (`Aouda:BulkLoad:MaxQueuedAppendBytes`) keeps its permit, so with jobs larger than that queue three pipelined loaders into one table can starve the lock holder's next `:append`: keep it to half this setting's pipelined loaders a table (**BL-1117**). |
 | `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: a rejected `:append` must be recovered by its client (a keyed `:begin`, then the same body: see [the frame numbers](#a-jobs-frames-are-numbered-lead-s21a-060)), so a rejection costs the load a round of recovery or, in a client that does not recover, the load. |
 | `Aouda:MaxConnections` | `0` (unlimited) as of **BL-419, 0.1.22** — was `100` through 0.1.21 | Kestrel's concurrent-connection ceiling. `0` (Kestrel's own default) means the request limiter (`MaxConcurrentRequests` + `RequestQueueLimit`) is the first thing an overloaded server hits, and it sheds with a retryable HTTP status; the old `100` default sat *below* that budget (150) on every stock deployment, so the connection ceiling — which Kestrel enforces by silently closing the socket with **no HTTP response** — bit first instead. If you do set a finite value, keep it above `MaxConcurrentRequests + RequestQueueLimit`. On 0.1.20 and earlier, `0` fails validation at startup (`MaxConnections must be at least 1`) — check your server version before relying on the unlimited default. |
@@ -5936,6 +5936,7 @@ Content-Type: application/json
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
 | `AUTHORIZATION_DENIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
+| `BULK_LOAD_TABLE_LOCKED` | 409 | (**BL-1743, next train**) Another job holds one of the job's tables: at once under `conflictPolicy: "failFast"`, once the job has waited 30 s under `"block"`. `Retry-After` is set; a body that commits is answered the same. See [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). It was `BULK_LOAD_INVALID_STATE`. |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, 0.3.0**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, 0.6.0**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job; none of its frame's rows is applied (**Lead S21a, 0.6.0**). `details: frame={f}, row={n}, …` (**Lead S12, 0.6.0**: was `lineNumber=N`). |
@@ -6037,6 +6038,9 @@ queries current, read with the commit's `token` (which waits for them, as for an
 
 | Code | Status | When |
 |---|---|---|
+| `BULK_LOAD_TABLE_LOCKED` | 409 | (**BL-1743, next train**) Another job holds one of the job's tables, as at `:append`; nothing was committed. `Retry-After` is set, and the same `:commit` again answers the same. See [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). It was `500 INTERNAL_ERROR`. |
+| `WRITE_CONFLICT` | 409 | (**BL-1743, next train**) A job whose keys are checked at its commit (`validation: "strict"`, or a table with an Expression column) waited 30 s for the writes in flight on its table and they had not finished. Nothing was committed: send the load again from `:begin`. It was `500 INTERNAL_ERROR`. |
+| `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | The job it follows (`afterJobId`) did not commit — (**BL-1743, next train**) or had not taken its tables within the 30 s this one waits for it (it was `500 INTERNAL_ERROR`). Nothing was committed. |
 | `BULK_LOAD_DUPLICATE_PK` | 409 | (**Lead S27a, 0.6.0**) A job at `validation: "strict"` — or any job, in a table with an Expression column (**BL-1488, 0.15.0**) — holds a primary key twice, or one the table already holds. Nothing of it was committed; the message names the table and the key, and `details` is `{"table", "sampleKeys", "totalDuplicateCount", "withinJob"}` (the check stops at the first key). Deduplicate the source and load it again, load at `"coerce"`, or upsert the rows. The check waits for the writes that were in flight on the table when the job began to commit, so an insert racing the load and the load never both write one key. |
 | `INVALID_REQUEST` | 400 | (**Lead S27a, 0.6.0**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
 | `IDENTITY_STAMP_REQUIRED` and the other insert-transform codes | 400 | (**BL-1277, 0.9.0**) `:commit` of a row the insert transform refuses. The code is the one a REST insert already returns for that row (`IDENTITY_STAMP_REQUIRED`, `TRANSFORM_DERIVED_READONLY`, `CONSTRAINT_CHECK_VIOLATION`, `TRANSFORM_ROUTE_UNMATCHED`, `TRANSFORM_ROUTE_AMBIGUOUS`, and the other codes the exception carries), with `rowErrors`. `GET {jobId}` shows `state: "failed"` and that `errorCode`. Nothing was committed. Fix the row and run the load again from `:begin`. A failure after the commit point is still the 500 below and must not be sent again. |
@@ -6053,6 +6057,38 @@ load again from `:begin`. Before this change both refusals answered **500 `INTER
 whatever fails after that — the managed heap included — answers **500 `INTERNAL_ERROR`** with the message *"Bulk-load committed,
 but work after its commit point failed. The rows are durable: do not send the load again."* and no `Retry-After`. Do not run that
 load again: its rows are in the table, and a second load would add them twice.
+
+---
+
+#### A table another load holds (`BULK_LOAD_TABLE_LOCKED`)
+
+(**BL-1743, next train**) One job at a time streams rows into a table. A job that cannot have one of its tables — at once under
+`conflictPolicy: "failFast"`, after a 30 s wait that starts when the job begins under `"block"` — is refused **`409
+BULK_LOAD_TABLE_LOCKED`** at its next `:append`, at an `:append` whose body commits, and at `:commit`. The job has failed (`GET {jobId}`:
+`"failed"`, `errorCode` `BULK_LOAD_TABLE_LOCKED`) and nothing of it was committed; every later `:append` and `:commit` of it answers the
+same. **Send the load again from `:begin`** after `Retry-After`: its idempotency key starts a new job.
+
+```json
+{
+  "error": "Table 'Trades' is locked by bulk-load job '6fada2b6…'; this job waited 30 s for it. Nothing of job '…' was committed: …",
+  "code": "BULK_LOAD_TABLE_LOCKED",
+  "details": "{\"table\":\"Trades\",\"activeJobId\":\"6fada2b6…\",\"waitedMs\":30000,\"holderState\":\"appending\",\"holderIdleSeconds\":127,\"sweptInSeconds\":533}",
+  "requestId": "…"
+}
+```
+
+`details` is a string of JSON:
+
+| Member | Present | What it is |
+|---|---|---|
+| `table` | always | The locked table; of a job over several, the one that is held. |
+| `activeJobId` | always | The job that holds it. Its beginner may [`:abort`](#post-jobidabort) it, and its beginner or a principal holding `manage` on the database may [`:force-abort`](#post-jobidforce-abort) it. Its id lets nobody else append to, commit or abort it. |
+| `waitedMs` | always | How long this job waited; `0` under `"failFast"`. |
+| `holderState` | the holder was begun on this server | Its state, as `GET {jobId}` names it. Absent for an embedded load. |
+| `holderIdleSeconds` | as above | How long ago it last made progress. |
+| `sweptInSeconds` | as above, `holderState` is `"acquired"` or `"appending"`, it has been idle for more than 60 s, and `SessionIdleTimeoutMinutes` is not `0` | If it stays idle, the server aborts it and releases the table within this many seconds. |
+
+`Retry-After` is `10`, or, when `sweptInSeconds` is present, that number (at most `60`).
 
 ---
 
