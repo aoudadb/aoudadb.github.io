@@ -92,7 +92,12 @@ tabular tables, **edge tables** and **`Vector` columns**. Materialized queries a
 - **Internal tables**, and the server's own state.
 - An **`MdVector`** column's values: its schema only. A **vector index** (IVF centroids) is trained again at the target's flushes, so with more than
   one cell an approximate search can rank differently on the target while the vectors are equal.
-- A dump taken from a server **older than this release** refuses its edge tables and vector columns (the route that exports vectors is new).
+- A dump taken from a server **older than this release** (data-directory format 19) **cannot carry its edge tables or vector columns**: that
+  server has no route that exports them, and `aouda dump` refuses them. What an upgrade by dump and load keeps is therefore the tabular
+  tables, and the edge tables and vector columns only of a server that is already on this release. For a deployment that uses either on the
+  older server, keep its data directory and its backups of format 19 until the upgrade has been done another way; do not rely on a dump of it.
+- **A branch's contents.** A dump notes each branch (`DUMP_BRANCH_NOT_DUMPED`) and carries none of its rows: branches are outside dump and load.
+  Back a branch up with the [backup set](backup.md) instead.
 
 **Load refusals** that name what to do: `LOAD_TABLE_NOT_EMPTY` (the target table holds rows that are not the dumped ones),
 `LOAD_DATABASE_DIFFERS` (the database exists with other options), `LOAD_SCHEMA_DIFFERS` (the target's schema differs and a table the difference

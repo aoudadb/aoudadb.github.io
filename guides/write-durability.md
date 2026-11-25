@@ -65,9 +65,12 @@ nothing is lost, a named test in the repository proves it.
   skips the frame and applies the frames after it — the writes of the skipped frame are lost, and the open logs it. The salvaged open
   closes the damaged segment at its next write; until a checkpoint moves the replay's start past the damaged frame (the rows after it
   written out of the write buffer), a later open — after a crash, or after a clean close that wrote nothing out — can refuse the
-  database again: salvage it again. Limits of the check: a damaged frame followed by a whole 512-byte block of zeros reads as a torn
-  tail and is trimmed, as before, with a warning in the log; damage in the very last frame written, or a length prefix damaged in more
-  than one bit so that the frame seems to run past the last written byte, is trimmed as a torn tail too.
+  database again: salvage it again. **Two cases the check cannot tell from a torn tail**, so "a damaged frame refuses the open" is
+  not absolute: (1) damage in the very last frame written, or a length prefix damaged in more than one bit so that the frame seems to run past
+  the last written byte, is trimmed as a torn tail; (2) a damaged frame followed by a whole 512-byte block of zeros (a sector that is zero
+  because it was never written, or because it was zeroed) reads as a torn tail and the frames after it are not read. Both are trimmed with a
+  warning in the log and counted; neither is refused. The log does not yet record how far each write reached, which would settle both
+  (BL-1749). Watch the log of every open for the warning; a database that must prove an unbroken log should be restored from a backup instead.
 - **The `os` power-loss statement is proved against a model of power loss**, not on a real disk. On a real disk the kernel can write some files
   back out of order; one such case (an `os` mark or a load file reaching the disk ahead of the log) is an open card (BL-1705): it can keep
   an UPDATE's delete of the old row and lose the new row — half a statement, which the model does not show. If you cannot lose
