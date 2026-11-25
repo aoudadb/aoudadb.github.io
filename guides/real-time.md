@@ -437,15 +437,16 @@ await foreach (var evt in client.GetTable("trades").SubscribeAsync)
 `SubscriptionRangeDeleteEvent`); the async iterator yields the same events (`type: "horizon"` / `"range_delete"`), and its snapshot
 event carries `horizon` and `horizonColumn` (and `horizonColumnType: "date"` on a `Date` column; the notices carry `columnType`).
 `applyNotice(rows, event)` returns the rows a notice keeps; `noticeRemoves(row, event)` answers for one row. Apply it to the
-snapshot too (`applyNotice(rows, snapshotEvent)` in the async iterator). The `onSnapshot` callback receives no horizon (BL-1068), so
-a callback-only client drops those rows at the next `horizon` message instead.
+snapshot too (`applyNotice(rows, snapshotEvent)` in the async iterator). In the callback style the fourth argument of `onSnapshot(rows, version, totalMatches, snapshot)` is that snapshot event, with `horizon`,
+`horizonColumn` and `horizonColumnType` (**BL-1068, next train**; before it the callback received no horizon, and a callback-only client
+dropped those rows at the next `horizon` message instead).
 
 ```typescript
 import { applyNotice } from "@aouda/client";
 
 let rows: Trade = ;
 const sub = client.table<Trade>("trades").subscribe({
- onSnapshot: (snapshot) => { rows = snapshot; },
+ onSnapshot: (snapshot, _version, _total, event) => { rows = applyNotice(snapshot, event); },
  onChange: (event) => { /* insert / update / delete, as before */ },
  onHorizon: (event) => { rows = applyNotice(rows, event); },
  onRangeDelete: (event) => { rows = applyNotice(rows, event); },

@@ -109,7 +109,7 @@ await client.connect;
 
 ### Consistency token (read-your-writes)
 
-The client captures `X-Aouda-Token` after every data-plane response and presents it on the next request. The default store is **in-memory per instance**. Recreating the client without sharing `consistencyTokenStore` **loses** read-your-writes. Pin a token with `.atLeast(token)`; fetch this node's current token with `getConsistencyToken`. Full caveats: [Freshness](../guides/freshness.md).
+The client captures `X-Aouda-Token` after every data-plane response and presents it on the next request. The default store is **in-memory per instance**. Recreating the client without sharing `consistencyTokenStore` **loses** read-your-writes. Pin a token with `.atLeast(token)`; fetch this node's current token with `getConsistencyToken`. `client.forgetConsistencyTokens()` discards the client's tokens for every database (a custom `ConsistencyTokenStore` implements `forgetAll()`; a successful `admin.backup.restore` calls it for you) (**BL-1731, next train**). Full caveats: [Freshness](../guides/freshness.md).
 
 ```typescript
 import { AoudaClient, MemoryConsistencyTokenStore } from '@aouda/client';
@@ -1251,7 +1251,9 @@ The subscription delivers two event types via `onChange`:
 - `op: "update"` — a row was updated; `row` is the new row, `prev` is the previous row.
 - `op: "delete"` — a row was deleted; `key` contains the deleted primary key.
 
-An `onSnapshot` callback receives the initial consistent snapshot of existing rows when the subscription first connects.
+An `onSnapshot` callback receives the initial consistent snapshot of existing rows when the subscription first connects:
+`onSnapshot(rows, version, totalMatches, snapshot)`. `snapshot` is the whole snapshot event — `horizon`, `horizonColumn`, `horizonColumnType` and `token`
+as the async iterator's snapshot event carries them (**BL-1068, next train**); a callback of two or three parameters is unchanged.
 
 **Dates and timestamps in a subscription** (**BL-1391, 0.11.0**). A snapshot page names a `Timestamp` or `Date` column in
 `column_types`, and the SDK hands a JavaScript `Date` for both, in the snapshot and in every later change's `row` and `prev` (a change
@@ -1430,7 +1432,7 @@ import { applyNotice } from '@aouda/client';
 
 let rows: Trade = ;
 const sub = client.table<Trade>('trades').subscribe({
- onSnapshot: (snapshot) => { rows = snapshot; },
+ onSnapshot: (snapshot, _version, _total, event) => { rows = applyNotice(snapshot, event); },
  onChange: (event) => { /* insert / update / delete, as before */ },
  onHorizon: (event) => { rows = applyNotice(rows, event); },
  onRangeDelete: (event) => { rows = applyNotice(rows, event); },
@@ -1438,8 +1440,9 @@ const sub = client.table<Trade>('trades').subscribe({
 ```
 
 The snapshot's horizon is read after the snapshot, so for a moment the snapshot can hold a row below it (a `horizon` event then
-follows): apply it to the async iterator's snapshot event too, `applyNotice(rows, snapshotEvent)`. The `onSnapshot` callback receives
-no horizon (BL-1068), so a callback-only client drops those rows at the next `horizon` event instead.
+follows): apply it to the snapshot event too — `applyNotice(rows, snapshotEvent)` in the async iterator, and in the callback style
+the fourth argument of `onSnapshot` is that event (**BL-1068, next train**; before it the callback received no horizon, and a
+callback-only client dropped those rows at the next `horizon` event instead).
 
 A client older than this ignores both messages, so its rows include ones the server no longer returns until it subscribes again. A
 `TRUNCATE` sends no notice. The wire contract: [Real-time Streaming — Horizons and range deletes](../guides/real-time.md#horizons-and-range-deletes).
@@ -1765,10 +1768,13 @@ try {
  `MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVER_STARTING`, `SETUP_REQUIRED`, `429 SERVER_AT_CAPACITY` — or a connection that
  never opened, so these two reach your code: retry after `Retry-After` yourself. `setSchedule` and `setRetention` replace the whole value,
  so a repeat changes nothing, and they are re-sent after any transient failure, these two included.
-- **After a restore, discard the consistency token your data clients hold.** A restore rewinds the node; a token from before it is
- ahead of the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a fresh client, or
- stop passing the old token — `AoudaClient` has no call that clears its token store; a `MemoryConsistencyTokenStore` you passed as
- `consistencyTokenStore` can `forget(database)`. Studio discards its data clients after a restore it ran.
+- **A restore that succeeded clears the consistency tokens of the client that ran it** (**BL-1731, next train**), for every database. A restore
+ rewinds the node; a token from before it is ahead of the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` — again and
+ again — until it is discarded. A refused restore changes nothing. A client that did not run the restore (another process did, or
+ another client of this process) calls `client.forgetConsistencyTokens()`; a store you share between clients is cleared for all of them.
+ A custom `ConsistencyTokenStore` has to implement `forgetAll()` (it fails to compile without it). Before this change `AoudaClient` had no
+ such call: the remedy was a fresh client, or `forget(database)` on a `MemoryConsistencyTokenStore` you had passed in.
+ Studio discards its data clients after a restore it ran.
 
 ### Configuration (P16)
 
@@ -2036,8 +2042,10 @@ try {
  any magnitude in a key or a literal.
 - **`Formula.from(node)` is the value of an Expression column** in an `insert` or `update` row; `null` makes the row an input again. It goes
  on the wire as its JSON object. A read gives the Expression column back as a `Formula` (`null` for an input row); the type
- `GET …/schema/typescript` generates for it is `Formula | null`. A live subscription's rows carry the formula's JSON object:
- `Formula.fromValue(cell)` reads that (or the formula's text, or `null`) to the same `Formula`. `formula.equals(other)` compares two by
+ `GET …/schema/typescript` generates for it is `Formula | null`. A live subscription's snapshot and change rows (`row`, `prev`) give the
+ Expression column as a `Formula` too, `null` for an input row (**Operability S25b, next train**; before it they carried the formula's JSON object);
+ `Formula.fromValue(cell)` reads a JSON object, the formula's text or `null` to the same `Formula`. A change message does not name the
+ column again: the subscription keeps the names its snapshot gave. `formula.equals(other)` compares two by
  structure, property order aside (`1` and `1.0` are one number in JavaScript); `formula.toString` is its JSON text.
 - **The driven column is an ordinary typed column** (a `Decimal` is a `number` in a query read). A formula whose value cannot be computed
  leaves the cell `null`, not `0`; `client.table(name).explain(key, column)` returns a `FormulaExplanation` — the row's `kind` and `formula`,

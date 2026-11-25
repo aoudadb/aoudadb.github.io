@@ -314,6 +314,11 @@ The MCP `aouda_backup_restore` tool restores exactly only. Studio's backup page 
 restores to a point in time, edits retention, previews a prune, labels an incomplete set and shows each error with its remedy (**BL-332, next train**).
 Point-in-time restore is available over HTTP, the CLI and both SDKs.
 
+**After a restore, a client's consistency tokens are ahead of the node.** A read that carries one answers `409 TOKEN_UNSATISFIED` until it is
+discarded. `@aouda/client` clears the tokens of the client that ran a successful restore, for every database, and has
+`client.forgetConsistencyTokens()` for a client that did not (**BL-1731, next train**); `Aouda.Client` has no such call yet — discard its
+store, or use a new client.
+
 ## 8. Operations
 
 - **Metrics**: `GET /api/admin/metrics` carries backup counters, the `wal` block (`archiveSegmentsArchivedTotal`, `archiveErrorsTotal`,
