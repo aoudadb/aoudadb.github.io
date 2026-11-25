@@ -623,7 +623,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `WAL_FAILED` | 503 | A write or an `fsync` of the database's WAL failed earlier, and the log refuses every write until the database is reopened — a later sync cannot prove the failed range reached the disk. The request was **not applied**. `Retry-After: 60`. Clears only at a restart of the server (or of the database); read the log for the first failure. The SDKs do not re-send a write refused with it (it is not among the refusals that prove "not applied" to them, above); retry after `Retry-After`. |
 | `PROMOTION_INCOMPLETE` | 409 | `POST /api/databases/{db}/tables/{name}/promote-all-cold-for-update`: some of the table's cold segments were not promoted for update (a segment whose rows could not be loaded, or that a coalesce replaced meanwhile). The message gives the counts and `details` each segment's status; the segments that were promoted **stay promoted**, and a second call is idempotent. Before, such a call answered `200 { "promoted": n }` counting every attempt. A capacity refusal part-way keeps its own status and code and says how many were promoted before it |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) `POST …/tables/{name}/rows/batch` only: operation `k` (`k` ≥ 1) was refused for capacity. Operations `0` to `k − 1` **were applied**; operation `k` and the ones after it were not. `details` names `appliedOperations=k`, `totalOperations=n` and the refusal's own code. **No `Retry-After`**, deliberately: re-sending the whole batch would apply its first `k` operations twice. Re-send only the remaining operations (`operations[k..]`) as a new batch. A refusal of operation `0` is still the plain `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` with `Retry-After`: nothing was applied. It used to be that plain refusal whatever `k` was, which both SDKs re-send |
-| `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
+| `BATCH_ROW_DENIED_PREFIX_APPLIED` | 403 | (**BL-1303, 0.9.0; BL-1464, 0.16.0**, the renamed code) `POST …/tables/{name}/rows/batch` only: the row condition of the caller's statements refused operation `k` (`k` ≥ 1) after operations `0` to `k − 1` were applied. The refused row was not written; later operations did not run. `details` names `appliedOperations=k`, `totalOperations=n` and `refusalCode=AUTH_ROW_DENIED`. **No `Retry-After`**. Do not re-send the batch as-is. A refusal of operation 0 is `403 AUTH_ROW_DENIED` and applies nothing |
 | `REQUEST_TIMEOUT` | 504 | The request ran past the server's request timeout (`Aouda:RequestTimeoutMs`, 30 s by default; the bulk-load `:append` / `:commit` and `:refresh` endpoints have their own). A data write answered `504` — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert, an edge or vector insert — **applied nothing**: the timeout is honoured only before the write's commit point, so it is safe to retry. A write the server had already applied when the timeout fired is answered `500 WRITE_APPLIED_RESPONSE_FAILED` instead (do not re-send it). Before, a timeout inside a table, branch, database, graph, vector or query endpoint was answered `500 INTERNAL_ERROR` "Failed to …", which a client could not tell from a bug, and an applied write that then timed out was answered `504`. (This row used to name the code `TIMEOUT`; the server has always sent `REQUEST_TIMEOUT`.) |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -1004,7 +1004,7 @@ Execute a query against a table.
 | `orderBy` | object[] | No | Sort columns (see below) |
 | `offset` | number | No | Rows to skip (default: 0) |
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
-| A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
+| `crossPartitionAccess` | boolean | No | When `true`, a query on a partitioned table does not need a partition-key filter. Without it, a query on a partitioned table with no partition filter returns `PARTITION_FILTER_REQUIRED`. Default: `false`. It is a **cost waiver and nothing else**: it waives that scan guard for every caller, and it never widens what the caller sees. A caller whose `read` statement has a `where` sees exactly the rows it admits, with the flag or without; one with no `read` statement on the table is still refused. A `where` that constrains every partition-key column with `eq` or `in` satisfies the guard itself ([partition-filter rule](../guides/partitioning.md#partition-filter-rule-p40)). The same flag is accepted on `…/query/count`, on a named-query call and each batch item (`crossPartitionAccess`), and on a WebSocket or long-poll `subscribe` as `cross_partition_access`; the data-plane listener does not accept it (**BL-1227, 0.9.0**). |
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
 | `aggregates` | object[] | No | (**ColumnarRead S16, 0.3.0**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
 | `groupBy` | object[] | No | (**ColumnarRead S16, 0.3.0**) GROUP BY keys; requires `aggregates`. |
@@ -1172,13 +1172,11 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
 rejects takes part in no match: an inner or cross join drops it, a left join answers the base row with `null` in that table's
 columns.
 
-**Row- and partition-level security on a joined table (BL-818, 0.3.0).** The caller's row conditions and row conditions for every joined
+**Row conditions on a joined table (BL-818, 0.3.0; BL-1464, 0.16.0).** The caller's `read` statements for every joined
 table are applied on that join's side, exactly as on a direct read of the table: a join onto a table the caller may read only
-part of answers with that part. (From the 2026-10 architecture review until this change such a join was refused with `403`
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-joined table the caller has no read grant on, a joined table whose partition-level security refuses the caller (no grant),
-and a joined materialized-query result whose source security cannot be applied to it. The same holds for a named query that joins, single and batch,
-and for `…/query/count`.
+part of answers with that part, and a joined table the caller has no `read` statement on joins against no rows of it (an inner join answers
+nothing, a left join nulls) — never a `403`. `crossPartitionAccess` is not carried to a joined table. The same holds for `…/query/count`.
+A named query is different: its joined tables are read as the definition wrote them ([Execute](../auth/authorization.md#execute)).
 
 **Join example:**
 ```json
@@ -1488,14 +1486,11 @@ Execute one named query by unique name.
 |--------|------|------|
 | 404 | `NAMED_QUERY_NOT_FOUND` | No such named query, or the caller may not `execute` it on the data plane (the same answer). |
 | 400 | `NAMED_QUERY_BIND_FAILED` / `NAMED_QUERY_PARAM_REQUIRED` | Bind-time type or constraint failure |
-| 404 | `TABLE_NOT_FOUND` | Data-plane browser-tier and a touched table has `a statement on `anonymous`: false` |
 | 429 | `IDENTITY_QUOTA_EXCEEDED` | Data-plane quota |
 
-Invoker policy always applies (row conditions + row conditions of the caller). There is no definer / `runAs` field. A definition that joins a
-table the caller's row conditions or row conditions restricts is answered with that security applied on the joined side, exactly as a direct read of
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-AUTHORIZATION_DENIED` naming the table: a joined materialized-query result whose source security cannot be applied to it, and a
-joined table whose partition-level security refuses the caller ([joins and authorization](#post-apidatabasesdbquery); **BL-818, 0.3.0**).
+A named query runs under the caller's `execute` statement: there is no definer / `runAs` field. The statement's `where` is added to the
+definition's primary table. The tables it joins are read as the definition wrote them, whatever the caller's table statements say
+(**BL-1464, 0.16.0**; [Execute](../auth/authorization.md#execute)).
 
 #### `POST /api/databases/{db}/named-queries/batch`
 
@@ -1596,10 +1591,10 @@ does not choose — a presence heartbeat or typing indicator keyed by
 succeeds at all. See [Named mutations § choosing
 `op`](../guides/named-queries.md#choosing-op).
 
-(**BL-1227, 0.9.0**) On a table with row conditions or row conditions, an upsert that finds a row under the key replaces it only if the caller may
-write **that** row — on row conditions its partition, on row conditions the update scope and the write check — else `403 AUTHORIZATION_DENIED` and no row of
-the call is written. The message names the key, not the stored row's partition. A holder of the lifting grant(s) at `write` is not
-checked. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement).
+(**BL-1227, 0.9.0; BL-1464, 0.16.0**) An upsert that finds a row under the key replaces it only if the `where` of the caller's `execute`
+statement admits **that** row too, else `403 AUTH_ROW_DENIED` and no row of
+the call is written. The message names the key, not the stored row's partition. A caller whose statement has no `where` is not
+checked. See [Row conditions](../auth/authorization.md#row-conditions).
 
 
 **What a `values` / `set` entry may be.** Exactly three forms:
@@ -1682,6 +1677,78 @@ flush (the key disappears from reads), and counted in `rowsUpdated` **and** in `
 row, so `rowsInserted + rowsUpdated + expiredRows` can exceed the rows sent.
 
 **Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget now, nothing changed; **BL-817, 0.3.0**), `STATEMENT_TOO_LARGE` (400, no `Retry-After` — a DELETE / UPDATE whose matches alone exceed the read path's ceiling, which no retry can satisfy; nothing changed; narrow the statement), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending row index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+
+### Schema and branches
+
+`apply` and the branch create, delete and merge need `manage` on the database; `diff`, `export` and the branch reads need `read` on
+`<db>/table/*`.
+
+#### `POST /api/databases/{db}/schema/apply`
+
+(**BL-1178, 0.9.0**) A document that would leave a table with no columns is `400 INVALID_REQUEST`. The message says nothing
+was applied and names the table. That includes `dryRun: true`. Nothing in the document is applied. Dropping the table is not this
+refusal. Dropping every old column and adding one new column is allowed when `allowDestructive` is true.
+
+**The body is read strictly** (**BL-1460, 0.14.0**). The body is `{ "schema": { … }, "options": { "allowDestructive": false,
+"dryRun": false } }` and nothing else; `options` and both flags are optional, and a flag is `true` or `false` (a string is refused).
+In the document, a member the schema format does not have, or a known member in another case, is refused, never ignored:
+`400 SCHEMA_UNKNOWN_MEMBER`, every such member named with its JSON pointer and, when one is close, the member meant:
+
+```json
+{ "error": "Invalid schema: unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?", "code": "SCHEMA_UNKNOWN_MEMBER" }
+```
+
+Before, the member was dropped (`"nulable": true` made a non-nullable column; a misspelt `"dryrun"` applied for real). A security member of the
+0.14 access model is an unknown member (**BL-1464, 0.16.0**).
+
+**Document-level errors refuse the whole document** (**BL-1460, 0.14.0**). The checks that need no catalog run first, with the
+server's named-query ceilings: partition and `pkUniqueness` values, column defaults, the shape and ceilings of named queries and mutations, and the
+document rules (column types, a `partitionKey` or `clusterColumns` entry that is not a column of the table, …). Any of them is
+`400 INVALID_REQUEST` naming each `<JSON pointer>: <reason>`, and **nothing is applied**, `dryRun` or not. Before, the valid tables beside
+the error were created and the bad one came back as a `Failed` entry in a `200`. What needs the catalog (a named query that names a
+missing column, a reference to another table) is still found per change during the apply.
+
+`GET …/schema/export` writes the document as `schema apply` reads it: no `null` members (it used to write `"or": null` in a `where`),
+so an export applies back as no change.
+
+#### `POST /api/databases/{db}/schema/diff`
+
+The body is the `SchemaDocument` alone, read as strictly as by `schema/apply` (**BL-1460, 0.14.0**): an unknown or wrong-case member is
+`SCHEMA_UNKNOWN_MEMBER`, and a document-level error is `INVALID_REQUEST` before any plan is
+computed, so a diff never shows a plan for a document `schema/apply` would refuse whole. (A named query that names a missing column is
+found only by the apply, against the catalog.) `?format=markdown` answers the plan as text. A changed named query or mutation is
+`UpdateNamedQuery` / `UpdateNamedMutation`. `?access` and the members of the removed access-surface diff are refused `400 INVALID_REQUEST`
+(**BL-1464, 0.16.0**).
+
+#### Branch routes
+
+(**BL-1209, 0.9.0**) A branch name is one segment of 1–64 ASCII letters, digits, or hyphens, not `main` and not a Windows device name. `/`, `\`, `..`, a drive, a rooted name, a trailing dot or space, and `_` are refused. Every branch route answers `400 INVALID_REQUEST` and writes nothing.
+
+#### `POST /api/databases/{db}/branches/{name}/diff`
+
+The body is empty (`{}`); the answer is structural.
+
+#### `POST /api/databases/{db}/branches/{name}/query`
+
+Query one table on a branch (**BL-1161, BL-1298, 0.9.0**). The body is `{ "table" }` only; any other property is ignored, and the table name is case-sensitive.
+
+`200` is the same columnar body as [`POST …/query`](#post-apidatabasesdbquery): `columns`, `types`, `data`, `rowCount`, `stats`, `token`. The body has no `clrType`.
+
+The caller is authorized for `read` on that table of the **parent** (a branch is not a resource of its own), then the rows are filtered as a `/query` of the same table with no `where`: the row condition, and the embargo cutoff on a base table. A table that requires a partition-key filter, and whose row condition does not supply one, is `400 PARTITION_FILTER_REQUIRED` — the body has no `crossPartitionAccess` field. A branch table whose partition key, or whether a key filter is required, differs from the live table's is `403 AUTH_POLICY_DENIED` with remedy `none`, and nothing is scanned: a guard turned on after the branch was cut is refused rather than full-scanned. A materialized result the live database has dropped or replaced is refused the same way. An unknown branch and an unknown table are `404 NOT_FOUND`. A caller who may not read the table is refused before the branch is opened.
+
+#### `POST /api/databases/{db}/branches/{name}/insert`
+
+Insert rows into a table on a branch; they are written to the branch's own segments only. The body is the table and the rows as
+[column arrays](#column-arrays-the-write-body) (**Lead S12, 0.6.0; breaking**: it was `{"table", "rows": [{…}]}`, now refused
+`400 ROW_OBJECTS_UNSUPPORTED`). The rows are inserted as `POST …/tables/{name}/rows` inserts them, including the row conditions and the identity stamp, and a refusal uses that route's status and code (**BL-1278, BL-1170, 0.9.0**).
+
+```json
+{ "table": "orders", "columns": ["id", "status"], "data": [[1, 2], ["pending", "shipped"]] }
+```
+
+**Response:** `200` `{ "table": "orders", "rowsInserted": 2 }`. A body without `table` or without a row is `400 INVALID_REQUEST`.
+
+---
 
 ### Explain a formula cell
 
@@ -1767,7 +1834,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
+**Who may read on `POST /{name}/query` (**BL-1464, 0.16.0**).** The caller needs a `read` statement on `<db>/table/<name>`, the result's own name, and gets the rows its `where` admits; statements on the source table play no part ([Who may read a result](../guides/materialized.md#232-who-may-read-a-result-its-own-statements)). An unconditional statement on a result other statements restrict is audited as `unconditional_access` with `operation` `materialized-query`.
 
 > **BL-419 (0.1.22).** Before this fix, `:refresh` sat under the server's global 30s
 > `Aouda:RequestTimeoutMs` default like every other endpoint, and that ambient deadline started
@@ -2071,12 +2138,10 @@ A table may carry `absent` as any write body does; a cell left absent is not par
 
 **Response:** `200 OK` — `SeedApplyResult` with per-table `insertedCount` and `skippedCount` (existing primary keys skipped).
 
-**Authorization.** Database-level `write`. (**BL-1227, 0.9.0**) Tables the document names stay on the whole-table grant: a seed of
-those tables is not a per-user write — their rows pass no row conditions or row conditions check — so every named table that has partition- or row-level
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-keys, a `role `admin`` user or a role. Otherwise the answer is `403 AUTHORIZATION_DENIED` naming every refused table and the grant
-it lacks, and nothing from the document is written. A table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A
-holder's seed writes one ``unconditional_access`` row per table and grant (operation `seed`) before the first row. (**BL-1304, 0.9.0**)
+**Authorization.** An unconditional `write` statement (no `where`) on every table the document names (**BL-1227, 0.9.0; BL-1464, 0.16.0**): a seed of
+those tables is not a per-row write — their rows pass no row check. Otherwise the answer is `403 AUTH_POLICY_DENIED` naming every refused table,
+with the statement to grant as its `remedy`, and nothing from the document is written. A table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A
+seed over a table other statements restrict writes one `unconditional_access` row per table and statement (operation `seed`) before the first row. (**BL-1304, 0.9.0**)
 A transform that lands on any other table is the caller's per-row insert check, on the target row after derived columns. Seed does
 not stamp identity, so a stamp column is not filled before that check. A refusal is the same `403` and code as
 `POST …/tables/{target}/rows` of that row, and that landing is not written when it is refused.
@@ -2474,10 +2539,7 @@ not a duration, an edge table, a table with a vector column — is `400` naming 
     { "name": "SecurityId", "type": "String", "primaryKeyOrder": 1, "partitionKeyOrder": 1 },
     { "name": "Source", "type": "String", "primaryKeyOrder": 2, "partitionKeyOrder": 2 },
     { "name": "Bid", "type": "Double", "isNullable": true }
-  ],
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-  "an attribute": "fx_source",
-  "the column in the `where`": "Source"
+  ]
 }
 ```
 
@@ -2502,9 +2564,7 @@ rename, the graph and vector creates and the schema apply accepted any name.
 
 Delete a table. A `__mqbuild_*` name is `404 TABLE_NOT_FOUND` (**BL-1468, 0.14.0**): a materialized query's build table is not
 addressable. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
-table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, 0.9.0**) A table that already has
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-where row conditions applies. statements `drop` is still required and is not enough. A table with neither restriction is unchanged.
+table, remove it from the schema file and apply with `allowDestructive: true`. Needs `manage` on the database.
 
 **Response:** `204 No Content`
 
@@ -2635,10 +2695,9 @@ DELETE for each non-key column its row type omits. A typed update does not recon
 column remains (`204`). A partition-key column stays `400 PARTITION_KEY_FIXED`, including when it is the only column.
 
 (**BL-1199, 0.9.0**) A partition-key column is not dropped: refused `400 PARTITION_KEY_FIXED` (it was dropped, leaving the
-table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key. (**BL-1296, 0.9.0**)
-Dropping the `the column in the `where`` of a table that already has row conditions is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-`400 PARTITION_KEY_FIXED`, and the table is unchanged.
+table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key. A column that a statement's
+`where` names may be dropped (`manage` on the database): the statement then admits no row of the table, and `aouda plan` warns
+(`STATEMENT_COLUMN_UNKNOWN`).
 
 **Response:** `204 No Content`
 
@@ -2940,7 +2999,7 @@ Update rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, or a group inside it with no condition, missing/empty SET, or invalid column name in SET; a JSON array or object in SET for a scalar column — for a number column it was `500 INTERNAL_ERROR`, a `String` column stored it as a type name) |
-| `AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
+| `AUTH_ROW_DENIED` | 403 | (**BL-1464, 0.16.0**) The row a `set` or `setExpr` would commit is outside the `where` of the caller's `write` statements. Nothing is changed. A row the `where` does not admit to begin with is not matched, and is no refusal. See [Row conditions](../auth/authorization.md#row-conditions) |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget now, as the same `SELECT` would not (**BL-817, 0.3.0**) — other work holds the memory they need. Nothing is changed; `Retry-After` is set. |
 | `STATEMENT_TOO_LARGE` | 400 | The rows the WHERE matches alone exceed the most the read path may hold on this database, so no retry can satisfy it (it was this `503` with a `Retry-After`, every time). Nothing is changed; no `Retry-After`. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
@@ -3129,13 +3188,10 @@ The following optional fields extend the standard delete request:
 
 #### `POST /api/databases/{db}/tables/{name}/truncate`
 
-Truncate (clear) all rows from a table. Schema is preserved. Requires the `Truncate`
-authorization scope — `role `writer`` alone is insufficient.
-
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-else holds them only through a role. Without them the answer is `403 AUTHORIZATION_DENIED` naming the table and the grant it lacks,
-and nothing is truncated; delete the rows you may write with a `WHERE` instead. A holder's truncate writes one ``unconditional_access``
-row per grant (operation `truncate`) before the table is emptied. See [Authorization](../auth/authorization.md#bulk-load-is-not-a-per-user-write-bl-1031-050).
+Truncate (clear) all rows from a table. Schema is preserved. Requires an **unconditional** `delete` statement (no `where`) on the
+table; the built-in roles `writer` and `admin` hold one (**BL-1227, 0.9.0; BL-1464, 0.16.0**). Without it the answer is `403 AUTH_POLICY_DENIED` naming the table,
+and nothing is truncated; delete the rows you may delete with a `WHERE` instead. A truncate of a table other statements restrict writes one `unconditional_access`
+row per statement (operation `truncate`) before the table is emptied. See [Row conditions](../auth/authorization.md#row-conditions).
 
 **Request Body:**
 
@@ -3168,7 +3224,7 @@ is freed at once; it is still one log record and atomic for readers. Subscribers
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `AUTHORIZATION_DENIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
+| `AUTH_POLICY_DENIED` | 403 | The caller holds no `delete` statement without a `where` on the table |
 
 ---
 
@@ -3180,12 +3236,12 @@ own** (**BL-843**). When an operation fails, the operations before it have been 
 whole batch applies them again. Make operations that a retry may repeat idempotent (literal `set`, not `setExpr` arithmetic), or
 retry from the failed operation. What each answer means for what was applied:
 
-- **`400 INVALID_REQUEST` for the request's shape** (see Errors below), a row conditions `403`, an row conditions deny-all, and an row conditions write-check
-  refusal of operation 0 (`403 AUTH_RLS_UPDATE_SET_VIOLATION`): nothing was applied. Those checks run before the first operation
+- **`400 INVALID_REQUEST` for the request's shape** (see Errors below), a policy `403`, a scope that admits nothing, and a row-condition
+  refusal of operation 0 (`403 AUTH_ROW_DENIED`): nothing was applied. Those checks run before the first operation
   commits. (**BL-1303, 0.9.0**)
-- **`403 BATCH_RLS_PREFIX_APPLIED`**, no `Retry-After`: the row conditions write check refused operation `k` ≥ 1. Operations `0` to `k − 1`
+- **`403 BATCH_ROW_DENIED_PREFIX_APPLIED`**, no `Retry-After`: the row condition refused operation `k` ≥ 1. Operations `0` to `k − 1`
   were applied, operation `k` and the later ones were not, and the row that check refused was not written. `details` names
-  `appliedOperations` and `totalOperations` (and `refusalCode=AUTH_RLS_UPDATE_SET_VIOLATION`). **Do not re-send the batch as-is.**
+  `appliedOperations` and `totalOperations` (and `refusalCode=AUTH_ROW_DENIED`). **Do not re-send the batch as-is.**
   Each update is checked against the rows the earlier operations of this batch left. (**BL-1303, 0.9.0**)
 - **`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`**, with `Retry-After`: the **first** operation was refused for capacity
   and nothing was applied. Retry the whole batch after `Retry-After` (**0.3.0**).
@@ -3265,7 +3321,7 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
 | `STATEMENT_TOO_LARGE` | 400 | The first operation's matches alone exceed the read path's ceiling; nothing was applied. No `Retry-After`: narrow or split the operation. See [`STATEMENT_TOO_LARGE`](#request-validation-errors-4xx) |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `DISK_FULL`, `WAL_FAILED`); operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
-| `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
+| `BATCH_ROW_DENIED_PREFIX_APPLIED` | 403 | (**BL-1303, 0.9.0**) Operation `k` ≥ 1 was refused by the row condition of the caller's statements; operations before it were applied. No `Retry-After`; do not re-send the batch as-is. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were. `details` ends `failedOperation=k; appliedOperations=k; totalOperations=n`, as does every `400`, `409` and `500` an operation answers while the batch runs |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The batch was applied; the answer failed. Do not re-send |
 
@@ -3359,12 +3415,12 @@ admin-listener routes: on the data-plane listener they are `404`. A write needs 
 
 | Method | Path | Body | Answer |
 |---|---|---|---|
-| A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
+| `POST` | `/api/databases/{db}/edge-tables` | `{ name, srcColumn, dstColumn, edgeLabel?, storeCsc?, srcIsPartitionKey?, rlsColumn? }` | `201` `{ "name" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/edges` | `{ srcs, dsts, edgeLabels? }` | `200` `{ "edgesInserted", "token" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/edges:traverse` | `{ startNodeId, hops? }` | `200` `{ "neighborIds", "executionMs" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/edges:khop` | `{ startNodeId, k }` | `200` `{ "nodeIds", "hops", "executionMs" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/edges:shortest-path` | `{ a, b }` | `200` `{ "path", "executionMs" }` |
-| A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
+| `POST` | `/api/databases/{db}/tables/{name}:create-vector-column` | `{ columnName, dimensions, distance?, quantization?, ivfCells?, embeddingModel?, rlsColumn? }` | `201` `{ "columnName" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}` | `{ rowKeys, vectorData, embeddingModelVersion?, partitionKey? }` | `200` `{ "rowsInserted", "token" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}:nearest` | `{ queryEmbedding, k }` | `200` `{ "rowKeys", "distances", "executionMs", "token" }` |
 
@@ -3380,12 +3436,11 @@ write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtables
 | `srcColumn` / `dstColumn` | string | Yes | The source and destination columns' names. |
 | `edgeLabel` | string? | No | A label for the table's edges. |
 | `storeCsc` | bool | No | Also keep the reverse (destination → source) index, which lets a shortest path search from both ends. Default `false`. |
-| A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
-| A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
-| `rlsColumn` | string? | No | Adds a `String` column for grant-sourced row conditions (for example `org`). |
+| `rlsColumn` | string? | No | Adds a nullable `String` column (for example `org`), for a statement's `where` to compare. |
 
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
+Needs an unconditional `write` statement on the table it creates. `400 INVALID_REQUEST` for a missing field, `400 SCHEMA_UNKNOWN_MEMBER` for a security
+member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the name is taken.
 
 ```json
 { "name": "follows", "srcColumn": "src_id", "dstColumn": "dst_id", "edgeLabel": "follows", "storeCsc": true }
@@ -3414,13 +3469,12 @@ never refused.
 { "edgesInserted": 3, "token": "…" }
 ```
 
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
+Every edge must satisfy the `where` of the caller's `write` statements, checked on the source and destination columns as stored: else `403 AUTH_ROW_DENIED`, and none of the batch is written (**BL-1204, 0.9.0; BL-1464, 0.16.0**).
 
 #### `POST /api/databases/{db}/tables/{name}/edges:traverse`
 
 Breadth-first traversal: every node reachable from `startNodeId` within `hops` hops (default `1`), each once, the start node not
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-(**BL-1279, 0.9.0**)
+included. Only the edges the `where` of the caller's `read` statements admits are followed. (**BL-1279, 0.9.0; BL-1464, 0.16.0**)
 
 ```json
 { "startNodeId": 1, "hops": 2 }
@@ -3434,9 +3488,8 @@ A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's
 
 The k-hop neighbourhood: every node reachable from `startNodeId` within `k` hops (`k` > 0), with its smallest hop distance
 (from 1; the start node not included), ordered by distance and then node id. The answer is column arrays: `nodeIds[i]` is at
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-table with partition-level security, the caller sees only the bound claim's partition. A missing, empty, or white-space claim
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
+`hops[i]` hops (**Lead S12, 0.6.0; breaking**: it was `"nodes": [{"nodeId", "hops"}]`, one object per node). Only the edges the `where`
+of the caller's `read` statements admits are followed. (**BL-1279, 0.9.0; BL-1464, 0.16.0**)
 
 ```json
 { "startNodeId": 1, "k": 2 }
@@ -3449,9 +3502,8 @@ A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's
 #### `POST /api/databases/{db}/tables/{name}/edges:shortest-path`
 
 The shortest path from node `a` to node `b`: the node ids along it, both ends included, or `[]` when there is none. A table
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-only the bound claim's partition. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`.
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
+created with `storeCsc: true` is searched from both ends. Only the edges the `where` of the caller's `read` statements admits are
+followed. (**BL-1279, 0.9.0; BL-1464, 0.16.0**)
 
 ```json
 { "a": 1, "b": 4 }
@@ -3473,15 +3525,17 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `quantization` | string | No | `None` (default), `RaBitQ`, `PQ` or `SQ`. |
 | `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
 | `embeddingModel` | string? | No | The embedding model's name. |
-| A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
+| `rlsColumn` | string? | No | As for an edge table. |
 
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
+Needs an unconditional `write` statement on the table it creates. `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance` or
+`quantization`, `400 SCHEMA_UNKNOWN_MEMBER` for a security member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the table exists.
 
 #### `POST /api/databases/{db}/tables/{name}/vectors/{column}`
 
 Insert vectors for row keys. `vectorData` is **row-major**: the vectors one after another, `rowKeys.length × dimensions` numbers.
-`embeddingModelVersion` records which model made them; `partitionKey` places them in a partition of a row conditions table (the default
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
+`embeddingModelVersion` records which model made them; `partitionKey` places them in a partition (the default
+partition when omitted or null; an empty string names a partition of its own, **BL-1184, 0.9.0**). The vectors must satisfy the `where` of the caller's
+`write` statements, checked on the stored image (its first partition column holds `partitionKey`): else `403 AUTH_ROW_DENIED`, and none is written (**BL-1204, 0.9.0; BL-1464, 0.16.0**). Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
 
 ```json
 { "rowKeys": [1, 2], "vectorData": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], "embeddingModelVersion": "v1" }
@@ -3495,10 +3549,8 @@ A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's
 
 Approximate nearest neighbours of `queryEmbedding` (its length is the column's `dimensions`): up to `k` (> 0) hits, nearest first.
 The answer is column arrays: `rowKeys[i]` is at `distances[i]` (**Lead S12, 0.6.0; breaking**: it was
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-partition-level security, the caller sees only the bound claim's partition, not another tenant's and not vectors stored with no
-A table carries no security member (**BL-1464, 0.16.0**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-every partition, including unpartitioned vectors. (**BL-1279, 0.9.0**)
+`"results": [{"rowKey", "distance"}]`, one object per hit). `token` is the cut the search read. Only the vectors whose row the `where` of the
+caller's `read` statements admits are candidates. (**BL-1279, 0.9.0; BL-1464, 0.16.0**)
 
 ```json
 { "queryEmbedding": [0.1, 0.2, 0.3], "k": 2 }
@@ -4960,7 +5012,7 @@ Open a write stream to a table for continuous high-throughput inserts without pe
 
 **Server responds with:** `stream_ready`.
 
-**Authorization** (**BL-1227, 0.9.0**). `stream_open` needs the `write` role permission on the table, as `POST …/tables/{name}/rows` does; the check runs before the table is looked up, so a credential without it learns nothing about which tables exist. A refusal is an `error` message for the stream `id` with HTTP's code (`INSUFFICIENT_PERMISSIONS`, `AUTHORIZATION_DENIED` or `AUTH_TOKEN_MISSING`). Up to 0.8.0 a write stream checked no role. On a table with row conditions or row conditions the rows are then written under the same write rules as HTTP, with the access grants of the credential (a grant at `write` or `admin` lifts the write side); a grant that decides a stream is audited once per stream, with the first batch of rows it decides, and again only when the grants that decide it change (a `re_auth`, or a role change that re-keys the session) ([Audit](#audit-`unconditional_access`)).
+**Authorization** (**BL-1227, 0.9.0; BL-1464, 0.16.0**). `stream_open` needs a `write` statement on the table, as `POST …/tables/{name}/rows` does; the check runs before the table is looked up, so a credential without it learns nothing about which tables exist. A refusal is an `error` message for the stream `id` with HTTP's code (`AUTH_POLICY_DENIED`). Every row must then satisfy the `where` of the caller's `write` statements, read again for each batch: a refused row is acked `AUTH_ROW_DENIED` and the admitted rows persist. An unconditional statement that decides a stream on a table other statements restrict is audited once per stream, with the first batch of rows it decides, and again only when the statements that decide it change ([Audit](#audit)).
 
 ---
 
