@@ -101,7 +101,7 @@ Aouda treats developer testing flow as product surface, not only internal engine
 
 If you do nothing beyond basic package install and default options:
 
-- `AoudaTestServer.StartAsync()` creates one database named `default`, no auth, ephemeral temp data path.
+- `AoudaTestServer.StartAsync()` creates one database named `default`, called as the server's operator, ephemeral temp data path.
 - `AoudaTestServerOptions.Port` defaults to `5433`, but this is informational under `TestServer` (no real socket binding).
 - `AoudaTestServer` auto-applies disabled setup-mode state so integration tests can hit normal API routes.
 - `aouda-test` defaults to running all scenario categories with `300s` duration and `10` concurrency.
@@ -110,7 +110,7 @@ If you do nothing beyond basic package install and default options:
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
 | `AoudaTestServerOptions.Databases` | `[new TestDatabase("default")]` | You get a ready single DB with no extra setup |
-| `TestDatabase.EnableAuth` | `false` | `ServiceKey`/`AnonKey` unavailable unless explicitly enabled |
+| `TestDatabase.EnableAuth` | `false` | With it, the database is linked to the application auth database (`auth`); it makes no key |
 | `AoudaTestServerOptions.DataPath` | `null` | Temp directory is auto-created and deleted on dispose |
 | `AoudaTestServerOptions.Port` | `5433` | Document-only under TestHost (useful for parity/config readability) |
 | `AoudaTestServerOptions.ConfigureServices` | `null` | No service overrides unless caller opts in |
@@ -305,7 +305,7 @@ Key implementation anchors:
 |---|---|---|---|---|---|
 | `AoudaTestServerOptions.Databases` | `IReadOnlyList<TestDatabase>` | `[default]` | non-empty list | .NET test code | Empty list throws |
 | `TestDatabase.Name` | `string` | required | non-empty expected | .NET test code | Used as app DB name |
-| `TestDatabase.EnableAuth` | `bool` | `false` | `true/false` | .NET test code | Enables key generation + auth DB linkage |
+| `TestDatabase.EnableAuth` | `bool` | `false` | `true/false` | .NET test code | Auth DB linkage |
 | `AoudaTestServerOptions.DataPath` | `string?` | `null` | null or valid path | .NET test code | Null => ephemeral with auto-delete |
 | `AoudaTestServerOptions.Port` | `int` | `5433` | int | .NET test code | Informational in TestServer mode |
 | `AoudaTestServerOptions.ConfigureServices` | `Action<IServiceCollection>?` | `null` | callback or null | .NET test code | Allows service overrides in tests |
@@ -358,13 +358,13 @@ await using var server = await AoudaTestServer.StartAsync(new AoudaTestServerOpt
 await server.CreateUserAsync("myapp", "alice@test.com", "Pass123!");
 var token = await server.SignInAsync("myapp", "alice@test.com", "Pass123!");
 var userClient = await server.CreateUserHttpClientAsync("myapp", "alice@test.com", "Pass123!");
-var response = await userClient.GetAsync("/api/databases/myapp/auth/me");
+var response = await userClient.GetAsync("/api/auth/whoami");
 response.EnsureSuccessStatusCode();
 ```
 
 Expected result: user is created, valid JWT is minted, and auth-protected endpoint accepts token.
 
-Common mistake: calling `ServiceKey()`/`CreateClient()` on a database that was not created with `EnableAuth: true`.
+Common mistake: expecting `EnableAuth: true` to make a key. A key belongs to a principal: declare it (`AoudaTestServerOptions.Declaration`) and use `DerivedKey("auth/<name>")`, or use `OperatorKey`.
 
 ### TypeScript example (`@aouda/client` test-style usage)
 
@@ -374,7 +374,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+  apiKey: process.env.AOUDA_OPERATOR_KEY, // a _serverauth principal: the memory snapshot needs manage on server
 });
 
 const mem = await client.admin.server.memory();
@@ -418,7 +418,7 @@ Common mistake: not accounting for setup mode; non-setup routes can return `SETU
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Start in-process Aouda server for tests | `AoudaTestServer.StartAsync` | Missing | N/A | Implemented (.NET only) | `Aouda.Testing` package |
-| Get service/anon keys for auth-enabled test DB | `ServiceKey`, `AnonKey` | Missing | N/A | Implemented (.NET only) | Works after `EnableAuth: true` |
+| Get a key in a test | `OperatorKey`, `DerivedKey("auth/<name>")` | Missing | N/A | Implemented (.NET only) | `DerivedKey` needs a declared principal and a `KeyRoot` |
 | Create test users and JWTs quickly | `CreateUserAsync`, `SignInAsync`, `CreateUserHttpClientAsync` | Missing | Equivalent HTTP exists but slower for setup | Implemented (.NET helper path) | Engine-direct helper strategy |
 | xUnit/NUnit/MSTest fixture helpers | `AoudaTestFixture`, `AoudaNUnitFixture`, `AoudaMSTestFixture` | Missing | N/A | Implemented (.NET only) | TS has normal Vitest patterns, no Aouda-specific fixture package |
 | Local server dev workflow | `aouda start` CLI (.NET tool) | Consumes resulting server | Server endpoints exposed | Implemented | Supports `--auth` shortcut |
@@ -452,8 +452,8 @@ Steps:
 
 Expected result checks:
 - `/health` is reachable.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- `CreateUserHttpClientAsync(...).GetAsync("/api/databases/myapp/auth/me")` returns `200`.
+- `OperatorKey` starts with `aouda_`.
+- `CreateUserHttpClientAsync(...).GetAsync("/api/auth/whoami")` returns `200` with the user's principal.
 
 ### Scenario 2: Developer local workflow (`aouda start` + SDKs)
 
@@ -527,7 +527,7 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `SETUP_REQUIRED` in integration tests | Setup mode active, override not applied | Apply `AddDisabledSetupModeForIntegrationTests()` in test host composition |
-| `ServiceKey()` throws for DB | DB was started without `EnableAuth: true` | Use auth-enabled `TestDatabase` entry |
+| `DerivedKey()` throws | The server was started without a `KeyRoot`, or the principal declares no `derivedKey` | Set both in `AoudaTestServerOptions` |
 | OIDC discovery check fails | Wrong authority path assumption | Use `{OidcAuthority}/auth/.well-known/openid-configuration` |
 | `aouda-test` exits `2` | Infrastructure/startup error | Validate server path/port/data dir, then rerun with `--verbose` |
 | Benchmark compare fails unexpectedly | Baseline stale or different machine profile | Rebaseline intentionally and keep environment consistent |

@@ -265,8 +265,8 @@ like `AUTH_REFRESH_TOKEN_INVALID` — the client clears its tokens, reports `"si
 stop reconnecting. See [Sessions](../reference/http-api.md#sessions).
 
 **One credential (BL-1464, 0.16.0, breaking).** `apiKey` takes a key of any kind (stored, derived or limited; all have the one format
-`aouda_<id>_<secret>`), `session` a signed-in session. The options `appAuth`, `serverAuth` and `userToken` are gone, with no alias: the
-constructor throws, naming what replaces each. A key goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves it to
+`aouda_<id>_<secret>`), `session` a signed-in session. The 0.15 options for a user's session, a server user's session and a second user token
+are gone, with no alias: the constructor throws, naming what replaces each ([Moving from 0.14](../auth/migrating-from-0-14.md)). A key goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves it to
 its principal; nothing about the key's text says what it may do. The client checks the key at construction (shape, checksum, the retired
 format) and the error never contains the value. `client.whoami()` says which principal the credential is and what it may do.
 `client.databases.list()` and `create()` need `manage` on `server`, which only a principal of `_serverauth` can hold; another principal
@@ -322,7 +322,7 @@ means the caller's statements do not `execute` that artifact; a batch answers `N
 `client.access` calls the [access routes](../reference/http-api.md#access-routes): principals, roles, the `signup` setting and credentials
 of one auth database. The caller needs `manage` on what it changes and must itself hold every statement it grants
 ([Grant only what you hold](../auth/authorization.md#grant-only-what-you-hold)). What a user may reach is an attribute of the principal that a
-statement's `where` reads; the entitlement calls of 0.13 to 0.15 (`createEntitlement`, `listEntitlements`, `deleteEntitlement`) are gone.
+statement's `where` reads, where 0.13 to 0.15 had calls for per-user rows of their own on `client.auth` (gone).
 
 ```ts
 const access = client.access.authDatabase('auth');
@@ -1011,7 +1011,7 @@ early expiry), on any other table it is one log record and whole segments retire
 
 ### Databases
 
-`client.databases.create(name, options)` (**BL-1123, 0.6.0**) sends `kind` and `auth` only when the caller sets each one, and sends both when the caller sets both. On `auth`, `enabled` and `database` are included only when set there. The server rejects `kind: "auth"` together with an `auth` object (400). `kind: "data"` with `auth` is valid. Sign-up is not an option of the call: set it with `client.access.authDatabase(name).signup.set(...)`; the removed options `allowSelfSignup` and `selfSignupRole` throw, naming it (**BL-1464, 0.16.0**).
+`client.databases.create(name, options)` (**BL-1123, 0.6.0**) sends `kind` and `auth` only when the caller sets each one, and sends both when the caller sets both. On `auth`, `enabled` and `database` are included only when set there. The server rejects `kind: "auth"` together with an `auth` object (400). `kind: "data"` with `auth` is valid. Sign-up is not an option of the call: set it with `client.access.authDatabase(name).signup.set(...)`; the removed sign-up options throw, naming it (**BL-1464, 0.16.0**).
 
 (**Lead S26, 0.6.0**) A database's durability level is `options.durability` — `'strict'` (the server's default when
 omitted), `'os'`, `'unlogged'` or `'memory'` (the `DurabilityLevel` type), sent only when set. It replaces `enableWal` (`false` is
@@ -1579,7 +1579,7 @@ contract](../reference/http-api.md#subscribe).
 
 > **Fixed in 0.1.25 (`BL-635`), released 2026-09-23.** Before that release `connect()` was not idempotent:
 > each subscription's start opened its **own** socket, orphaning the previous one — still open,
-> unpinged, still delivering — and overwriting the single pair of handshake resolvers, so one
+> unpinged, still delivering — and overwriting the single pair of handshake callbacks, so one
 > socket's `auth_ok` completed a different socket's `connect()` and the rest never settled. An
 > application binding several live views in one tick got several server sessions, and the
 > reconnect replay could then land a subscription id on a session that already held it. The server

@@ -190,7 +190,7 @@ If you do nothing beyond starting local dev:
 | Auth-enabled local bootstrap (`EnableAuth`) | Yes | No | No | `DevServerHost.cs`, `DevServerOptions.cs`, CLI tests | Prints the auth database's name and where a key comes from; the first admin still comes first |
 | Auto-link/create auth DB during DB create | Yes | No | No | `DatabasesController.cs` | Handles 0/1/many auth DB shorthand rules |
 | Keyless sign-up and sign-in from a browser | Yes | No | No | `PublicRouteAllowlist.cs`, `AppAuthPublicEntryTests.cs` | `signup` must be enabled |
-| One credential per request, resolved to one principal | Yes | No | No | `CredentialResolver.cs` | A second credential (`X-User-Token`) is refused `400` |
+| One credential per request, resolved to one principal | Yes | No | No | `CredentialResolver.cs` | A second credential header is refused `400` |
 | Row conditions on statements | Yes | No | No | `PolicyAuthorizer.cs`, `ReadRowPolicy.cs`, `WriteRowPolicy.cs` | Reads are filtered; a write outside the condition is `403 AUTH_ROW_DENIED` |
 | Access administration from code | Yes | No | No | `AccessAdminApi.cs`, `client.access` | Principals, roles, `signup`, credentials |
 | MCP server/tooling package | No | No | Yes | `docs/decisions/0017-ai-native-interface.md`, code search | Direction documented; implementation absent |
@@ -276,7 +276,7 @@ Primary evidence:
 1. The backend holds the user's session (it signed the user in, or the user's client sent it).
 2. It sends that session as the only bearer, or mints a limited key from it (`POST /api/auth/keys`) and sends the key.
 3. The server resolves either to the user's principal; a limited key's limit is intersected with the principal's policy on every row.
-4. A request that also carries `X-User-Token` is refused `400 INVALID_REQUEST`; its value is not read.
+4. A request that also carries the old second-token header is refused `400 INVALID_REQUEST`; its value is not read.
 
 Primary evidence:
 - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
@@ -329,7 +329,7 @@ Precedence and operational notes:
 - Auth route/admin policy changes are runtime dynamic.
 - Safety-gated behavior:
   - a key or a session that does not resolve is refused (`401`), also on a route `anonymous` could have called;
-  - a second credential (`X-User-Token`, `userToken`) is refused `400`.
+  - a second credential on the request is refused `400`.
 - Reserved/deferred:
   - no runtime config surface for MCP server tooling or NL query engine in this repo.
 
@@ -514,7 +514,7 @@ Recommended tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `AUTH_CREDENTIAL_MISSING` on an app auth route | A non-public `/auth/*` path | Public signup/signin/refresh are keyless. `/password` and `/mfa/*` need a user's session. |
-| `400 INVALID_REQUEST` naming `X-User-Token` | A second credential on the request | Send the user's own token as the credential, or mint a limited key |
+| `400 INVALID_REQUEST`: the header is no longer supported | A second credential on the request | Send the user's own token as the credential, or mint a limited key |
 | A query returns too few rows | The statement's `where` admits fewer, or the attribute lacks a value | `whoami` shows both; add the value to the principal's attribute |
 | Write denied on a row the caller can read | The `read` and `write` statements differ | Add a `write` statement with the `where`; the refusal's `remedy` is that statement |
 | A row condition seems not applied | Another statement of the principal has no `where` (statements are a union), or the call is a named query, which reads its `execute` statement | `whoami` lists every statement with its origin (`from`) |

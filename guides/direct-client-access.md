@@ -88,7 +88,7 @@ do is its statements, whichever credential it sends:
 | A key of a backend's principal | What its statements allow: tables, named artifacts, admin routes with `manage` | Either; **ad-hoc query only on admin** (data-plane `/query` is 404 for everyone) |
 | A session or key of a `_serverauth` principal (Studio operator) | Ad-hoc + admin | Admin |
 
-`GET /api/auth/whoami` (both listeners) says which principal a credential is and which statements it holds. A retired `X-User-Token` header is
+`GET /api/auth/whoami` (both listeners) says which principal a credential is and which statements it holds. The retired second-token header is
 refused `400 INVALID_REQUEST`: to act as a user, send that user's session or a [limited key](../auth/credentials.md#limited-keys) minted from it.
 
 ---
@@ -125,7 +125,7 @@ nothing by default. Give the caller an `execute` statement; nothing is set on th
 ```
 
 A materialized-query result is opened the same way: define a named query over the result table, and give `execute` on that query. A table or
-schema document that still carries `dataPlaneAccess` is refused `SCHEMA_UNKNOWN_MEMBER`.
+schema document that still carries the old opt-in member is refused `SCHEMA_UNKNOWN_MEMBER`.
 
 A named query nobody may execute from a browser is still **allowed to apply** — operators and services need it. What widens the browser tier is a
 change of statements, so it is in the diff of `aouda.json`; a public statement on a table other statements restrict is refused

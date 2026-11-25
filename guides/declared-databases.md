@@ -62,8 +62,8 @@ overwrites a field it does not name.
 either declared in the same file with `"kind": "auth"`, or already in the catalog; it is **never created for you**. The passes run in
 a fixed order whatever the order in the file: auth databases, then data databases, then links.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-`POST /api/databases` that links still returns them as before. For keys that survive a wipe, declare their principals with
+A declarative link sets the link and nothing else: it makes **no key** and no principal. `POST /api/databases` with a link makes none
+either (**BL-1464, 0.16.0**). For keys that survive a wipe, declare their principals with
 `credentials` in the same file (**BL-1464, 0.16.0**; [Keys that survive a wipe](keys-that-survive-a-wipe.md)).
 
 The start fails, naming the entry and changing nothing, when:
@@ -139,7 +139,8 @@ they are not in it).
 ```
 
 The first admin and the operator's key are in this file too (**BL-1464, 0.16.0**): a `server.principals` entry holding the role
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`admin`, with a password seed or a `derivedKey` ([Declared access](declared-access.md)). The old first-admin and operator-key
+settings are refused at start (`SETTING_REMOVED`, naming this replacement).
 
 The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan --declaration /etc/aouda/aouda.json --env prod` validates it offline (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
 [Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
@@ -163,6 +164,7 @@ Delete the data directory and start the server with the declaration above. What 
 | Every row of data | **Lost** |
 | Users, sessions and refresh tokens of an application auth database | **Lost** |
 | Signup settings of a database | **Lost** (catalog-owned; set them again) |
+| Stored keys minted at runtime, and the principals made through the API | **Lost** — declare the principal, with a derived key or a stored key's `{ "id", "sha256" }` |
 | Tables, roles and settings made only through the API | **Lost** |
 
 ### The order a start follows
@@ -179,7 +181,7 @@ there is no `/ready` to ask):
 
 1. **Declared databases**: auth databases, then data databases, then the links.
 2. **`_serverauth`**: created for an operator declared in `server.principals` (**BL-1464, 0.16.0**). With none declared and no admin, the server stays in setup mode.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+3. **Declared schema files**: every file was read and validated before step 1 (**BL-1463, 0.14.0**: before any database is created), then applied in the server with its own privileges, with no key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `schemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
 4. **Declared access** (**BL-1464, 0.16.0**): roles, `signup`, principals and their credentials, in their auth databases ([Declared access](declared-access.md)). It replaces the configured key rows, which came last.
 5. The server is marked ready.
 

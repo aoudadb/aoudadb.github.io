@@ -241,12 +241,12 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, 0.14.0**). A server that
-declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, 0.16.0**).
+⚠️ The first operator is created through the **running** server in setup mode, from this host, or declared. The command of 0.15 and earlier
+that wrote to a stopped server's data directory is removed (**BL-1464, 0.16.0**). A server that
+declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode.
 
 **The data-directory lock and its limits** (**BL-1462, 0.14.0**). The server holds an exclusive `flock` on
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`<data>/Server/aouda.lock` while it runs; `aouda table backfill` and a second server on the same directory take the
 same lock and refuse. The kernel releases it when the process exits, `kill -9` included, so there is never a stale lock to delete.
 It protects a directory on a **local filesystem, between processes on one host**. On a mount without `flock` (some NFS, CIFS and
 FUSE mounts answer `ENOLCK` or `EOPNOTSUPP`) .NET treats the failure as success and the lock is silently not held; on NFS mounted
@@ -260,13 +260,12 @@ Three supported ways, in order of preference:
 # 1. A file only you can read
 sudo install -m 600 /dev/null /etc/aouda/admin-password
 sudo sh -c 'printf "%s" "$PASSWORD" > /etc/aouda/admin-password'
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-  --email admin@example.com --password-file /etc/aouda/admin-password \
-  --data /var/lib/aouda
+/opt/aouda/Aouda.Server init --server http://localhost:5000 \
+  --admin-email admin@example.com --admin-password-file /etc/aouda/admin-password
 
 # 2. Standard input — touches no filesystem
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-  --email admin@example.com --password-stdin --data /var/lib/aouda
+printf '%s' "$PASSWORD" | /opt/aouda/Aouda.Server init --server http://localhost:5000 \
+  --admin-email admin@example.com --admin-password-stdin
 ```
 
 ⚠️ A file readable by group or other is **refused**, with the mode it found. `chmod 600` it.
@@ -380,7 +379,8 @@ one [`aouda plan`](../guides/plan.md) prints, headed `aouda start`, and the last
 ```text
 aouda start: declaration /etc/aouda/aouda.json, 1 database, 0 schema files
 
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+error    SETTING_REMOVED  Aouda:Auth:Bootstrap:ServerKey  (environment variable Aouda__Auth__Bootstrap__ServerKey)
+         Aouda:Auth:Bootstrap:ServerKey is no longer read (ADR 0071: principals and their credentials are declared in the declaration file). Remove it and declare the operator in the declaration file (aouda.json): a server.principals entry holding the role admin, with a derivedKey (from the file's keyRoot) or a stored key { "id", "sha256" }.
          fix:  Remove the setting and use the one the message names instead.
 
 stages   read ok, settings 1 error, principals ok, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
@@ -389,8 +389,8 @@ stages   read ok, settings 1 error, principals ok, databases ok, bootstrap ok, s
 
 Every code, its stage and what fixes it is in [Declaration Finding Codes](../reference/plan-codes.md). Among them:
 `SETTING_REMOVED` — a setting that is no longer read, such as the old operator settings above (`Aouda:Auth:Bootstrap:*`,
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-train**; an empty value counts as not set), naming its replacement and never its value; `SERVER_HAS_NO_OPERATOR` — the data
+the first-admin and keys-file settings, the systemd credentials `aouda-server-key` and `aouda-admin-password`; **BL-1464, 0.16.0**;
+an empty value counts as not set), naming its replacement and never its value; `SERVER_HAS_NO_OPERATOR` — the data
 directory was set up before, and now has nobody who can manage the server and nothing declared (declare an operator in the
 declaration file's `server.principals`, or `--dev-admin` for development; a data directory that was never set up starts in setup
 mode instead, **BL-1462**); `DEV_ADMIN_REFUSED`; `CONFIGURATION_INVALID`; and

@@ -150,7 +150,7 @@ If you do nothing except install artifacts:
 
 ### Reserved / not yet wired
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- Current code snapshot does not expose a public `Aouda.CreateClient()` + `AoudaMode` auto-select surface in `src/Aouda.Embedded`.
 - No Docker image distribution flow is implemented in this repo snapshot.
 - No first-class HTTP API for artifact publishing/release management exists.
 
@@ -327,6 +327,7 @@ This section includes both runtime distribution settings and package/build metad
 | `AOUDA_SERVER` / `AOUDA_URL` | string | unset | URL | CLI schema flows | Used by schema command context |
 | `aouda start --port` | int | `5000` | valid port | CLI args | Server listen port |
 | `aouda start --data-dir` | string? | from config | path | CLI args | Persistent data directory |
+| App auth | HTTP | — | create-database API | Not CLI | The response holds no key |
 | npm `license` | string | `"MIT"` | SPDX | `aouda-client-ts/package.json` | Package-level legal declaration |
 | npm `engines.node` | string | `>=22` (**NativeClients, 0.4.0**; 0.3.0: `>=20`) | semver range | `aouda-client-ts/package.json` | Distribution runtime constraint |
 

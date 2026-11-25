@@ -126,9 +126,9 @@ The same shape: Aouda sizes scan parallelism from the cores it can see. On a ded
 
 ⚠️ **Aouda does not accept a password on the command line**, on any platform. A command line is recorded by shell history, by process-creation audit events, and by CI logs; none of that can be un-leaked.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-naming the remedy (`POST /api/auth/setup` from this machine, or stop the service first) (**BL-1462, 0.14.0**). A server that
-declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, 0.16.0**).
+⚠️ The first operator is created through the **running** service in setup mode, from this machine, or declared. The command of 0.15 and earlier
+that wrote to a stopped server's data directory is removed (**BL-1464, 0.16.0**). A server that
+declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode.
 
 ```powershell
 # A file
@@ -136,14 +136,12 @@ $path = 'C:\ProgramData\Aouda\admin-password'
 Set-Content -Path $path -Value $env:ADMIN_PASSWORD -NoNewline -Encoding utf8
 icacls $path /inheritance:r /grant:r "$env:USERNAME:(R)"
 
-# $env:AOUDA_TOKEN is an aouda_ key. aouda whoami --server http://localhost:5000
-  --email admin@example.com --password-file $path `
-  --data 'C:\ProgramData\Aouda\data'
+& 'C:\Program Files\Aouda\Aouda.Server.exe' init --server http://localhost:5000 `
+  --admin-email admin@example.com --admin-password-file $path
 
 # Or standard input, which touches no filesystem
-# $env:AOUDA_TOKEN is an aouda_ key. aouda whoami --server http://localhost:5000
-  --email admin@example.com --password-stdin `
-  --data 'C:\ProgramData\Aouda\data'
+$env:ADMIN_PASSWORD | & 'C:\Program Files\Aouda\Aouda.Server.exe' init --server http://localhost:5000 `
+  --admin-email admin@example.com --admin-password-stdin
 ```
 
 ⚠️ **The file-permission check is Linux and macOS only.** On Windows Aouda cannot inspect the mode the way it can a Unix one, so a loose ACL is **not** refused — set it yourself, as above, and delete the file once the admin exists.

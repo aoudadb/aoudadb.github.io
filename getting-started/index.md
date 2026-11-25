@@ -1464,7 +1464,7 @@ and nothing is declared. Once set up, a server never re-enters it: an operator i
 `server.principals` means no setup mode: a key-only operator (the role `admin` and a `derivedKey` or stored key) operates the
 server from the first start, with no human admin, and a first admin named by an email with a password seed is created at start
 (Option B below). Setup mode is the interactive first run for a server that declares neither. The old `Aouda:Auth:Bootstrap:*`,
-`Aouda:Auth:RootUser:*` and `Aouda:Auth:Keys:File` settings, and the systemd credentials `aouda-server-key` and
+first-admin and keys-file settings, and the systemd credentials `aouda-server-key` and
 `aouda-admin-password`, are refused at start (`SETTING_REMOVED`, exit status `78`).
 
 Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`. The health probes answer in setup mode too: `/health` and `/startup` are `200`, `/ready` is `503` with `setup_required` (**BL-1462, 0.14.0**; see [the probes](../reference/http-api.md#the-probes-one-meaning-each)).
@@ -1550,7 +1550,7 @@ and name the file at start: `aouda start --declaration ./aouda.json` (or `Aouda_
 creates the admin when the principal is created, with a forced password change at the first sign-in; the seed is never applied
 again, so a later change of the variable changes nothing. See [Declared access](../guides/declared-access.md).
 
-`Aouda:Auth:RootUser` (`Email` / `Password` in `appsettings.json` or `AOUDA_AUTH__ROOTUSER__*`) is **refused** at start
+The old first-admin setting (an email and a password in `appsettings.json` or the environment) is **refused** at start
 (`SETTING_REMOVED`, exit status `78`), naming this declaration as its replacement; an empty value counts as not set.
 
 #### Option C: `aouda init`
@@ -1562,8 +1562,8 @@ printf '%s' "$PASSWORD" | aouda init \
   --server http://localhost:5433
 ```
 
-This calls the setup endpoint of a **running** server that is in setup mode, from its own host. `aouda create-admin`, which wrote the admin
-into the data directory of a stopped server, is removed (**BL-1464, 0.16.0**): for an install with no interactive first run, declare the
+This calls the setup endpoint of a **running** server that is in setup mode, from its own host. The command that wrote the admin into the data
+directory of a stopped server is removed (**BL-1464, 0.16.0**): for an install with no interactive first run, declare the
 operator (Option B).
 
 ### Step 2: Sign In
@@ -2055,8 +2055,8 @@ kept by shell history, by process-launch audit rules, by CI logs and by an agent
 of that can be un-leaked, which is why the option was removed rather than deprecated — a deprecation
 warning is printed *after* the leak has already happened.
 
-⚠️ The first operator is created through a **running** server in setup mode, or declared. `aouda create-admin`, which wrote to a stopped
-server's data directory, is removed (**BL-1464, 0.16.0**). A service that declares a
+⚠️ The first operator is created through a **running** server in setup mode, or declared. The command that wrote to a stopped
+server's data directory is removed (**BL-1464, 0.16.0**). A service that declares a
 key-only operator in its declaration file needs no admin at all.
 
 **Three supported paths.**

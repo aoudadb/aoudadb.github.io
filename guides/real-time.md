@@ -889,7 +889,7 @@ Content-Type: application/json
 {"token":"<key-or-session-token>","wireMode":"json"}
 ```
 
-There is one credential and no second token: a non-empty `userToken` is `400 INVALID_REQUEST`. To act as a user, send that user's
+There is one credential and no second token: a body that carries the old second-token member is `400 INVALID_REQUEST`. To act as a user, send that user's
 session, or a [limited key](../auth/credentials.md#limited-keys) minted from it. A refused credential answers `401` with `{ "code", "message" }` (`AUTH_KEY_MALFORMED`,
 `AUTH_CREDENTIAL_INVALID`, `AUTH_CREDENTIAL_EXPIRED`, `AUTH_CREDENTIAL_REVOKED`); `500` with `AUTH_DB_UNAVAILABLE` means the auth database could not be read or the
 session's permissions could not be resolved — no session is created, and it is **retryable** (**BL-1223, 0.9.0**).
