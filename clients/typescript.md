@@ -190,8 +190,12 @@ the client holds, and a call in flight belongs to the session it was made in:
 - A request answered 401 after its session was replaced or ended is thrown, not sent again, and a `retryPolicy` sends nothing again once the
  session changed (the last failure is thrown). A call that was waiting for a refresh when another session was stored is rejected with
  `AUTH_REFRESH_SUPERSEDED`, unsent. Make it again if it is meant for the new session.
-- An open realtime connection is **not** replaced by a sign-in (**BL-1854**): call `signOut()` first, or `client.disconnect()` and make a new
- client, when the user changes.
+- An insert whose binary body the server refused (`415`) is not sent again as JSON in another session: it is rejected with
+ `AUTH_REFRESH_SUPERSEDED`, and nothing was inserted. `bulkLoadJobs` begins each of its jobs in the session held then; a job belongs to the
+ principal that began it, and the server refuses another's `:append`.
+- An open realtime connection is **not** replaced by a sign-in, **nor closed by `signOut()`** (**BL-1854**, open): its subscriptions and write
+ streams, **and new ones made after the next sign-in**, go on as the earlier user until the server ends the signed-out session (within one
+ heartbeat, 20 s by default). When the user changes, `await client.disconnect()` and make a new client for the new user.
 
 **Native sign-in through the browser** (**NativeClients, 0.4.0**): `createPkcePair` (needs `crypto.getRandomValues` — on
 React Native, `react-native-get-random-values`; see [React Native](#react-native-nativeclients-040)), then
