@@ -20,6 +20,13 @@ A third rule rejects a string shaped `aouda_[a-z2-7]{16}_[A-Za-z0-9]{49}` whose 
 ADR 0071 D-15's (IEEE CRC-32 of the first 66 characters, four big-endian bytes, six base62
 digits, alphabet `0-9A-Za-z`). The script imports nothing from the engine; it reimplements
 that checksum. A placeholder that fails the checksum is not a hit.
+
+A fourth rule (aouda BL-1867) rejects a **stand-in**: a line that a rewrite left where a line that
+named a removed concept was. The sentences of the two commits that did it are refused wherever
+they are, code included; and any prose line that a page holds three times or more, or that stands in more than three pages,
+is refused, because a sentence that fits three places says what none of them was saying. A removed concept is
+not retired by replacing its lines with one sentence: write what each place was saying, or delete
+the line and repair the sentence, list or table around it.
 """
 
 from __future__ import annotations
@@ -86,6 +93,37 @@ VOCABULARY: list[tuple[str, str, str]] = [
     (r"RLS", "RLS", "a statement `where`"),
     (r"ADRA", "ADRA", "the policy (statements)"),
 ]
+
+# The lines the 0.16.0 rewrite put in place of others (a259eb2, f9afb4f, c9a710e). Exact fragments.
+STAND_INS: list[str] = [
+    "Access is a principal's statements. The credential is an `aouda_` key or a session",
+    "A table carries no security member (**BL-1464",
+    "# an aouda_ key or a session. GET /api/auth/whoami names the principal",
+    "a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)",
+    "// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session",
+    "// client.whoami() — apiKey is an aouda_ key, or session, never both",
+    "is an aouda_ key. aouda whoami --server",
+    "a principal's statements, proved by an `aouda_` key or a session",
+]
+
+# The same, where the words are an ordinary sentence's too: only a whole line of them is a stand-in.
+STAND_IN_LINES: list[str] = [
+    "See [Access](auth/index.md) (**BL-1464",
+    "See [Access](../auth/index.md) (**BL-1464",
+]
+
+# Pages the fourth rule does not read yet, each with its reason. Remove a row with its cause.
+STAND_INS_PENDING: dict[str, str] = {
+    # 16 lines. The maintainer keeps the Hub pages as they are (Operability Q-5, 2026-11-24).
+    "guides/cloud-hub.md": "Operability Q-5",
+}
+
+# A prose line this long, of this many words, at most this many times in one page.
+_REPEAT_LENGTH = 45
+_REPEAT_WORDS = 5
+_REPEAT_LIMIT = 2
+# The same line, once each, in at most this many pages (three pages share the replication notice today).
+_PAGES_LIMIT = 3
 
 EXEMPT_FILES = {"auth/migrating-from-0-14.md", "CHANGELOG.md"}
 EXEMPT_PREFIX = "_review/"
@@ -176,6 +214,64 @@ def scan_text(path: str, text: str, vocabulary: bool) -> list[str]:
     return findings
 
 
+def _prose_lines(text: str) -> list[tuple[int, str]]:
+    """(number, line) outside code fences and tables (a header or a field's row may repeat)."""
+    lines: list[tuple[int, str]] = []
+    fence = ""
+    for number, line in enumerate(text.split("\n"), start=1):
+        bare = re.sub(r"^[ >]*", "", line)
+        opened = re.match(r"(`{3,}|~{3,})", bare)
+        if fence:
+            if opened and bare.startswith(fence) and not bare.strip(fence[0] + " \r"):
+                fence = ""
+            continue
+        if opened:
+            fence = opened.group(1)
+            continue
+        if not bare.startswith("|"):
+            lines.append((number, line.strip()))
+    return lines
+
+
+def _is_stand_in(line: str) -> bool:
+    return any(fragment in line for fragment in STAND_INS) or line.strip().startswith(tuple(STAND_IN_LINES))
+
+
+def scan_stand_ins(path: str, text: str) -> list[str]:
+    """The fourth rule: a canned line, or a prose line a page holds more than twice."""
+    if path in STAND_INS_PENDING:
+        return []
+    findings = [
+        f"{path}:{number}: a stand-in line — write what this place was saying, or delete it"
+        for number, line in enumerate(text.split("\n"), start=1)
+        if _is_stand_in(line)
+    ]
+    seen: dict[str, list[int]] = {}
+    for number, line in _prose_lines(text):
+        if len(line) >= _REPEAT_LENGTH and len(re.findall(r"[A-Za-z]{2,}", re.sub(r"`[^`]*`", "", line))) >= _REPEAT_WORDS:
+            seen.setdefault(line, []).append(number)
+    for line, numbers in seen.items():
+        if len(numbers) > _REPEAT_LIMIT and not _is_stand_in(line):
+            findings.append(f"{path}:{numbers[0]}: the same line {len(numbers)} times — say what each place is about: {line[:70]}")
+    return findings
+
+
+def scan_across_pages(pages: dict[str, str]) -> list[str]:
+    """The fourth rule across pages: one sentence put once in each of many pages. A heading and a lead-in (`...:`) are a template's."""
+    held: dict[str, list[str]] = {}
+    for path, text in pages.items():
+        for line in dict.fromkeys(line for _, line in _prose_lines(text)):
+            if line.startswith("#") or line.endswith(":") or _is_stand_in(line):
+                continue
+            if len(line) >= _REPEAT_LENGTH and len(re.findall(r"[A-Za-z]{2,}", re.sub(r"`[^`]*`", "", line))) >= _REPEAT_WORDS:
+                held.setdefault(line, []).append(path)
+    return [
+        f"{paths[0]}: the same line in {len(paths)} pages ({', '.join(paths[:4])}) — say what each place is about: {line[:70]}"
+        for line, paths in held.items()
+        if len(paths) > _PAGES_LIMIT
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
@@ -184,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = os.path.abspath(args.root)
     findings: list[str] = []
+    prose: dict[str, str] = {}
     for rel in tracked_files(root):
         if exempt(rel) or not _selected(rel, args.paths):
             continue
@@ -196,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
         with open(full, encoding="utf-8-sig", newline="") as handle:
             text = handle.read()
         findings.extend(scan_text(rel, text, vocabulary=not args.no_vocabulary))
+        if rel.endswith((".md", ".txt")):
+            findings.extend(scan_stand_ins(rel.replace("\\", "/"), text))
+            prose[rel.replace("\\", "/")] = text
+    findings.extend(scan_across_pages(prose))
     for line in findings:
         print(line)
     return 1 if findings else 0

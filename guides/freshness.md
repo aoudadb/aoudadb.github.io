@@ -9,7 +9,7 @@ parent: "Guides"
 Document status: Complete (P38 S07)
 Last updated: 2026-08-21
 
-Aouda issues **one** consistency token on every write, returns it on every read, and accepts it on every read. A node that has not applied that position does not answer — it waits, forwards, or returns a typed error. Freshness is also a **declared** property of a named query, reviewable in `aouda schema diff --access`.
+Aouda issues **one** consistency token on every write, returns it on every read, and accepts it on every read. A node that has not applied that position does not answer — it waits, forwards, or returns a typed error. Freshness is also a **declared** property of a named query, reviewable in `aouda schema diff` (`UpdateNamedQueryFreshness`).
 
 **Wire contract:** [HTTP API — Consistency tokens](../reference/http-api.md#consistency-tokens-and-freshness). **ADR:** [0042](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0042-freshness-and-replica-consistency.md).
 
@@ -145,7 +145,7 @@ The budget lives on the named query. A name with no `freshness` block is fail-sa
 | Call site | May **tighten** (`?maxStalenessMs=500` on a 2 s named query). May **not** loosen (400 `FRESHNESS_LOOSENED`) |
 | `serveStaleAndRevalidate` | Schema-apply and request 400 `FRESHNESS_CONTRACT_INVALID` (no local copy yet) |
 | Omitted `waitMs` | 250. Cap 30 000; over-cap is `FRESHNESS_CONTRACT_INVALID` |
-| Loosen in a branch | `aouda schema diff --access` reports `freshness` / `widen` and exits 1. A tightening is `narrow` and does not fail CI |
+| Loosen in a branch | `aouda schema diff` reports `UpdateNamedQueryFreshness`, for a loosening and a tightening alike. Nothing fails CI by itself: review the change |
 
 Freshness is keyed by the path, batch, or subscribe **name**. There is no `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`.
 

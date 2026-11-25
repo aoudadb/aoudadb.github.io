@@ -61,6 +61,19 @@ There is no converter. A `{ "hash": "sha256:<hex>" }` secret has no counterpart:
 
 `GET /api/auth/whoami` with the credential says which principal it is and which statements it holds. A refusal is logged once, with the code, the principal, the action, the resource and the remedy — never the key. The key commands are `aouda keys new`, `aouda keys new-root` and `aouda keys derive`.
 
+### Counting refused keys (**BL-1428, BL-1430, 0.12.0**) {#counting-refused-keys}
+
+`GET /api/server/metrics` (`manage` on `server`) counts the credentials refused since the server started, once per refusal, as two splits of the same
+total: `rejectedApiKeysByTransport`, `{ "http": n, "websocket": n, "longpoll": n }`, and `rejectedApiKeysByReason`,
+`{ "credential": n, "malformed": n, "retired_format": n }` (**BL-1464, 0.16.0**: the reasons; there is no count by kind of key). Each always lists all of its names.
+
+- **Every transport counts**: HTTP, the WebSocket `auth` or `re_auth` message, and a long-poll connect. A rising `websocket` with a flat `http` is
+  the signal of a feeder locked out.
+- `credential` is a key or a session the auth database refused (unknown, revoked, expired, of another auth database); `malformed` a value whose
+  shape or checksum is wrong; `retired_format` a key of 0.14.
+- The warning in the log names the 8 most frequent **fingerprints** of the keys refused since the previous line: the first 8 hex characters of a
+  key's SHA-256, never the key.
+
 ## Secret files (**BL-1425, 0.12.0**) {#secret-files}
 
 Every secret the server reads from a file goes through one reader.

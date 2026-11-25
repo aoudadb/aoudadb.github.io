@@ -313,32 +313,27 @@ results are keyed by identity rather than time, and are not clustered.
 aggregate's window bucket even when another bucket comes first, a `topNPerGroup`'s window column — and its segments are cut by
 time slice ([2.11e](#window-expiry)).
 
-### 2.3.2 Who may read a result: the source's security
+### 2.3.2 Who may read a result: its own statements
 
-(**BL-1227, 0.9.0**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-alone. A grant that names the result table lifts nothing. A holder of one grant is still restricted by the other half — for
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+(**BL-1464, 0.16.0**) **A materialized result is a table of its own for access.** A read of it — the materialized-query endpoint, a `/query`
+on the result — needs a `read` statement on `<db>/table/<result>`, and its rows are the ones that statement's `where` admits; a named query
+over it needs an `execute` statement on the query. **The source table's statements play no part:** a statement on the source alone admits
+nothing of the result, and a caller whose `read` on the source has a `where` is not scoped by it on the result. So write the result's
+statements when you declare the query, with a `where` on a column the result carries (for example the tenant as a `groupBy` column); a wildcard
+(`<db>/table/*`, as the built-in roles hold) covers the results too. Up to 0.15 a result carried its source's security. An
+unconditional statement on a result that another statement restricts is audited as `unconditional_access` (`operation` `materialized-query`).
+See [Row conditions](../auth/authorization.md#row-conditions).
 
-**A materialized query declares no security of its own** (**0.15.0** for the message; the refusal is 0.14.0). The members `authMode`, `permissionColumn`,
-`permissionDimension` and `rlsResolverName` that a table carries are **not members of a materialized query**: in a schema file, `schema apply` or `schema diff` they are
-`400 SCHEMA_UNKNOWN_MEMBER` (`aouda plan`: the same finding, with the JSON pointer of the member). They were never read: whatever a query's definition said, its result was filtered by the source
-table's partition-level and row-level security alone, so a file that carried them changed nothing and still changes nothing once they are deleted. From the 0.15.0 the
-message says so: *"a materialized query has no 'authMode'. The server never read it here: a materialized query's security comes from its source table ... Delete the member; to secure the
-result, set authMode, permissionDimension, permissionColumn, rlsResolverName or partitionLevelSecurity on the source table."*
+**A materialized query declares no security of its own**, and neither does a table (**BL-1464, 0.16.0**). A security member in either is
+`400 SCHEMA_UNKNOWN_MEMBER` (`aouda plan`: the same finding, with the JSON pointer of the member). Delete the member, and write a statement.
 
-**Migration:** delete the member from the materialized query; to secure its result, declare the security on the **source table** (`authMode`, `permissionDimension`, `permissionColumn`,
-`rlsResolverName`, `partitionLevelSecurity` there, as for any table). Nothing about who can read the result changes by deleting the member, because it was ignored. A holder is lifted
-past each half by its own `all-partitions` / `all-rows` grant **on the source table**, as above.
-
-(**BL-418, 0.9.0**) **An embargo holder cannot read a result over the embargoed table.** A result is computed once for every
+(**BL-418, 0.9.0**) **An embargoed caller cannot read a result.** A result is computed once for every
 reader, so it cannot be cut by one caller's delay: its query endpoint, a `/query` or named query that names it, and a subscription to
-it answer `403 AUTH_EMBARGO_UNSUPPORTED` to a credential holding an
-[embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) on the source (or on the result table).
-The holder's reads of the source table itself work, with the cutoff applied as any read's security is — a read the server routes
+it answer `403 AUTH_EMBARGO_UNSUPPORTED` when every statement that admits the caller to the result carries
+[`embargoSeconds`](../auth/authorization.md#embargo); another statement without one lifts it.
+The caller's reads of the source table itself work, with the cutoff applied as any read's row condition is — a read the server routes
 to a result carries that cutoff as part of its question, and is answered from the result only where the routing rules below prove
 the answer equal.
-
 ## 2.4 Availability status (implementation honesty)
 
 ### Available now
@@ -895,7 +890,7 @@ An aggregate materialized query may declare `computed` columns — physical, alw
         "right": { "type": "colRef", "col": "open" }
       }
     }
-  ],
+  ]
 }
 ```
 

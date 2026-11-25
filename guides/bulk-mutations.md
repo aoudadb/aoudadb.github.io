@@ -63,15 +63,17 @@ authorization scope to prevent accidental use.
 
 ### Authorization
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- `UPDATE` requires a **`write`** statement on the table, `DELETE` a **`delete`** statement.
+- `TRUNCATE` requires a **`delete`** statement with **no `where`**: it empties the whole table. A principal whose `delete` statement has a
+  `where` receives 403. The built-in roles `writer` and `admin` hold an unconditional one.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+### Row conditions
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  target column is restricted by a write policy for the caller's role, the mutation returns
-  403 regardless of the expression type.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-  cannot reference columns outside the caller's authorized partition boundary.
+- **A statement's `where` is checked on every mutation**, including expression SET values: the rows an update or delete can match are
+  scoped by the `where` of the caller's `write` / `delete` statements, and an update's new row must satisfy a `write` statement's
+  `where`, else the mutation returns `403 AUTH_ROW_DENIED`, regardless of the expression type.
+- **A condition on the partition column** scopes a mutation to the partitions it admits. An expression SET value
+  cannot move a row outside them.
 
 ---
 
@@ -216,7 +218,7 @@ When both `set` and `setExpr` target the same column, the literal `set` value wi
    snapshot, producing a concrete value.
 3. The concrete values are written to the HRA and WAL — no expression AST is stored in the
    WAL. Crash recovery and replication replay see only resolved values.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+4. The row conditions are checked on the row the update commits, the same as for literal SET values.
 
 ### Limitations
 
@@ -267,17 +269,17 @@ Content-Type: application/json
 
 ### Authorization requirement
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-truncate permission receives `403 AUTHORIZATION_DENIED`. Grant truncate permission explicitly
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`TRUNCATE` requires an unconditional `delete` statement on the table (no `where`). A principal without one
+receives `403 AUTH_POLICY_DENIED`, whose `remedy` is the statement to grant. Give it that statement,
+or use a principal with the role `writer` or `admin`.
 
 ```bash
-# Attempt with insufficient permissions → 403
+# Attempt with a conditional statement only → 403
 curl -X POST http://localhost:5433/api/databases/appdb/tables/auditLog/truncate \
-  -H "Authorization: Bearer <db_writer_token>" \
+  -H "Authorization: Bearer $AOUDA_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "database": "appdb" }'
-# → 403 AUTHORIZATION_DENIED
+# → 403 AUTH_POLICY_DENIED
 ```
 
 ### Durability and crash safety
@@ -1012,11 +1014,13 @@ await client.branches.delete(`backup-${Date.now()}`);
 | `400 INVALID_REQUEST` on `set` / `setExpr` | `set` is empty, or `setExpr` references an unknown column | Check that SET contains at least one key; verify column names exist in table schema |
 | `400 COLUMN_NOT_FOUND` on expression | A `$col` / `colRef` name in `setExpr` or `selectExpr` does not exist in the schema | Correct the column name; use `GET /api/databases/{db}/tables/{name}` to inspect the schema |
 | `400 INVALID_REQUEST` on `selectExpr` | Alias collides with a physical column name, duplicate alias, empty alias, or more than 20 expressions | Rename the alias; remove duplicates; stay under the 20-expression limit |
+| `403 AUTH_POLICY_DENIED` on TRUNCATE | The caller's `delete` statement has a `where`, or there is none | Give the principal an unconditional `delete` statement on the table |
+| `403 AUTH_ROW_DENIED` on expression SET | The row the update would commit is outside the `where` of the caller's `write` statements | Read the `remedy`; write the statement the caller needs, or another value |
 | `hasMore: true` loop never terminates | ORDER BY column is not the same column as the WHERE filter | Ensure `orderBy` targets a column with monotonically increasing or decreasing values relative to the predicate; add a time-based cutoff |
 | RETURNING returns unexpected columns | `["*"]` was used and the schema has more columns than expected | Enumerate explicit column names instead of `"*"` |
 | Computed column value is `null` | Division by zero in the expression for that row | Guard with `$ifNull` or check denominator values before querying; this is intentional behavior |
 | Expression SELECT result type shows `"Unknown"` | Expression is uninferable (mixed coalesce, unbound param, missing col) | Expected for that expression; inferable expressions report a concrete type (P40 S08) |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| Batch operation fails partway through | One operation in the batch returned an error | A batch is not one transaction: the operations before the failing one were applied and stay applied, and the later ones did not run. Do not re-send the whole batch unless its operations are idempotent; see [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch) for what each answer means (`503 BATCH_PARTIALLY_APPLIED` names how many were applied, and `403 BATCH_ROW_DENIED_PREFIX_APPLIED` does the same when a later operation's row condition refuses — do not re-send that batch as-is) (**BL-1303, 0.9.0**) |
 
 ---
 

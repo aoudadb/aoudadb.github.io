@@ -10,7 +10,7 @@ Document status: Approved baseline
 Primary owner: Aouda maintainers  
 Last updated: 2026-10-27
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, a paged screener, and real-time ranking — all from a **browser-tier caller** on the data-plane listener, holding no key. Every recipe in §§2–8 is executable against the published conformance fixture.
 
 **Related guides:**
 
@@ -27,11 +27,11 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ## 1. Audience and scope
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Browser-tier caller** (this guide's primary audience): a web app or mobile client with no key on the data-plane — `anonymous`, or a signed-in user's session (a subscription needs the session). You can:
 
 - Execute named queries (by name) and read columnar results.
 - Subscribe to named queries over WebSocket for real-time updates.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- Run only the named queries that `anonymous`, or the user's statements, `execute`.
 
 You cannot (data-plane restrictions):
 
@@ -63,7 +63,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
         "ask":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true }
       },
       "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
-      "clusterColumns": ["time"],
+      "clusterColumns": ["time"]
     },
     "trades": {
       "columns": {
@@ -75,7 +75,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
         "size":   { "type": "Int64" }
       },
       "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
-      "clusterColumns": ["time"],
+      "clusterColumns": ["time"]
     },
     "listings": {
       "columns": {
@@ -84,7 +84,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
         "sector":   { "type": "String" },
         "country":  { "type": "String" },
         "mcap":     { "type": "Int64" }
-      },
+      }
     }
   },
   "materializedQueries": {
@@ -232,7 +232,7 @@ Key design decisions:
 - **This schema is a tick tape, and that is the layout to copy only for a tick tape.** `quotes` and `trades` partition on `(ticker, source)` and cluster on `time`, because one ticker holds a great many ticks and every read names the ticker and the source. `partitionStorage` is left unset, so the table is `Auto`: a pair that reaches 10 million rows or 1 GB is promoted to its own directory, and a chart of that ticker reads that directory. A daily series (one row per security per day, plotted across years) partitions on the security, uses a shared bucket and clusters on the date. A shared bucket is written and merged in key order and then time order, so each security keeps one run (**BL-1180, 0.9.0**). Up to 0.7.1 the merge ordered by `clusterColumns` only, so on those versions such a series lists the security again as the first `clusterColumns` entry, before the date. A tick tape needs neither: a promoted ticker is its own directory, and clustering on `time` alone keeps that directory in time order. A sensor feed whose old rows are irrelevant is a third layout. All three are in [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45). Copying the tick schema onto either of the others is the mistake that page is there to prevent.
 - **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. The partition key is the `(ticker, source)` pair, the same columns the candles group by. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, 0.4.0**). See [schema](schema.md).
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **An `execute` statement for every named query** — a name the caller may not execute returns 404 from `POST .../named-queries/{name}/query` on the data-plane. The statements are in `aouda.json`; nothing is set on a table or an MQ.
 
 ---
 
@@ -296,7 +296,7 @@ their maintainer after the commit, so read with the insert's consistency token t
 ```http
 POST /api/databases/finance/named-queries/quotes.watchlist/query
 Content-Type: application/json
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+Authorization: Bearer <session-token>
 
 { "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" } }
 ```
@@ -333,7 +333,7 @@ Declare a `latestPerKey` MQ over `quotes`. The MQ maintains one row per `(ticker
   "orderBy":     "time",
   "descending":  true,
   "select":      ["ticker", "source", "bid", "ask", "time"],
-  "updateMode":  "sync",
+  "updateMode":  "sync"
 }
 ```
 
@@ -367,7 +367,7 @@ Query or subscribe to `candles.byTicker` — a named query over the `candles_bid
 ```http
 POST /api/databases/finance/named-queries/candles.byTicker/query
 Content-Type: application/json
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+Authorization: Bearer <session-token>
 
 { "args": { "ticker": "AAPL" } }
 ```
@@ -375,7 +375,7 @@ Content-Type: application/json
 Response columns: `["ticker", "time", "open", "high", "low", "close"]`. The `time` column contains the UTC **epoch-millisecond** start of each hour bucket — an Int64, not a formatted string. Candles are ordered ascending by time (as defined in the NQ).
 
 {: .important }
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Ad-hoc `POST .../query` is 404 on the data-plane.** All browser-tier access goes through named-query names. Both the MQ (`candles_bid_1h`) and the named query (`candles.byTicker`) must be declared in the schema file; the caller needs an `execute` statement on the named query.
 
 ### Day and minute intervals
 
@@ -586,19 +586,19 @@ The `derived` expression (base-table computed column) is a fallback for ranking 
 
 ---
 
-## 9. Partition-level security
+## 9. Row conditions
 
-### Pattern 1 — `jwt-claim` (single ticker per user)
+### Pattern 1 — one attribute value (single ticker per user)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Each user's principal carries an attribute (for example `ticker: ["AAPL"]`), and the `execute` statement's `where` binds the partition key to it, with the condition `{ "column": "ticker", "op": "eq", "principal": "attributes.ticker" }`. The condition is added to the query, and it satisfies the partition filter. Ideal for apps where each end user watches one symbol.
 
-See [Auth — jwt-claim mode](../auth/authorization.md#193-mode-1-jwt-claim-default).
+See [Row conditions](../auth/authorization.md#row-conditions).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+### Pattern 2 — a list in an attribute (multi-ticker watchlists)
 
-When a user may access many tickers (watchlist, portfolio), store grants in the auth database. Fan-out: a named-query subscription automatically merges results from all granted tickers. Revoke access on the next request without re-issuing JWTs.
+When a user may access many tickers (watchlist, portfolio), list them in the attribute and write `"op": "in"`. A named-query subscription then covers every listed ticker. Changing the attribute takes effect on the next request, without a new sign-in.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+See [Attributes](../auth/principals.md#attributes), [Partitioning](partitioning.md#live-subscriptions-on-a-partitioned-table) and [Division of responsibility](division-of-responsibility.md).
 
 ---
 
@@ -607,6 +607,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Step | Detail |
 |------|--------|
 | Schema file includes MQs | `materializedQueries` section in `aouda.schema.json` |
+| `execute` statements for every named query the browser runs | In `aouda.json`, for `anonymous`, `signup` or a role; not on the table or MQ |
 | Named queries select `outputName` columns | `open`, `high`, `low`, `close` — not `_max_bid` / `_first_open_val` |
 | No `crossPartitionAccess` in NQ params | A definition cannot set it, and the data-plane listener ignores it; bind the partition keys in the where clause (**BL-1227, 0.9.0**) |
 | Watchlist: both partition keys required | `ticker in $tickers` + `source eq $source` (not just ticker) |
@@ -674,7 +675,7 @@ await client.table("quotes")
   .execute();
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`.Aggregate(...)` is an admin-listener API, and `crossPartitionAccess` is honoured on the admin listener only: the data-plane listener ignores it. The flag waives the partition-filter guard (a scan cost guard) and nothing else. It never widens what the caller sees, so the caller still needs its `read` statement. A named query accepts it per call on the admin listener (`crossPartitionAccess` in the execute body or a batch item); a definition cannot set it. (**BL-1227, 0.9.0**)
 
 ### Ad-hoc query on a candle table (admin HTTP)
 

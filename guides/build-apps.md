@@ -44,6 +44,7 @@ Each row below is a service you would normally write, deploy, monitor, and versi
 |---|---|---|---|
 | **Read gateway / BFF** — `GET /orders/:id/overview` forwards to a service that builds a query and maps the result back | Nothing. It does not change the data and it does not change the trust: the JWT is Aouda-issued and Aouda validates it | A **named query** in `aouda.schema.json`, identified by the SHA-256 of its canonical form and pinned into your bundle at build time. Adding a field becomes a schema PR that CI can diff for access widening | [Named queries](named-queries.md) |
 | **Streaming relay** — a hub that holds one subscription and re-broadcasts rows over its own WebSocket | Fan-out, and it hides how many subscriptions you really have | **Subscribe by name** directly from the browser: paged snapshots ending in `snapshot_complete`, a server-emitted `gap` with `resume_from`, `re_auth` on token refresh, and fan-out that costs O(authorization classes) rather than O(subscribers) | [Subscribe by name](named-queries.md#subscribe-by-name) · [Real-time](real-time.md) |
+| **Auth proxy** — forwards sign-in, refresh, sign-out to the database's auth endpoints | Nothing, for the user-facing half | The data-plane **auth endpoints**, called directly from the browser with no key. Keep server-side only what needs a backend's key | [Auth setup](../auth/setup.md) · [Client integration](../auth/client-integration.md) |
 | **Ingest / normalization worker** — drops malformed rows, trims a string, rounds a price, derives a column, fans rows to two tables | Checks, derived values, and routing — all of which are pure functions of the row | `checks`, `derived`, and `route` / `tee` **on the table**, evaluated at insert time. Keep the worker for anything needing a lookup, a loop, or an outbound call | [Insert-time transforms](insert-transforms.md) |
 | **Rollup / aggregation job** — a cron that recomputes hourly candles or "latest value per key" | Recomputes something the database already watched change | A **materialized query** declared in the same file, maintained incrementally, readable by a browser through a named query | [Materialized queries](materialized.md) |
 | **Count endpoint** — the one route that exists because the grid needs "1–25 of 412" | One extra round trip and one more thing to keep consistent with the list query | `count: true` on the named query → `totalMatches` on the same response, cost-checked when you apply the schema | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
@@ -123,7 +124,31 @@ aouda databases create --name tasks
 }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Three things in that file are worth naming, because each one is a service you did not write. `checks` rejects an empty title at the database, so no caller can bypass it. `derived` normalizes `title` into a stored, indexable, **sortable** column at write time. `select` is the entire column exposure — `titleNorm` and `ownerId` are not in it, so a browser cannot read them.
+
+The fourth is in the other file. **Who may run these names, and on which rows, is in `aouda.json`**, the declaration:
+
+<!-- declaration-example -->
+```json
+{
+  "version": 1,
+  "databases": {
+    "auth": {
+      "kind": "auth",
+      "signup": {
+        "enabled": true,
+        "statements": [
+          { "actions": ["execute"], "resources": ["tasks/query/tasks.page", "tasks/mutation/tasks.setDone"],
+            "where": { "and": [ { "column": "ownerId", "op": "eq", "principal": "id" } ] } }
+        ]
+      }
+    },
+    "tasks": { "kind": "data", "authDatabase": "auth", "schema": "aouda.schema.json" }
+  }
+}
+```
+
+The `where` is applied by the engine on every path, so `tasks.page` did not have to take an `ownerId` argument and could not be tricked into taking someone else's. With no statement, a signed-up user can run nothing.
 
 ### 3. Apply it
 
@@ -149,7 +174,7 @@ import { tasksPage, tasksSetDone } from "./generated/aouda";
 const client = createAoudaClient({
   serverUrl: "https://data.example.com",   // the data-plane listener
   database: "tasks",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+  // no apiKey: a browser holds no key
 });
 await client.connect();
 
@@ -185,7 +210,8 @@ await client.namedMutations.execute("tasks.setDone", { id: 42, done: true });
                   │  hop adds trust  │    │ named mutation · ws      │
                   │  or calls out)   │    │ everything else → 404    │
                   └────────┬─────────┘    └────────────┬─────────────┘
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+                            │  a key                    │  no credential, or the
+                            │                           │  user's session
                            ▼                           ▼
                   ┌────────────────────────────────────────────────┐
                   │            Aouda ADMIN :5433                   │
@@ -197,7 +223,7 @@ a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoam
 Four rules hold this together, and every one of them is enforced rather than documented:
 
 1. **The trust boundary is the listener, not a route or a header.** The profile is tagged on the connection. There is no request you can send to switch profiles, and no header you can forge to get the other one.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+2. **The admin listener is never reachable from the internet.** Services inside your network hold a key and use it. Browsers never see it, hold no key, and a request with no credential there is `401 AUTH_CREDENTIAL_MISSING`.
 3. **The edge stays thin.** TLS, WAF, CDN, geo-allow — yes. Deserializing the JSON and re-serializing it — no. Direct internet exposure with **no** edge is not a supported configuration in this release.
 4. **Browsers read through named artifacts only.** They cannot compose a query, cannot name a table, and cannot see that `admin/*` exists.
 
@@ -205,6 +231,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 | Credential | Held by | Listener | Ships in a browser bundle? |
 |---|---|---|---|
+| A key of a backend's principal | Your backend services, CI, migration jobs | Admin (and data-plane, but ad-hoc query is admin-only) | **Never** |
+| No credential (`anonymous`) | Your frontend, before sign-in | Data-plane only | Nothing to ship |
 | End-user JWT | The signed-in browser | Data-plane | Held in memory, refreshed automatically |
 | Operator JWT | Studio / Hub users | Admin | n/a |
 
@@ -268,7 +296,7 @@ What each choice buys you, in the order you should think about it:
 | Physical ordering | `clusterColumns` | Time-ordered data scans dramatically better clustered — and on an unpartitioned table this is what gives you segment pruning, with no query-shape guard attached. [Time-series and clustering](time-series.md) |
 | Memory residency | `policy.storageTemperature` | `Hot` / `Auto` / `ColdPreferred` / mutable tiers. You control what stays in RAM. [Hot/cold storage](hot-cold.md) |
 | Durability | `durability.level` | What a write survives: `strict` (WAL forced to disk), `unlogged` (no WAL; (**Lead S26c, 0.6.0**) emptied by an open that does not follow a clean close if it was being changed) or `memory` (no files at all); omitted, the table inherits its database's level (default `strict`); `strict` may be named in a database at `os`, where that table's writes are synced to the WAL at each commit. Replaces `walEnabled` (**Lead S26, 0.6.0**). [Write path durability](write-durability.md#durability-levels-lead-s26-060) |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| Browser visibility | A named query, and an `execute` statement in `aouda.json` | Closed by default: `anonymous` and signed-up users may run nothing until a statement says so. A table has no switch of its own |
 
 Indexes are deliberately absent: zone maps, bloom filters, and sparse primary-key indexes are maintained for you and there is no index DDL to get wrong. See [Primary key indexing and memory](pk-indexing.md) for what that costs in RAM and how to bound it.
 
@@ -276,25 +304,27 @@ Indexes are deliberately absent: zone maps, bloom filters, and sparse primary-ke
 
 #### 2. Put the schema in git and gate it in CI
 
-**What you do.** Commit `aouda.schema.json`. Run `schema diff` on every pull request, `schema apply` on merge, and — the important one — `schema diff --access` to fail the build when a change widens what a browser-tier identity can read.
+**What you do.** Commit `aouda.schema.json` and `aouda.json`. Run `schema diff` and `aouda plan` on every pull request, `schema apply` on merge, and — the important one — review the diff of both files: it is where what a browser may read is widened.
 
-**Why here.** `select` is the whole column-exposure mechanism, so *adding a field to a named query is a security change*. The access diff makes that reviewable instead of invisible: it compares the effective read surface for a set of declared test identities and reports widening.
+**Why here.** `select` is the whole column-exposure mechanism, so *adding a field to a named query is a security change*, and a statement in `aouda.json` is the whole row-exposure mechanism. The plain schema diff reports a changed query or mutation body (`UpdateNamedQuery`, `UpdateNamedMutation`); `aouda plan --server` reports changed roles, principals and `signup`.
 
 ```bash
 aouda schema validate --file aouda.schema.json
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+aouda schema diff     --file aouda.schema.json
+aouda plan            --declaration aouda.json --skip-secrets
+aouda policy explain  --declaration aouda.json --as-signup auth --action execute --resource appdb/query/orders.mine
 aouda schema apply    --file aouda.schema.json
 ```
 
-Add the gate **now**, on day one. Adding it after ten named queries exist means approving ten findings at once, which means approving them without reading them. Ready-made workflows for both toolchains: [Schema CI/CD](schema-cicd.md). What the gate compares and how to write the identities fixture: [Access-surface diff](../auth/authorization.md#audit).
+Add the review **now**, on day one. Adding it after ten named queries exist means approving ten findings at once, which means approving them without reading them. Ready-made workflows: [Schema CI/CD](schema-cicd.md).
 
-**Alternatives.** `schema diff --access` ships in the **C# `aouda` CLI only** — `npx @aouda/client schema diff` has no `--access` flag ([BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176)). If your pipeline already touches .NET this costs one line: `dotnet tool install --global Aouda.Cli`. If it is pure Node, either add that one step, or call `POST …/schema/diff?access=true` on the admin listener from your existing job. Adding .NET to CI is the price of the gate, and it is worth paying.
+**Alternatives.** `npx @aouda/client schema diff` gives the same schema diff in a pure Node pipeline; `aouda plan` and `policy explain` are in the `aouda` tool (`dotnet tool install --global Aouda.Cli`). The access-surface diff (`schema diff --access`) was removed with the 0.14 access model (**BL-1464, 0.16.0**): a table carries no security, so a schema change cannot widen access by itself.
 
 ### Phase 2 — Secure
 
 #### 3. Set the trust boundary before you write any client code
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**What you do.** Turn on the data-plane listener on its own hostname behind your existing edge, keep the admin listener private, and give the frontend no key: its requests are `anonymous` until a user signs in.
 
 **Why here.** Because the boundary is the socket, not a check you can forget. Prove the isolation rather than assuming it — on the data-plane listener, `POST …/query` and `GET /api/databases` must return **404**, and must work on admin. If they do not, stop and fix that before anything else.
 
@@ -304,40 +334,42 @@ Q='{"database":"appdb","table":"Order","limit":1}'
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://data.example.com/api/databases/appdb/query \
   -H "Content-Type: application/json" -d "$Q"   # expect 404
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://admin.internal/api/databases/appdb/query \
-  -H "Content-Type: application/json" -d "$Q"   # expect 200 (401 without a credential when auth is on)
+  -H "Content-Type: application/json" -d "$Q"   # expect 401 (no credential); 200 with a key that may read Order
 ```
 
 Configuration, the full data-plane allowlist, and the quota surface: [Direct client access](direct-client-access.md). What that listener refuses and why: [What a browser-tier read cannot do](browser-tier-read-limits.md).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Alternatives.** You do not have to expose a data plane at all. A backend holding a key can call the same named queries on the admin listener and keep every benefit of step 5 — reviewability, name identity, bounded cost — while the browser talks only to your service. That is [Pattern C](../auth/architecture.md#pattern-c--a-backend), and it is a legitimate destination, not a failure. See [Choose your shape](#choose-your-shape).
 
 #### 4. Put identity and authorization inside the database
 
-**What you do. ** Enable application auth, then choose an authorization mode per table.
+**What you do.** Declare an auth database, link the data database to it, then write the statements each kind of caller needs.
 
 **Why here.** A row filter enforced in the database applies to HTTP, WebSocket, batch, and subscribe with one definition. A row filter enforced in a service applies to the paths that service owns, and is silently absent everywhere else.
 
-Aouda has **two independent auth systems**, and conflating them is the most common early mistake:
+There is **one** access model ([Auth and Authorization](../auth/index.md)): a principal, its statements, and one credential. What differs is which auth database the principal is in:
 
-| System | Answers | Used by |
+| Auth database | Holds | Used by |
 |---|---|---|
-| **Server auth** | Which services and developers may connect to this server | Your backend, CI, operators, Studio. Like PostgreSQL roles |
-| **Application auth** | Who your end users are | Your app's sign-up, sign-in, JWT, refresh, MFA. Like Auth0 or Supabase Auth |
+| **`_serverauth`** | The operators of this server | Operators, Studio, deploy jobs. Its principals may hold statements on every database and on `server` |
+| **An application auth database** (`"kind": "auth"`) | Your end users and your services | Your app's sign-up, sign-in, JWT, refresh, MFA, and the keys of its backends. Like Auth0 or Supabase Auth |
 
-Either can be used alone, together, or not at all — [Auth and Authorization](../auth/index.md) has the full model. Then pick the data-authorization mode:
+Then pick the row condition of each statement:
 
-| Mode | Use when | Cost |
+| The statement's `where` | Use when | Cost |
 |---|---|---|
-| `jwt-claim` | The user belongs to exactly one tenant/partition, carried as a JWT claim | Cheapest; nothing to maintain |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| `{ "and": [ { "column": "tenant", "op": "eq", "principal": "attributes.tenant" } ] }` | The user belongs to exactly one tenant/partition | One attribute per user |
+| `{ "and": [ { "column": "room", "op": "in", "principal": "attributes.rooms" } ] }` | The user may reach **many** partitions (a watchlist, a set of rooms, a portfolio) | An attribute that lists them (at most 1 000 values) |
+| `{ "and": [ { "column": "ownerId", "op": "eq", "principal": "id" } ] }` | "Rows I own" | Nothing to maintain |
+| Several conditions in the `and` | Both: partition isolation *and* a row predicate inside it | Both of the above |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Worked setups, including reads and writes under different conditions (two statements, one per action) and an embargo: [Policy](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) — stamp the principal into the row and scope writes with the `write` statement's `where`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+> **The one mistake that matters.** An `execute` statement with **no** `where`, given to `signup` or `anonymous`, makes every row of that named query readable by **every signed-in user**, or by everyone. That is exactly right for reference data, price lists, and public catalogues. It is a data breach for anything owned by a user. Write the `where` in the *same change* as the statement, never in a follow-up, and confirm it with `aouda policy explain` for a real principal per table class. Once any statement restricts a table, a public one without a `where` is refused `AUTH_PUBLIC_UNRESTRICTED` unless it says `"unrestricted": true`.
 
 MFA (TOTP) is available, and password-reset and OTP delivery are configurable through [Email, SMS & notifications](../auth/notifications.md). Note that neither client SDK wraps password reset or MFA enrolment — the endpoints exist, and you call them over HTTP.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Alternatives.** A native app whose users sign in (with MFA) in the browser? **Native sign-in** hands the browser session to the app: the web front issues a single-use PKCE code, the app redeems it for its own session (**NativeClients, 0.4.0**) — [Native apps](../clients/typescript.md#with-authentication). Corporate IdP required? A hosted OAuth 2.0 authorization server (login page, social login, consent) and token introspection are **not shipped**. The supported shapes are Aouda email/password (+ MFA) directly, or a backend that authenticates against your IdP and holds a key — see [Choose your shape](#choose-your-shape).
 
 ### Phase 3 — Build the surface
 
@@ -378,7 +410,7 @@ The fields that make a real UI possible, each of which is often the reason a tea
 - **`limit` / `limitParam`, `offset` / `offsetParam`** — the cap is mandatory; `limitParam` lets the caller choose a *smaller* page; omitted `offsetParam` binds skip **0** (the cap is max skip, not the default). A non-zero offset disqualifies subscribe but HTTP paging still works.
 - **`distinct: true`** — and when every distinct column is a raw partition key and the predicate touches only partition keys, one constrained key is enough to pass the partition-filter rule. That is your "which values exist for this key?" filter dropdown. It is a scan pruned to that key, answered from row-group statistics where they hold the values (**architecture review, 0.3.0** — it used to be answered from the partition directories, which listed partitions whose rows had been deleted).
 - **`joins`** — up to three, so a detail page is one request instead of a waterfall.
-- **The batch envelope** — up to **32** named queries in one request, from **one read snapshot**, costing **one** rate-limit permit. A dashboard's ten independent panels cannot disagree with each other, and burn one permit instead of ten.
+- **The batch envelope** — up to **32** named queries in one request, from **one read snapshot**, costing **one** rate-limit permit. A dashboard's ten independent panels cannot disagree with each other, and burn one permit instead of ten. A batch needs a credential: a signed-in user has one, `anonymous` does not, so a public page executes its queries one by one.
 
 ```typescript
 const [summary, recent, alerts] = await client.namedQueries.batch([
@@ -390,7 +422,7 @@ const [summary, recent, alerts] = await client.namedQueries.batch([
 
 Use **joins** when one panel's filter comes from another panel's data; use **batch** when the panels are genuinely independent. Full authoring reference, execute/batch/subscribe, and the error table: [Named queries and mutations](named-queries.md).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Alternatives.** A trusted backend whose principal has `read` statements can still run **ad-hoc queries** on the admin listener with the full builder — filters, joins, grouped aggregates, `selectExpr` — see [Query execution](query.md). Use that for reporting, internal tools, and anything where the query genuinely cannot be enumerated ahead of time. Pre-aggregation belongs in step 8.
 
 #### 6. Author every write as a named mutation, and push validation into the table
 
@@ -452,7 +484,7 @@ So: **make subscriptions collection-shaped, not item-shaped.** A named query tak
 
 > **Be honest about `conflate`.** It holds only a **value update** to a row that is visible before *and* after. On an **insert-only** stream — a tick feed, an event log, an audit table — it reduces the event rate by **zero**, and `values_skipped` never fires. Conflation never collapses an insert, a delete, or a row leaving your visibility scope, because a client that misses one of those has a permanently wrong grid. For last-value-per-key, model it as a `latestPerKey` materialized query (step 8) and subscribe to that. Be precise about what that buys you: the MQ result table holds one row per key, so the grid stays bounded no matter how many ticks arrive — but MQ upserts do not carry `prev` today, so a subscribe over the MQ does not throttle the **event rate** either. It is the correct catalog shape, not a rate limiter. If you need a hard cap on messages per second right now, that belongs in a service that owns the fan-out. Details and the current caveats: [conflate is a no-op on insert-only streams](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
-**Alternatives, in descending order of preference.** WebSockets blocked by a proxy? The client falls back to **HTTP long-poll** automatically (`streaming.enableLongPollFallback`, on by default). Need to disable streaming entirely? Poll a named query on an interval — you keep name identity, the access gate, and `totalMatches`; you lose latency and you spend more permits. Genuinely need fan-out to more clients than the caps allow, or a wire protocol Aouda does not speak? Keep a relay, and let it hold **one** subscription per authorization class. That is a real answer for a real constraint. Streaming internals, wire modes, and reconnect playbooks: [Real-time streaming](real-time.md).
+**Alternatives, in descending order of preference.** WebSockets blocked by a proxy? The client falls back to **HTTP long-poll** automatically (`streaming.enableLongPollFallback`, on by default). Need to disable streaming entirely? Poll a named query on an interval — you keep name identity, reviewability, and `totalMatches`; you lose latency and you spend more permits. Genuinely need fan-out to more clients than the caps allow, or a wire protocol Aouda does not speak? Keep a relay, and let it hold **one** subscription per authorization class. That is a real answer for a real constraint. Streaming internals, wire modes, and reconnect playbooks: [Real-time streaming](real-time.md).
 
 #### 8. Pre-aggregate what a dashboard needs
 
@@ -484,7 +516,7 @@ So: **make subscriptions collection-shaped, not item-shaped.** A named query tak
 }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Three declarable types: `latestPerKey`, `aggregate`, and `filter`. Aggregate functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`. You read the result by its **`outputName`** — `high`, `open` — on every read path, and a named query over the result with an `execute` statement is what makes a browser-tier chart possible without an imperative admin call.
 
 > **The map is desired state.** `"materializedQueries": { … }` **drops anything live that is not listed**, and `{}` drops all of them. Omitting the key entirely leaves them unmanaged. On an existing database, always `schema export` first rather than hand-adding a partial map.
 
@@ -549,7 +581,7 @@ Two settings worth deciding deliberately rather than discovering: `storageTemper
 
 - **Engine-level and integration:** `Aouda.Testing` starts a **full in-process server** with auth helpers and ephemeral databases. Embedded mode gives you a real database per test with no server at all. [Testing](../getting-started/testing.md) · [Testing and DX](testing-dx.md)
 - **Schema:** `schema validate` in CI against every environment overlay, and `schema diff` as a review artifact.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **Authorization — the layer people skip:** `aouda policy explain --declaration aouda.json --as auth/<principal> --action … --resource …` tells you what a *specific principal* can actually do, offline, and with `--row` whether one row is admitted. Run it for at least one real principal per table class and keep the output. In a test, `AoudaTestServer` takes the same declaration and a derived key per principal. A test that proves tenant A cannot see tenant B is worth more than any number of unit tests over your query builder.
 
 ---
 
@@ -566,13 +598,19 @@ The showcase, and the table to check your feature list against. If something you
 | A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbychoices--orderbyindex) |
 | A live-updating grid or ticker | `namedQueries.subscribe` by name, collection-shaped, list parameter capped with `maxItems` | [Subscribe by name](named-queries.md#subscribe-by-name) |
 | A "latest value per key" board | `latestPerKey` materialized query, subscribed. **Not** the raw table plus `conflate` | [Materialized queries](materialized.md) |
+| A chart over hourly/daily buckets | `aggregate` MQ with `TruncateToHour`, a named query over its result, read by `outputName` | [Materialized queries](materialized.md) |
 | A dashboard of N independent panels | The batch envelope — up to 32, one snapshot, one permit | [Batch](named-queries.md#batch-one-snapshot) |
+| A detail page joining several tables | One named query with `joins` (≤ 3). The caller's `execute` condition scopes the primary table; the joined tables are read as the query wrote them | [Named queries](named-queries.md) |
 | Ranking by a computed value ("top gainers by %") | A `computed` output on an `aggregate` MQ — physically stored and orderable. Or a `derived` column on a base table. Expression `orderBy` on runtime columns is **not shipped** (BL-183) | [No expression orderBy](browser-tier-read-limits.md#no-expression-orderby) |
 | A record create/edit/delete form | Named mutations with `set`, `returning`, and capped `limit`; `checks` on the table | [Named mutations](named-queries.md#named-mutations) |
 | Server-side validation nobody can bypass | `checks`, `unique`, `references` — all enforced on write | [Insert-time transforms](insert-transforms.md) |
 | A bulk import or a migration | Bulk load, multi-table atomic, idempotency keys, identity-insert | [Bulk load](bulk-load.md) |
 | A high-rate event or telemetry ingest | Write stream (`insert`/`upsert`), plus `route`/`tee` to fan rows out | [Real-time](real-time.md) · [Insert-time transforms](insert-transforms.md) |
 | An append-only audit or event log | Table clustered on time, `ColdPreferred` temperature, durability `strict` | [Time-series](time-series.md) · [Hot/cold](hot-cold.md) |
+| Multi-tenant row isolation (SaaS) | A statement whose `where` binds the tenant column to an attribute. **Whether the table also gets a `partitionKey` is a separate, volume-only decision** | [Policy](../auth/authorization.md#row-conditions) · [Partitioning](partitioning.md#which-one-you-want) |
+| "Only rows I own" | A statement whose `where` holds `{ "column": "ownerId", "op": "eq", "principal": "id" }` | [Row conditions](../auth/authorization.md#row-conditions) |
+| Users who span many tenants/rooms/tickers | An attribute that lists them, and a `where` with `"op": "in"`. No `partitionKey` needed | [Attributes](../auth/principals.md#attributes) |
+| Role-based admin screens | Roles (bundles of statements: `read` / `write` / `delete` per table, `manage`) given to principals | [Roles](../auth/principals.md#roles) |
 | Sign-up, sign-in, refresh, password change | Application auth, called directly from the browser | [Setup and flows](../auth/setup.md) |
 | MFA | TOTP enrolment and verification (HTTP; not wrapped by the SDKs) | [Auth reference](../auth/reference.md) |
 | Password-reset emails, OTP by SMS | Notification providers (SendGrid, GatewayAPI, console for local) | [Email, SMS & notifications](../auth/notifications.md) |
@@ -598,10 +636,15 @@ The path above is the one that removes the most work. It is not the only support
 |---|---|---|---|
 | No WebSockets survive your network path | Keep subscriptions; the client falls back to **HTTP long-poll** automatically | Some latency; more connections | [Real-time](real-time.md) |
 | Streaming is off the table entirely | Poll a named query on an interval | Latency, and permits — measure against the 60/60 s quota | [Direct client access](direct-client-access.md#quotas-and-cost) |
-| Pure Node/JS CI, cannot add .NET | Call `POST …/schema/diff?access=true` on admin from your existing job | Convenience only — the gate still runs | [BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176) |
+| No credential may ever reach the browser | **Pattern C**: your backend holds a key and calls the same named queries | The BFF stays. You keep name identity, reviewability, and bounded cost | [Pattern C](../auth/architecture.md#pattern-c--a-backend) |
+| Users must sign in with your corporate IdP | Backend authenticates against the IdP and holds a key; or use Aouda email/password + MFA | A hosted OAuth authorization server (login page, social login, consent) and token introspection are **not shipped** | [Authentication that exists](direct-client-access.md#authentication-that-exists) |
+| Pure Node/JS CI, cannot add .NET | `npx @aouda/client schema diff` on the schema; review `aouda.json` in the pull request | `aouda plan` and `policy explain` before the merge | [Schema CI/CD](schema-cicd.md) |
 | Your team needs SQL | A trusted service using the fluent query builder; ad-hoc queries on admin | There is **no SQL surface** | [Query execution](query.md) |
-| Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and run the access gate | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
+| Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and review both files | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
+| Native mobile or desktop app, not a browser | Identical to the browser path for data — same data-plane listener, no key, same names. Sign-in: email/password in the app, or **native sign-in through the browser** — the signed-in web front issues a PKCE code, the app redeems it for its own session, MFA carried (**NativeClients, 0.4.0**). Persist the rotated refresh token (`onTokensChanged`) | Nothing | [Native apps](../clients/typescript.md#with-authentication) · [Direct client access](direct-client-access.md) |
+| Edge / serverless functions | Treat them as trusted services with a key; mind connection lifetime and that subscriptions want a long-lived socket | Streaming from a short-lived function | [Direct client access](direct-client-access.md) |
 | Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
+| A browser needs cross-partition analytics | **Refused by design.** Use an `execute` statement whose `where` lists the caller's partitions, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener) |
 | You already have an application | Start from the existing-app branch below | Nothing — it is the same destination | [Adoption](adoption.md) |
 
 ---
@@ -615,19 +658,19 @@ If the application already exists, the destination is identical — you just arr
 | **Read gateway / BFF** | **Delete** | It does not change the data, and it does not change the trust. Replace with named queries. Keep it for cross-service aggregation, third-party calls, and workflow |
 | **Streaming relay** | **Delete** on a current build | Paged snapshots, `gap` + `resume_from`, `re_auth`, `SLOW_CONSUMER`, and authorization-class fan-out all shipped. Check [capacity](adoption.md#capacity-what-changes-when-the-relay-is-gone) first — you lose the relay's fan-out |
 | **Ingest / normalization worker** | **Shrink**, sometimes delete | Checks + derived + route move in. Anything resolving an identifier against another system, quarantining and notifying, or needing a loop stays |
-| **Auth proxy** | **Delete the user-facing half** | Sign-in, refresh, `me`, sign-out are data-plane endpoints designed to be called from a browser. Keep service-key flows server-side, and **do not** delete JWT validation in the services that remain |
+| **Auth proxy** | **Delete the user-facing half** | Sign-in, refresh, sign-out are data-plane endpoints designed to be called from a browser. Keep the flows that need a key server-side, and **do not** delete JWT validation in the services that remain |
 
 Migration order — each step independently shippable and independently revertible:
 
 1. Upgrade, and check the deliberate breaks on the trusted surface against your current usage.
 2. **Move the schema into a file** (`schema export` → git → `diff` on every PR → `apply` on merge). Everything after this depends on it.
 3. Turn on the data-plane listener behind your existing edge, on its own hostname, and **prove** the isolation.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-5. Add the CI access gate **now**, while there is one named query to approve rather than ten.
+4. Open named queries to the browser **one at a time**, by `execute` statement — and if the table is user-scoped, with its `where` in the same change.
+5. Make the diff of `aouda.json` and `aouda.schema.json` a reviewed artifact **now**, while there is one named query to approve rather than ten.
 6. Author named queries and switch reads over behind a flag; run both and compare.
 7. Move ingest normalization that passes the decision test, having first decided where rejected rows go.
 8. Move streaming, subject to the capacity arithmetic, building the direct path while the relay still runs.
-9. Move browser auth to direct data-plane calls; keep service-key flows server-side.
+9. Move browser auth to direct data-plane calls; keep the flows that need a key server-side.
 10. **Delete — in separate commits from the construction.** Never delete a relay and build its replacement in the same change.
 
 **Read [Adopting Aouda in an existing application](adoption.md) for the full treatment**: the SDK coverage matrix (which capabilities have a typed method versus wire-only — planning as if everything does is the most common way an adoption plan goes wrong), the capacity arithmetic for losing the relay's fan-out, the complete adoption checklist, and a troubleshooting table for the migration itself.
@@ -659,10 +702,14 @@ If you are an AI agent writing an application against Aouda, this section is you
 | Give every named query a capped `limit` | Rely on a default page size |
 | Pass schema names as string literals | Guess a name that is not in `aouda.schema.json` |
 | Make subscriptions collection-shaped with a capped list parameter | Subscribe once per row |
+| Write an `execute` statement for **every** named query a browser runs | Assume a query is reachable because it exists — the default is no statement, fail-closed |
+| Write the statement's `where` in the same change for any user-scoped table | Leave a user-owned table readable by every signed-in user |
+| Ship no key in client code | Put any `aouda_` key anywhere a browser can reach — grep the bundle, do not assume |
 | Use the batch envelope for independent panels, joins for dependent ones | Fire N independent executes on page load |
 | Push row validation into `checks` and normalization into `derived` | Validate only in the client, or in one of several callers |
 | State that `conflate` is a no-op on insert-only streams | Recommend `conflate` for a tick feed or event log |
 | Read an aggregate MQ by its `outputName` (`high`, `open`) | Read internal state columns (`_max_bid`, `_first_open_val`) |
+| Run `aouda plan` and `policy explain` before declaring done | Widen a `select` or a statement without reading its diff |
 | Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, a SQL surface, a hosted OAuth login page, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, `computed` MQ outputs, `topNPerGroup`, `firstPerKey`, and a named query's declared `aggregates` / `groupBy` / `perKey` (**BL-796, 0.3.0**) **are** shipped — do not list them as absent) |
 
 ### Per-screen decision procedure
@@ -673,9 +720,9 @@ For each screen or feature, in order:
 2. **Can the read be expressed as one definition** — one table plus ≤ 3 joins, an explicit `select`, a capped `limit`, values as parameters? If yes, write a named query. If it needs a groupBy, declare `aggregates` / `groupBy` in the definition (**BL-796, 0.3.0**); if the rollup must stay current as rows arrive, or be subscribed to, write a materialized query and read *that*. If it needs a lookup, a loop, or an outbound call, it is a service.
 3. **Does the screen need a total?** Add `count: true`. If apply rejects it with `NAMED_QUERY_COUNT_UNBOUNDED`, the definition's cost is not bounded — cover the partition keys or drop the count. Do not add a count endpoint.
 4. **Does it need to update live?** Subscribe by name, collection-shaped. If the table is insert-only, do not reach for `conflate` — it holds value updates only. Model a `latestPerKey` MQ and subscribe to that: it bounds the grid to one row per key, which is the shape you want, though it does not throttle the event rate today.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+5. **Is the data user-scoped?** Put the condition in the `where` of the `execute` statement and verify with `policy explain`. Never filter by identity through a parameter — identity is read from the principal and is never an argument. Stamp it with `"derived": { "identity": "subject" }` and, when read scope and write scope differ, write one statement per action.
 6. **Does it write?** Named mutation, with the row rules as `checks` on the table.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+7. **Re-run the checks.** `schema validate`, `schema diff`, `aouda plan`, `policy explain`.
 
 ### The error contract
 
@@ -689,7 +736,7 @@ Errors are structured and designed to be acted on programmatically:
 }
 ```
 
-Branch on `error`; show `suggestion` to whoever can act on it; log `requestId`. Codes you should recognise without looking them up:
+Branch on `error`; on a refusal of the credential or the policy, show its [`remedy`](../auth/whoami.md#remedy) to whoever can act on it; log `requestId`. Codes you should recognise without looking them up:
 
 | Code | It means | Do |
 |---|---|---|
@@ -703,7 +750,7 @@ Branch on `error`; show `suggestion` to whoever can act on it; log `requestId`. 
 | `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` at apply | Add a numeric cap |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | You parameterized a table, column, operator, or direction | Not permitted, ever. Parameters are values only |
 | `TRANSFORM_ROUTE_UNMATCHED` | A row matched no `route` | Declare a catch-all route to a quarantine table |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| `401 AUTH_CREDENTIAL_MISSING` | No credential on the admin listener, or on a subscription | A browser calls the data-plane; a backend sends its key to admin; sign in before subscribing |
 
 ### Self-verification checklist
 
@@ -712,12 +759,14 @@ Before reporting the work complete:
 - [ ] Every table, query, mutation, and MQ is declared in `aouda.schema.json`; no imperative catalog call anywhere.
 - [ ] `aouda schema validate` is clean.
 - [ ] Every named query has an explicit `select`, a capped `limit`, and ≤ 3 joins.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [ ] Every named query a browser runs has an `execute` statement, for `anonymous`, `signup` or a role.
+- [ ] Every statement on a user-scoped table has a `where`, and `policy explain` was run for one principal per table class.
+- [ ] No `aouda_` key appears in any client-delivered artifact — grepped, not assumed.
 - [ ] Names are string literals from the schema; codegen is optional Args/Row types.
 - [ ] Subscriptions are collection-shaped; the count per connection is well under 32.
 - [ ] Independent panels use the batch envelope.
 - [ ] `conflate` is not used on an insert-only stream, or its no-op is stated where used.
-- [ ] `aouda schema diff --access` runs and passes.
+- [ ] `aouda plan` runs and is clean.
 - [ ] No API, field, or capability was used that is not in the docs — anything absent was reported as absent, with the alternative.
 
 ---
@@ -728,13 +777,15 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 |---|---|---|
 | A read gateway that forwards a query and maps the result back | A deployable artifact that adds no trust, plus a second place the column list can drift | A named query |
 | Hand-rolling WebSocket frames | You will reimplement snapshot paging, `gap`/`resume_from`, `re_auth`, and reconnect — badly | `namedQueries.subscribe` |
+| A key in a frontend bundle | Anyone who reads the bundle holds it, and the admin listener is reachable if it ever escapes your network | No key: `anonymous`'s statements, then the user's session |
 | One subscription per row, each with its own id | 32 per connection is reached at 32 rows; SDK sharing does not merge distinct arguments | A capped list parameter, one subscription per view |
 | Ten independent executes on page load | Ten permits, and ten snapshots that can disagree | The batch envelope: one permit, one snapshot |
 | `conflate` on a tick feed | Zero reduction, and a false sense that throttling is handled | A `latestPerKey` MQ, subscribed — it bounds rows per key, not yet the event rate |
 | Raising `PermitLimit` because of a 429 | You have hidden the design problem and will find it again at scale | Measure, batch, then size the quota from the measurement |
 | A five-way join in one definition | The cost cap is not a tuning knob; a view needing it is telling you to split | Split the view, or pre-aggregate with an MQ |
 | A lookup table encoded as a `conditional` tree in `derived` | Unmaintainable, and it will outgrow the expression substrate | Keep the service — this is the case where a hop earns its place |
-| Adding the access gate after the queries exist | Ten findings approved at once means ten findings unread | Add the gate on day one |
+| An `execute` statement with no `where` now, the condition "in the next sprint" | Every signed-in user can read the table until that sprint happens | One change, both |
+| Reviewing access after the queries exist | Ten findings approved at once means ten findings unread | Review both files from day one |
 | Deleting a hop in the same commit that replaces it | You find out in production that something was load-bearing | Two commits, and exercise the rollback |
 | Hand-editing `materializedQueries` into an existing file | The map is desired state; unlisted MQs are dropped | `schema export` first |
 | Storing a date as a String | Loses comparison, ordering, and bucketing | `Timestamp` or `Date` — [Timestamp type](../reference/timestamp.md) |
@@ -745,10 +796,12 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 - [ ] `aouda.schema.json` is in git; `schema validate` is clean against **every** environment overlay.
 - [ ] `schema diff` runs on every PR; `schema apply` runs on merge; neither is done by hand.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [ ] `aouda plan` runs on every PR that touches `aouda.json`, and `policy explain` for one principal per table class.
 - [ ] The admin listener is unreachable from outside the private network — **probed, not assumed**.
 - [ ] `POST …/query` and `GET /api/databases` return 404 on the data-plane listener.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [ ] No `aouda_` key in any client-delivered artifact — **grepped, not assumed**.
+- [ ] Every statement `anonymous` or `signup` reaches is either on genuinely public data or has a `where`.
+- [ ] `aouda policy explain` output for each table class is recorded in the deployment record.
 - [ ] Every named query has an explicit `select`, a capped `limit`, and ≤ 3 joins.
 - [ ] Subscriptions are collection-shaped; the measured count per connection is well under 32.
 - [ ] Measured permits/minute per identity is recorded, and `PermitLimit` is set **from** that measurement.
@@ -766,6 +819,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 | Symptom | Cause | Action |
 |---|---|---|
+| `404 NAMED_QUERY_NOT_FOUND` for a query you can see in Studio | The browser-tier caller has no `execute` statement for it | Write the statement; `whoami?database=` shows what the caller holds |
+| `401 AUTH_CREDENTIAL_MISSING` | No credential sent to the admin listener, or a subscribe before sign-in | Browser → data-plane; backend → admin with its key |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | `client.table(t).subscribe(...)` sends a target | `client.namedQueries.subscribe(name, args)` |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | The definition has joins, `selectExpr`, `distinct`, or an offset | Only the live path is restricted; HTTP execute still works. Split the view or poll it |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | Item-shaped subscriptions (distinct arguments per row) × N clients | A capped list parameter, one subscription per view |
@@ -803,8 +858,8 @@ Two lists. The first is *not yet*; the second is *not ever*, on purpose.
 | Ad-hoc aggregates built by the caller on the data plane | Declare `aggregates` / `groupBy` in the named query (**BL-796, 0.3.0**), or an aggregate MQ read through a named query when it must be live or subscribed |
 | Subscribe by name for definitions using joins, `selectExpr`, or `distinct` | HTTP execute plus polling, or split the view |
 | The failing row index on a rejected batch | The error names the check; pre-validate or quarantine |
+| A hosted OAuth 2.0 authorization server (login page, social login, third-party consent); token introspection | Aouda email/password (+ MFA); for native apps, native sign-in through the browser (PKCE, **NativeClients, 0.4.0**); or a backend holding a key |
 | Password reset / MFA methods on the client SDKs | The HTTP endpoints exist — call them directly |
-| `schema diff --access` in the npm CLI | The C# `aouda` CLI, or `POST …/schema/diff?access=true` on admin |
 | A SQL query surface | The fluent query builder, or named queries |
 | Full-text search | A stored `derived` normalized column plus prefix/`in` predicates |
 | Graph traversal and vector search from `@aouda/client` | The .NET client or the engine API |
@@ -830,7 +885,7 @@ Files and images (use object storage, keep the key in a column). Background jobs
 - [Division of responsibility](division-of-responsibility.md) — the hop test
 
 **Schema and governance**
-- [Schema management](schema-management.md) · [Schema lifecycle](schema.md) · [Schema CI/CD](schema-cicd.md) · [Access-surface diff](../auth/authorization.md#audit)
+- [Schema management](schema-management.md) · [Schema lifecycle](schema.md) · [Schema CI/CD](schema-cicd.md) · [Plan](plan.md) · [Declared access](declared-access.md)
 - [Partitioning and multi-tenancy](partitioning.md) · [Time-series and clustering](time-series.md) · [Timestamp type](../reference/timestamp.md)
 
 **Auth**
@@ -850,7 +905,7 @@ Files and images (use object storage, keep the key in a column). Background jobs
 - [HTTP API](../reference/http-api.md) · [Changelog](../CHANGELOG.md)
 
 **Worked end-to-end use case**
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [Market data and stock quotes](market-data.md) — quotes, OHLC candle MQs, partitioning, row conditions, watchlists
 
 **Existing applications**
 - [Adopting Aouda in an existing application](adoption.md) — SDK coverage matrix, capacity arithmetic, full migration order and checklist

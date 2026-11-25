@@ -99,7 +99,7 @@ using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "https://db.example.com",
     DatabaseName = "myapp",
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+    Credential = AoudaCredential.Key(Environment.GetEnvironmentVariable("AOUDA_KEY")!), // or Session, SignIn, OidcExchange
     Timeout = TimeSpan.FromSeconds(30),
 });
 ```
@@ -786,22 +786,23 @@ A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was 
 
 `client.GetTable(name).SubscribeAsync()` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
 `In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, 0.9.0**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
+a query, and the **data-plane listener** (the one browsers reach) refuses that by design, whatever the credential: its callers send a
+named-query name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
 
 | You are | Subscribe with | Listener |
 |---|---|---|
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| A trusted backend: a principal with a key and `read` on the table | `client.GetTable(t).Where(...).SubscribeAsync()`, or a named query | **Admin**, or either with a named query |
+| An application end user (a session; a subscription needs a credential, so `anonymous` does not subscribe) | `client.NamedQueries.SubscribeAsync(name, args)`; the principal needs `execute` on the query | **Data-plane** |
 
 A table subscription sent to the data-plane listener fails with `NAMED_QUERY_SUBSCRIBE_REQUIRED`
 (`AoudaRequestException.ErrorCode`). The fix is not a different filter: subscribe **by name** (see
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+[Named queries](../guides/named-queries.md#subscribe-by-name)), or point a trusted backend, with its key, at the admin listener.
 The wire contract is in the [HTTP API reference](../reference/http-api.md#websocket-streaming-protocol).
 
-**What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and events follow the same grants as an HTTP query by
-the same credential; `SubscribeAsync` is authorized by the same role check (`read` on the table, and for a named query every table it
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-on a linked application database opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
+**What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and events hold the rows the caller's `read` statements
+admit, as an HTTP query by the same credential does. `SubscribeAsync` is authorized as that query is (`read` on the table; for a named
+query `execute` on it), and the server re-reads the principal's statements on every subscribe. Every credential that works over HTTP on
+the database, a `_serverauth` principal's included, opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
 
 ### Timestamp columns in a subscription
 
@@ -843,10 +844,11 @@ await foreach (var evt in client.GetTable("orders")
 ```
 
 **It is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: the snapshot and every event are what the
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The flag itself writes nothing to the audit log; a grant that
-decides what a subscription sees is audited once per subscription
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+rows the caller's `read` statements admit (a statement with no `where` admits every partition, those created later too; one whose
+`where` names the partition column, only the partitions it admits). The data-plane listener ignores it. An older server ignores the field and
+answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The flag itself writes nothing to the audit log; an
+unconditional statement on a table other statements restrict is audited once per subscription
+([Audit](../auth/authorization.md#audit)).
 
 ### Named queries and the flag
 
@@ -879,7 +881,7 @@ await foreach (var evt in client.NamedQueries.SubscribeAsync(
 }
 ```
 
-The rows are the credential's grants, flag or not. The alternative is to bind the partition key in the definition's `where` clause: it
+The rows are what the caller's `execute` statement admits, flag or not. The alternative is to bind the partition key in the definition's `where` clause: it
 needs no flag and works on the data-plane listener, where the flag is ignored
 ([`crossPartitionAccess` on the data-plane listener](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
 

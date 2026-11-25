@@ -45,7 +45,7 @@ ASPNETCORE_ENVIRONMENT=Development AOUDA_DEV_ADMIN=true aouda start --data-dir "
 AOUDA-DEV-ADMIN email=<email> password=<password> key=<aouda_...>
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Split it on spaces, then each field on its first `=`. (**BL-1464, 0.16.0**: the field was `server_key=`, a key in the retired format.)
 
 A separate warning goes to the log, with no secret in it. The line is on stdout on purpose: `docker logs` and any log collector that captures
 stdout will hold the password and the key. That is acceptable for a throwaway server and is the reason never to use the flag on a shared one.
@@ -60,7 +60,7 @@ The start fails, naming the setting and never a secret, when the flag is set and
 | The declaration file's `server.principals` declares a credential (a password seed, a key, an OIDC trust) — `SERVER_KEY_DEV_ADMIN_CONFLICT` (**BL-1464, 0.16.0**) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused because server.principals declares a credential ('<name>', ...).` |
 | The node is configured with `Aouda:Join` or `Aouda:ReplicaSet` | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused on a node that is configured for replication` |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Principals of an application auth database may carry credentials beside the flag. The old first-admin setting and the
 `Aouda:Auth:Bootstrap:*` settings and their systemd credentials are not a guard any more: they are refused on their own
 (`SETTING_REMOVED`, **BL-1464, 0.16.0**). A node that becomes a follower by some other means is not detected. (**BL-1427,
 0.14.0**) `Aouda:Auth:DevAdmin` is restart-only: a reload lists a change to it under `restartRequired`.

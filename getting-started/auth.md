@@ -51,7 +51,7 @@ Do not paste that line into a document. The examples below use placeholders.
             {
               "actions": ["write"],
               "resources": ["rates/table/DepositQuote"],
-              "where": { "column": "source", "op": "in", "value": ["tullett"] }
+              "where": { "and": [ { "column": "source", "op": "in", "value": ["tullett"] } ] }
             }
           ]
         }

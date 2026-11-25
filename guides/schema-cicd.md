@@ -14,13 +14,13 @@ This guide describes how to automate Aouda schema management in CI/CD: run **dif
 
 | Trigger | Action | Purpose |
 |--------|--------|--------|
-| **Pull request** | Run `schema diff --access`, post plan as PR comment | Review schema **and** access-surface widening before merge |
+| **Pull request** | Run `schema diff`, post plan as PR comment | Review the schema before merge, changed named queries and mutations included |
 | **Merge to main** | Run `schema apply` against **staging** | Keep staging in sync with repo |
 | **Release / tag** | Run `schema apply` against **production** | Deploy schema to prod only on release |
 
 You can implement this with **.NET** (`dotnet aouda`) or **TypeScript** (`npx @aouda/client`). Ready-to-use GitHub Actions workflows are in the engine repo under `examples/github-actions/`.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**What widens access** is a statement in `aouda.json`, and the body of a named query or mutation in `aouda.schema.json` (a plain diff reports it as `UpdateNamedQuery` / `UpdateNamedMutation`). Review both diffs, and run [`aouda plan`](plan.md) on the declaration. The access-surface diff (`--access`) is removed with the 0.14 access model (**BL-1464, 0.16.0**): a table carries no security, so a schema change cannot widen access by itself; a request that still asks for it is refused `400 INVALID_REQUEST`. Named queries, named mutations, and materialized queries belong in `aouda.schema.json` (`namedQueries` / `namedMutations` / `materializedQueries`). Omitting `materializedQueries` does not drop live MQs; a present map (including `{}`) is desired state for the whole MQ set.
 
 ---
 
@@ -81,12 +81,12 @@ jobs:
           AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
           AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
         run: |
-          PLAN=$(dotnet aouda schema diff --access 2>&1 || true)
+          PLAN=$(dotnet aouda schema diff 2>&1 || true)
           echo "plan<<EOF" >> "$GITHUB_OUTPUT"
           echo "$PLAN"    >> "$GITHUB_OUTPUT"
           echo "EOF"      >> "$GITHUB_OUTPUT"
-        # Exit 1 from --access means hasWidening — fail the job:
-        # run a second step `aouda schema diff --access` without swallowing the exit code.
+        # `aouda plan --declaration aouda.json --skip-secrets` checks who may do what: run it as a step
+        # of its own, without swallowing the exit code.
 
       - name: Post diff as PR comment
         uses: peter-evans/create-or-update-comment@v4
@@ -175,9 +175,9 @@ Copy these three files into `.github/workflows/` in your repository, configure t
 - `AOUDA_STAGING_SERVER` — base URL of staging Aouda (e.g. `https://aouda-staging.example.com`).
 - `AOUDA_PROD_SERVER` — base URL of production Aouda.
 - `AOUDA_DATABASE` — database name (or use separate secrets per environment).
-- `AOUDA_TOKEN` — server admin key or bearer token, **required when the target database has auth
-  enabled** (**BL-464, 0.1.37**). Without it the `schema` commands exit `2` with
-  `AUTH_TOKEN_MISSING`; `--token` / `-t` on the command line overrides it.
+- `AOUDA_TOKEN` — a key or a session token of a principal with `manage` on the database, **required**
+  (**BL-464, 0.1.37**). Without it the `schema` commands exit `2` with
+  `AUTH_CREDENTIAL_MISSING`; `--token` / `-t` on the command line overrides it.
 
 Use `AOUDA_SERVER`, `AOUDA_DATABASE` and `AOUDA_TOKEN` in the workflow so the CLI picks them up; the examples use env vars set from secrets.
 

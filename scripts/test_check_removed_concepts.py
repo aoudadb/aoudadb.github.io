@@ -124,6 +124,105 @@ class RemovedConceptsTests(unittest.TestCase):
         # The limited run still fails because backup.md has the name. A clean limit passes.
         self.assertEqual(crc.main(["--root", root, "--paths", "auth/*.md", "--no-vocabulary"]), 0)
 
+    # ── The fourth rule: stand-ins (BL-1867) ──
+
+    def test_each_stand_in_is_refused_once_is_enough(self) -> None:
+        for fragment in crc.STAND_INS:
+            page = f"Before.\n{fragment} and more.\nAfter.\n"
+            findings = crc.scan_stand_ins("guides/a.md", page)
+            self.assertEqual([f.split(" ")[0] for f in findings], ["guides/a.md:2:"], fragment)
+        for start in crc.STAND_IN_LINES:
+            self.assertEqual(len(crc.scan_stand_ins("guides/a.md", f"  {start}, 0.16.0**).\n")), 1, start)
+
+    def test_a_stand_in_in_code_is_refused(self) -> None:
+        page = "```typescript\nconst c = new AoudaClient({\n// client.whoami() — apiKey is an aouda_ key, or session, never both.\n});\n```\n"
+        self.assertEqual(len(crc.scan_stand_ins("clients/typescript.md", page)), 1)
+        self.assertEqual(crc.main(["--root", _repo({"clients/typescript.md": page})]), 1)
+
+    def test_an_ordinary_sentence_is_not_a_stand_in(self) -> None:
+        page = (
+            "A key is minted on the principal. See [Access](../auth/index.md) (**BL-1464, 0.16.0**).\n"
+            "A principal may act; its credential is an `aouda_` key or a session.\n"
+            "`client.whoami()` says who the credential is.\n"
+        )
+        self.assertEqual(crc.scan_stand_ins("guides/a.md", page), [])
+
+    def test_a_prose_line_three_times_is_refused_and_twice_is_not(self) -> None:
+        line = "Who may do it is decided by the statements of the caller, as everywhere else."
+        twice = f"One.\n{line}\nTwo.\n- {line}\n{line}\n"
+        self.assertEqual(crc.scan_stand_ins("guides/a.md", twice), [])  # a list item is another line
+        thrice = twice + f"\n  {line}\n"
+        findings = crc.scan_stand_ins("guides/a.md", thrice)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("guides/a.md:2: the same line 3 times", findings[0])
+
+    def test_a_line_once_each_in_four_pages_is_refused_and_in_three_is_not(self) -> None:
+        line = "Who may do it is decided by the statements of the caller, as everywhere else."
+        pages = {f"guides/{name}.md": f"# {name}\n\n{line}\n" for name in "abcd"}
+        findings = crc.scan_across_pages(pages)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("the same line in 4 pages", findings[0])
+        self.assertEqual(crc.main(["--root", _repo(pages), "--no-vocabulary"]), 1)
+        del pages["guides/d.md"]
+        self.assertEqual(crc.scan_across_pages(pages), [])
+        template = {f"guides/{name}.md": "## A heading of the template that every one of the pages has\nIf this is your question, then here is where to jump to:\n" for name in "abcde"}
+        self.assertEqual(crc.scan_across_pages(template), [])
+
+    def test_code_tables_and_paths_may_repeat(self) -> None:
+        page = (
+            "```csharp\nawait using var server = await AoudaTestServer.StartAsync(new AoudaTestServerOptions());\n```\n" * 4
+            + "> ```bash\n> docker compose up -d with many words on one line of a quoted fence\n> ```\n" * 4
+            + "| Field | Type | Required | Allowed values | What it is and why it matters |\n" * 4
+            + "- `src/Aouda.Server/Controllers/TablesController.cs and a long path in code`\n" * 4
+        )
+        self.assertEqual(crc.scan_stand_ins("guides/a.md", page), [])
+
+    def test_a_pending_page_is_not_read_and_still_exists(self) -> None:
+        self.assertEqual(list(crc.STAND_INS_PENDING), ["guides/cloud-hub.md"])
+        self.assertEqual(crc.scan_stand_ins("guides/cloud-hub.md", crc.STAND_INS[0]), [])
+        repo = os.path.dirname(_HERE)
+        for path, reason in crc.STAND_INS_PENDING.items():
+            self.assertTrue(reason)
+            with open(os.path.join(repo, *path.split("/")), encoding="utf-8") as handle:
+                text = handle.read()
+            self.assertTrue(any(crc._is_stand_in(l) for l in text.split("\n")), f"{path} is clean: remove its row")
+
+    def test_no_published_page_holds_one(self) -> None:
+        repo = os.path.dirname(_HERE)
+        findings = []
+        pages = {}
+        for rel in crc.tracked_files(repo):
+            if crc.exempt(rel) or not rel.endswith((".md", ".txt")):
+                continue
+            full = os.path.join(repo, *rel.split("/"))
+            if os.path.isfile(full):
+                with open(full, encoding="utf-8-sig", newline="") as handle:
+                    pages[rel] = handle.read()
+                findings.extend(crc.scan_stand_ins(rel, pages[rel]))
+        self.assertGreater(len(pages), 50)
+        self.assertEqual(findings + crc.scan_across_pages(pages), [])
+
+
+class TheRewrite(unittest.TestCase):
+    """The commits that did it. Needs the history (a shallow clone has none)."""
+
+    def _count(self, ref: str) -> int:
+        repo = os.path.dirname(_HERE)
+        listed = subprocess.run(["git", "-C", repo, "ls-tree", "-r", "--name-only", ref], capture_output=True, text=True)
+        if listed.returncode != 0:
+            self.skipTest(f"{ref} is not in this clone")
+        total = 0
+        for rel in listed.stdout.split():
+            if rel.endswith((".md", ".txt")) and not crc.exempt(rel):
+                text = subprocess.run(["git", "-C", repo, "show", f"{ref}:{rel}"], capture_output=True, text=True, encoding="utf-8").stdout
+                total += len(crc.scan_stand_ins(rel, text))
+        return total
+
+    def test_the_rewrite_fails_and_what_was_before_passes(self) -> None:
+        self.assertEqual(self._count("c8ca688^"), 0)
+        self.assertGreater(self._count("f9afb4f"), 600)
+        self.assertGreater(self._count("a259eb2"), 400)
+
 
 if __name__ == "__main__":
     unittest.main()

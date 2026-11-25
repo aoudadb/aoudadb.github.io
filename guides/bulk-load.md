@@ -58,7 +58,7 @@ Operationally, this gives Aouda one ingest primitive that can be used by:
 
 Scope boundaries:
 - Bulk load optimizes the ingest path; it is not a replacement for normal row-level write APIs.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- Bulk load is not a per-row-condition write. It writes whole tables, so the caller needs an **unconditional** `write` statement (no `where`) on **`<db>/table/*`**: `:begin`, every `:append` and `:commit` refuse otherwise (`403 AUTH_POLICY_DENIED`, whose `remedy` is the statement to grant). A statement that names only the tables being loaded does not open the routes, and one with a `where`, which would allow an ordinary insert, does not admit a load. (Exactly: a `write` statement on `<db>/table/*`, and one with no `where` on every table the load locks.) The built-in roles `writer` and `admin` hold it. (**BL-1031, 0.5.0; BL-1464, 0.16.0**) See [Row conditions](../auth/authorization.md#row-conditions).
 - It guarantees atomic commit at the job boundary (`BulkLoadCommitted`), not partial "progressively visible" reads.
 - It currently does not provide persistent server session reconstruction across restarts (see `2.18`, `BL-067`).
 
@@ -400,10 +400,11 @@ difference is *when* the work is paid — per load, or once for many — not how
    where it committed in the log, and crash recovery re-applies a `Strict` table's delete (logged by key) only to the bulk segments
    loaded before it; on `Recent` / `BestEffort` tables a delete is replayed onto exactly the copies it matched. Before, deleting a
    key, bulk loading it again and crashing before the next checkpoint removed the loaded row.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-   refusal names each refused table and the grant it lacks, and starts no session. A job over such a table writes its
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-   credential that appends to the job; never per `:append` after that. (**BL-1031, 0.5.0; BL-1227, 0.9.0**)
+8. A load is refused at `:begin`, at every `:append` and at `:commit` unless the caller holds a `write` statement on `<db>/table/*`, and one with no
+   `where` on every table it writes (an unconditional one on `<db>/table/*` is both). A caller whose `write` statement has a `where` is refused, although it may insert the rows the condition admits. The
+   refusal names each refused table, and starts no session. A job over a table other statements restrict writes its
+   `unconditional_access` audit rows once per credential: at `:begin` (with the `jobId`), and at the first `:append` of another
+   credential that appends to the job; never per `:append` after that. (**BL-1031, 0.5.0; BL-1464, 0.16.0**)
 
 ### What a frame carries is what JSON carries
 
@@ -997,7 +998,7 @@ Tests: `BulkLoadReplicaCoordinatorTests`, `BulkLoadCompactionWatermarkTests`.
 
 1. Engine registers in-flight job in `BulkLoadResumeWatchdog` when bulk load starts.
 2. If job exceeds resume window without successful close, watchdog emits `BulkLoadAborted`.
-3. The credential that began the job, or a database admin who also holds `bulkload`, can force-abort via `POST .../bulk-load:force-abort`, which also emits an abort frame. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**).
+3. The principal that began the job, or one that holds `manage` on the database beside `write` on `<db>/table/*`, can force-abort via `POST .../bulk-load:force-abort`, which also emits an abort frame. Anyone else is `403 AUTH_POLICY_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**).
 4. Registry marks session aborted after durable WAL abort emission.
 
 Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort` cases).
@@ -1190,11 +1191,11 @@ Expected checks:
 
 ### Scenario 3: Operator force-abort of stuck job
 
-When to use: in-flight job is blocked and client path is no longer trusted. Force-abort stays the credential that began the job, or a database admin who also holds `bulkload`. Another `bulkload` holder is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**).
+When to use: in-flight job is blocked and client path is no longer trusted. Force-abort stays with the principal that began the job, or one that holds `manage` on the database. Another principal that may load is `403 AUTH_POLICY_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**).
 
 Steps:
 1. The credential that began the job finds it on `GET .../bulk-load:list` (the list contains only jobs that credential began). A database admin who did not begin the job is omitted from that list and needs the job id from outside it.
-2. Call `POST .../bulk-load:force-abort` with that `jobId` and a reason. The beginning credential may call it, and so may a database admin who also holds `bulkload`.
+2. Call `POST .../bulk-load:force-abort` with that `jobId` and a reason. The beginning principal may call it, and so may one that holds `manage` on the database.
 3. Status stays the owner's. The beginning credential confirms `GET .../{jobId}` returns `aborted`. An admin who did not begin the job gets `403` on that status.
 
 Expected checks:
@@ -1371,6 +1372,7 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
+| `403 AUTH_POLICY_DENIED` on `:begin`, `:append` or `:commit` (**BL-1031, 0.5.0; BL-1464, 0.16.0**) | The caller holds no `write` statement on `<db>/table/*` (the message names that), or none without a `where` on a table in the load (the message names the table) | Give the loading principal a `write` statement with no `where` on `<db>/table/*`, or a role that holds one (`writer`, `admin`); a statement on the loaded table alone is refused too. Ordinary inserts remain the write path of a principal whose statement has a `where`. |
 | "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, 0.6.0**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
 | `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, 0.6.0**) | The level is not `strict` or `os` (lower case); or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into an edge or vector table, needs `durability: "strict"` in an `os` database (omitted, it inherits `os`). |
 | `GET {jobId}` answers `lost` with `durability: "os"` (**Lead S26c, 0.6.0**) | The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was dropped whole | Load it again with the same idempotency key: it no longer names a commit. |

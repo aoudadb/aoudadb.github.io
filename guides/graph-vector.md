@@ -68,7 +68,7 @@ AI applications require three data modalities — structured rows, graph relatio
 
 ### Operational outcome
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+A single Aouda engine instance can store tabular fact rows, graph edge relationships, and dense vector embeddings in the same physical storage tree, served by the same WAL, replicated by the same replication substrate, and governed by the same policy (statements with row conditions). The unified retrieval pipeline (filter → ANN → graph expand → re-rank) runs inside one database.
 
 ### Scope boundaries (Stage 1)
 
@@ -155,7 +155,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 - Late-arriving vectors are flushed inline; the cell-aware `_delta/` merge is removed (**ColumnarRead, 0.3.0**)
 - `InsertVectorsAsync`, `DeleteVectorAsync` on `AoudaEngine`
 - ANN search operator: `NearestNeighborsAsync` (IVF-pruned brute-force scan, Stage 1)
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- Row conditions for vector search and edge traversal: the caller's `read` statements, as one `TableReadPolicy` (**BL-1464, 0.16.0**; ADR 0071)
 
 **MdVector storage:**
 - `DataType.MdVector` column type with `MdVectorColumnConfig` (`Dimensions`, `MaxTokens`, `Distance`, `Fde`)
@@ -245,6 +245,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Filtered ANN layer 1 (partition pruning) | Yes | — | — | `src/Aouda.Engine.Api/AoudaEngine.cs` `NearestNeighborsAsync` `partitionKey` param; ADR 0027 (columnar) §Filtered-ANN | Free; uses ADR 0009 partition machinery |
 | Filtered ANN layer 2 (pre-filter + brute-force) | — | — | Yes | ADR 0027 (columnar) §Stage-2 | Stage 2 |
 | Filtered ANN layer 3 (ACORN-1 + HNSW) | — | — | Yes | ADR 0027 (columnar) §Stage-3 | Stage 3 |
+| Row conditions for vectors/edges (`TableReadPolicy`) | Yes | — | — | `src/Aouda.Engine.Api/AoudaEngine.cs` (the overloads that take `TableReadPolicy`); ADR 0071 | The overloads without one are the embedded, no-policy path |
 | Stage-4 manifest reservation fields | Yes | — | — | `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs` lines 71–83; ADR 0031 | Schema only; no Stage-4 runtime |
 | Embedding model versioning per segment | Yes | — | — | `SegmentManifest.EmbeddingModelVersion`; `InsertVectorsAsync` `embeddingModelVersion` param | Enables multi-model coexistence and future Drift-Adapter |
 | Matryoshka dims metadata | Yes | — | — | `VectorColumnConfig.MatryoshkaDims`; `src/Aouda.Engine.Core/Schema/VectorConfig.cs` | Stored in catalog; tiered retrieval not yet implemented |
@@ -325,19 +326,23 @@ The `IvfCellId` and `QuantizationMethod` fields in `SegmentManifest` identify wh
 
 These fields are serialized by `ManifestSerializer.cs` for every manifest but have no runtime effect until Stage 4. Contributors **must not** repurpose them without a superseding ADR.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+### 2.7.6 Row conditions compose with graph/vector queries
 
-Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissionContext? permissions` parameter. When non-null:
-- `ResolveEdgeAccess` calls `AdraEdgeAccessFilter` to resolve the set of allowed partition keys.
-- `ResolveVectorAccess` calls `AdraVectorAccessFilter` similarly.
-- An empty allowed-partition set returns an empty result immediately (deny-by-default).
-- `null` permissions means embedded mode, with no auth context: unrestricted on a table no auth database governs, and **empty** on an
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- A credential that holds an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) on the
-  table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
+On the server, traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) and `:nearest` need a `read` statement on the edge or vector
+table, and read only the rows its `where` admits (**BL-1464, 0.16.0**):
+- The condition runs in the scan of every hop of a traversal: an edge it does not admit is not followed.
+- A vector search checks the candidates' rows. A condition that is exactly an `eq` / `in` of literals on the table's first partition-key
+  column scans those vector partitions only (no unpartitioned piece).
+- A condition that admits nothing (a missing attribute, a column the table lacks) returns an empty result without a read. No statement at
+  all is `403 AUTH_POLICY_DENIED`.
+- The engine API's overloads without a `TableReadPolicy` are embedded mode, with no policy: every row.
+- An unconditional statement on a table other statements restrict writes one `unconditional_access` row (`operation` `graph` or `vector`, the
+  edge or vector table, once per request). (**BL-1289, 0.9.0**)
+- A caller whose only `read` statements on the table carry [`embargoSeconds`](../auth/authorization.md#embargo)
+  is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
   and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, 0.9.0**)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Key invariant:** Filtered ANN layer 1 (partition pruning) and a condition on the partition column are the same mechanism — the condition narrows which partitions the ANN scan considers, at no extra cost.
 
 ---
 
@@ -363,12 +368,12 @@ InsertEdgesAsync / InsertVectorsAsync
 TraverseAsync / KHopNeighborhoodAsync / ShortestPathAsync
     └─ TraverseOperator / KHopNeighborhoodOperator / ShortestPathOperator
            └─ Scans CSR sealed segments; optional CSC for bidirectional BFS
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+           └─ Row conditions of the caller's read statements (TableReadPolicy), in the scan of every hop
 
 NearestNeighborsAsync
     └─ NearestNeighborsOperator
            └─ IVF cell pruning → brute-force distance over fp32 / decoded RaBitQ pages
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+           └─ Row conditions of the caller's read statements (TableReadPolicy), on the candidates' rows
            └─ Multi-partition fan-out merge (ADR 0032 M2 fix)
 ```
 
@@ -435,6 +440,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Capability question | Typical systems | Aouda approach | User impact |
 |---|---|---|---|
 | Store graphs, vectors, and rows together | Requires Postgres + Neo4j + Pinecone (3 systems) | All three in one engine; same WAL, same tiering, same auth | Zero ETL between modalities; one on-call rotation |
+| Unified authorization across modalities | Each system enforces its own model; joins across ACLs require bespoke glue | One policy: a statement's row condition governs rows, edge traversal and ANN search | Row-level access composes with graph traversal and ANN at query time |
 | IVF cells as columnar partitions | Most vector DBs maintain a parallel index subsystem | Aouda reuses ADR 0009 partition machinery for IVF cell routing | No separate index management; tiering policies apply to vector cells the same as to row partitions |
 | Quantization in cold tier, raw fp32 hot | Typical: quantize globally or not at all | Aouda stores raw fp32 in hot segments; cold sealing applies RaBitQ/PQ automatically | Precision for re-ranking hot results; cost efficiency for cold recall |
 | Embedding model version per segment | Most systems assume one model per table | `EmbeddingModelVersion` recorded per segment; multiple versions coexist | Zero-downtime model upgrades (old + new segments query simultaneously); Stage-2 Drift-Adapter uses this metadata |
@@ -481,13 +487,14 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, 0.9.0**; it was "no partition" in one place and a partition in another). The insert's row must satisfy the `where` of the caller's `write` statement, as any insert's (`403 AUTH_ROW_DENIED`) |
 
 ### NearestNeighborsAsync query parameters
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `partitionKey` | `string?` | `null` | Filtered ANN layer 1: restricts scan to one partition. Pass `null` to scan all partitions. Any other value, the empty string included, names one partition (**BL-1184, 0.9.0**). |
+| `rows` | `TableReadPolicy` | (an overload) | The row condition of the caller's `read` statements, which the server passes. The overload without it is embedded mode, with no policy |
 | `k` | `int` | — (required) | Maximum results to return; engine returns ≤ k results ordered by ascending distance |
 
 ### Stage-4 manifest reservation fields (ADR 0031 Decision-6)
@@ -567,7 +574,7 @@ curl -X POST "$AOUDA/api/databases/social/tables/follows/edges:khop" -H "Authori
 ```
 
 The reads (`edges:traverse`, `edges:khop`, `edges:shortest-path`, `:nearest`) take the same freshness parameters as `POST …/query`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+(`at_least`, `waitMs`, …), and the caller's row conditions apply to them as in §2.7.6.
 
 ### .NET examples
 
@@ -821,7 +828,7 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | Vector cell seal | `VectorSegmentFlusher` | At each HRA freeze-and-swap per column |
 | Compaction floor suppressed | `Perf.CompactionFloorSuppressed` | HRA triggered but below `MinFlushRows` / `MinFlushBytes` |
 | WAL replay edge/vector frames | WAL replay log | On `AoudaEngine.OpenAsync` after crash |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| Policy deny-early | `AoudaEngine` (empty result returned) | `TableReadPolicy.AdmitsNothing` |
 
 ### Recovery expectations
 
@@ -851,7 +858,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | `ShortestPathAsync` is slow or returns a long path | `StoreCsc: false`; using unidirectional BFS | Re-create the edge table with `StoreCsc: true` for bidirectional BFS (requires data reload) |
 | ANN recall is low | Too few IVF cells probed relative to corpus distribution | Increase `IvfCells` (requires recreating column config); or verify `partitionKey` is not too restrictive |
 | Edge traversal returns unexpected nodes | Cross-partition traversal not supported in Stage 1; edges from other partitions not reachable from a cross-partition query | Ensure the start node's partition is accessible and edges are routed to the same partition as their source |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| Traversal or `:nearest` returns nothing | The caller's `read` statement has a `where` that admits no edge or vector row: a missing attribute, a value of another partition | `whoami` shows the statement and the principal's attributes. No statement at all is `403 AUTH_POLICY_DENIED`, not an empty `200` |
 
 ---
 
@@ -929,7 +936,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - ADR 0014 — time-series clustering (delta-merge model reused for edges/vectors)
 - ADR 0021 — HRA freeze-and-swap (same mechanism for `EdgeHraBuffer` / `VectorHraBuffer`)
 - ADR 0022 — licensing (embedded parity for graph/vector)
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- ADR 0071 — principals and policy (row conditions on edges and vectors)
 - ADR 0030 — bulk-load replication (covers `BulkLoadAsync` write path)
 - ADR 0032 — cross-modal authorization (`AdraEdgeAccessFilter` / `AdraVectorAccessFilter`)
 

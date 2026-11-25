@@ -145,7 +145,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **Per-database memory governance** — `ServerMemoryBudgetManager` with per-engine budget tracking.
 - **Per-database health checks** — `DatabaseHealthCheck` included in `/health/detailed`.
 - **Unified CLI** — `aouda start`, `aouda stop`, `aouda databases list|get|create|drop`, `aouda version`.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **`Aouda.Server.exe` and `aouda` are one program** — `Aouda.Server.exe start` runs the server; operator workflows go through the same commands as `aouda`.
 - **First-run bootstrap** — `GET /api/auth/setup/status`, `aouda init`.
 
 ### Planned / Proposed
@@ -551,7 +551,7 @@ aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durab
 | `databases.<db>.onWriteConcernTimeout` | `string` | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` |
 | `databases.<db>.schema` | `string?` | `null` | Path of a schema file the server applies to this database at start, after the declared databases and the auth startup and before the server is ready. Absolute, or relative to the directory of `aouda.json`. Refused on a `"kind": "auth"` database. Its overlay (`<stem>.<env>.json` beside it) is merged over it for the process setting `Aouda:Environment` (`--env`; **BL-1463, 0.16.0**), which replaces the old `SchemaEnvironment`. Omitted = nothing is applied (**BL-1388, 0.11.0**) |
 | `databases.<db>.schemaAllowDestructive` | `bool` | `false` | Lets the start-time apply run destructive changes (drop table, drop column). When `false` they are refused, logged, and the start goes on. Needs `schema` (**BL-1388, 0.11.0**) |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| `databases.<auth>.roles.<role>`, `.principals.<name>`, `.signup` | `object` | none | The access section of a `"kind": "auth"` database: roles (`description`, `statements`), principals (`roles`, `statements`, `attributes`, `credentials`) and what a sign-up may do. Created, updated and removed to match the file at start and reload; the built-in roles `admin`, `writer` and `reader` cannot be declared (**BL-1464, 0.16.0**; [Declared access](declared-access.md)) |
 
 An invalid or unreadable `schema` file, or a declared role the roles API would refuse, **fails the start** and names the database and the file or role. A destructive change without `schemaAllowDestructive` is *refused*, not failed: it is logged and kept in the server's schema-apply state, and the catalog stays as it is (**BL-1388, 0.11.0**). See [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start).
 
@@ -698,9 +698,9 @@ aouda databases drop   --name trading --server http://localhost:5000
 # One-off version check
 aouda version
 
-# Offline admin bootstrap (Aouda.Server.exe only)
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-    --password-stdin --data /var/aouda/data
+# The first operator, on a running server in setup mode
+printf '%s' "$PASSWORD" | aouda init --admin-email admin@example.com \
+    --admin-password-stdin --server http://localhost:5000
 ```
 
 ---
@@ -1005,7 +1005,7 @@ curl -s http://localhost:5000/api/databases
 
 **Related Functionality docs:**
 - `docs/dev/Functionality-HotCold-And-Memory.md` — Memory budget internals; `MemoryBudgetManager` per-engine.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- `docs/dev/Functionality-Partitioning-And-Multitenancy.md` — `DatabaseManager` narrative and partition details; cross-link from here.
 - `docs/dev/Functionality-Replication-And-Clustering.md` — Wire protocol v2/v3, write concern, table subscription filtering.
 - `docs/dev/Functionality-Cloud-And-Hub.md` — CLI unification, Helm chart, Hub architecture.
 - `docs/dev/Functionality-Storage-And-Persistence.md` — On-disk layout for each database's segment files.
@@ -1016,4 +1016,4 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 - **`Aouda.Server.exe` vs `aouda` CLI internals** — The exact CLI command surface of `aouda databases get` and `drop` (P16 SA6) is documented at the HTTP layer; the internal CLI command handler (`DatabasesCommandHandler`) is not confirmed at method-level in source materials. No test artifacts for these CLI sub-commands are confirmed.
 - **TypeScript multi-database API** — Not verifiable in this repository; described as delivered in P6 and P16 reports in the `aouda-client-ts` sibling repo.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **Admin endpoint authentication details** — The `/admin/*` routes need `manage` on `server`; the route table is in the [HTTP API](../reference/http-api.md#route-actions) rather than repeated here.

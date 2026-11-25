@@ -87,7 +87,7 @@ printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
 
 The password goes on standard input, never on curl's command line.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+There is no command that writes the admin into the data directory beside the running server: the server holds it. Use the setup route, as above, or declare the operator.
 
 ## Declaring databases, keys and schema files
 

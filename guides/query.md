@@ -205,7 +205,7 @@ At a high level:
 
 1. HTTP receives `QueryMessage` in `QueryController.ExecuteQuery`.
 2. `QueryTranslator.Validate` performs request-level checks (database/table presence, `offset`, operators, order-by constraints, recursive `Groups` validation).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+3. The caller's `read` statements are asked (`403 AUTH_POLICY_DENIED` with none), and their `where`s compiled into one row condition.
 4. `QueryTranslator.Translate` builds an immutable `TableQuery` chain with:
    - projection,
    - predicate,
@@ -332,7 +332,7 @@ Precedence/override notes:
 - Response format: the JSON answer is always column arrays; `Accept` chooses JSON or column-batch frames (**Lead S12, 0.6.0**: the `format` parameter is gone).
 - Read preference: query parameter overrides header when both are present.
 - Limit handling: request value is normalized by translator (`0` special-case, negative->default, positive->cap).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- Cross-partition behavior: the flag is a cost waiver for the partition-filter guard, not a visibility grant. A caller whose `read` statement has a `where` sees exactly the rows it admits, with the flag or without; a caller with no `read` statement on the table is still refused. There is no rate limit on it, and no setting for one (a leftover key is ignored). (**BL-1227, 0.9.0**) See [Row conditions](../auth/authorization.md#row-conditions).
 
 ### Operator and query-option glossary
 
@@ -555,6 +555,7 @@ Quick-answer matrix:
 | `Database is required` or path/body mismatch | Missing or inconsistent `database` field | Ensure body `database` matches `/api/databases/{db}` route. |
 | `ThenBy() requires OrderBy()` exception | Secondary sort called first | Add `OrderBy()` before `ThenBy()` in query chain. |
 | Query returns fewer rows than expected | Default/capped limit applied | Set explicit `limit` (or `0` when intentionally unbounded). |
+| Cross-partition query rejected | `PARTITION_FILTER_REQUIRED` without the flag; or `AUTH_POLICY_DENIED`: the caller holds no `read` statement on the table (the flag never widens visibility); or the request came through the data-plane listener, which ignores the flag | Send `crossPartitionAccess` on the admin listener, or bind the partition key in the query, or in the statement's `where` |
 | Nested boolean request works over HTTP but not SDK builder | SDK does not expose groups API yet | Use raw protocol payload or flatten conditions; track `BL-044`. |
 | Slow cold predicate query | Limited pruning selectivity or high decode volume | Validate predicate columns, check pruning counters, review data distribution/segment stats. |
 

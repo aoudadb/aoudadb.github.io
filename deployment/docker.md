@@ -192,6 +192,9 @@ database opens, and the start exits `78`; the message names the replacement and 
 
 | Removed | Declare instead |
 |---|---|
+| Any setting under `Aouda:Auth:Bootstrap` | A key-only operator, as above |
+| The first-admin email and password settings | A first admin by password seed, as above |
+| The keys-file setting (the identities file) | Each key's principal in `databases.<auth>.principals` or `server.principals`, with its `credentials` ([Declared access](../guides/declared-access.md)) |
 | The systemd credentials `aouda-server-key`, `aouda-admin-password` | Remove the `LoadCredential=` line and declare as above |
 
 Before 0.14.0 a declared server key did **not** end setup mode: it was inert until a human created an admin, so a fully
@@ -251,26 +254,18 @@ JSON.
 The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
 else missing).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-`1` with:
-
-```
-The data directory '/data' is in use by another Aouda process (it holds Server/aouda.lock). Two processes on one data directory are not safe, so nothing was opened. To create the first admin on a running server in setup mode, call POST /api/auth/setup from the server's own host; otherwise stop the server and run this command again.
-```
-
-Before, it succeeded: a second process wrote to the live data directory, and the running server stayed in setup mode until a
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-command line):
+or with the CLI in the container, which calls the same route:
 
 ```bash
-docker compose stop aouda
-printf '%s' "$ADMIN_PASSWORD" | docker compose run --rm -T --entrypoint aouda aouda \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-docker compose start aouda
+printf '%s' "$ADMIN_PASSWORD" | docker compose exec -T aouda aouda init \
+  --admin-email admin@example.com --admin-password-stdin --server http://localhost:5000
 ```
 
+The command of 0.15 and earlier that wrote the admin into a stopped server's data directory is removed (**BL-1464, 0.16.0**): set up
+through the running server, or declare the operator.
+
 The image carries an `aouda` command on `PATH` (a thin wrapper around `dotnet Aouda.Server.dll`); the image's entrypoint is
-`dotnet Aouda.Server.dll start`, hence `--entrypoint aouda` for a one-off command.
+`dotnet Aouda.Server.dll start`, hence `--entrypoint aouda` for a one-off command in a container of its own.
 
 Or with Docker secrets, which is the better answer for anything long-lived:
 
@@ -283,7 +278,7 @@ secrets:
     file: ./admin-password
 ```
 
-then `--password-file /run/secrets/aouda_admin_password`.
+then `--admin-password-file /run/secrets/aouda_admin_password`, or name the file as the first admin's password seed in the declaration (below).
 
 **Secrets of the declaration from Docker secrets** (**BL-1464, 0.16.0**). The declaration's key root and a password seed can be
 read from a secret file, so they never pass through an environment variable: `"keyRoot": { "file": "/run/secrets/aouda_key_root" }`,
@@ -292,7 +287,7 @@ file's directory, and `$NAME` / `${NAME}` in the path are expanded from the envi
 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused) with one trailing newline ignored; a
 missing, unreadable or empty file stops the start. Docker mounts file-based secrets as `0444` by default, and this source does not
 refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md#secret-files). The identities file's
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`{ "file" }` secrets (**BL-1389, 0.11.0**) went with the identities file, whose setting is refused (`SETTING_REMOVED`).
 
 ---
 

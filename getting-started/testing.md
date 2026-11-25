@@ -45,7 +45,7 @@ This means that if your application uses Aouda Auth, writing integration tests t
 aouda start --port 5433
 # (then separately create the auth database:)
 aouda databases create --name myapp --kind auth
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+# → mints no key: declare a principal, or create one and mint its key
 # → tests only work if the server process is still running
 ```
 
@@ -73,6 +73,7 @@ await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOpti
 | Unit tests for logic that calls Aouda | Mock `IAoudaClient` / `IUserService` | Fast, no infrastructure, tests your logic in isolation |
 | Integration tests for auth flows (signin, refresh, OIDC) | **Aouda.Testing** | Real auth behavior; tests that your code integrates correctly |
 | Integration tests for a gateway that calls Aouda Auth | **Aouda.Testing** + `WebApplicationFactory` | Real end-to-end flow through your API |
+| Integration tests for data operations with access enforced | **Aouda.Testing** | The same statements and row conditions as a server |
 | Load and stress tests | `Aouda.TestHarness` (separate Aouda tool) | Not a consumer concern |
 
 > **Rule of thumb:** Mock Aouda for unit tests that test your business logic. Use `Aouda.Testing` for tests that test how your application **integrates** with Aouda.
@@ -102,7 +103,7 @@ Add the `Aouda.Testing` package to your test project:
 
 ## 3. Basic Usage — No Auth
 
-The simplest case: a server with one database and no authentication.
+The simplest case: a server with one database, called as its operator.
 
 ```csharp
 await using var aouda = await AoudaTestServer.StartAsync();
@@ -118,13 +119,13 @@ using var insertResponse = await aouda.HttpClient.PostAsJsonAsync(
 Assert.True(insertResponse.IsSuccessStatusCode);
 ```
 
-By default, `StartAsync()` creates one database named `"default"` with no authentication. Data is **ephemeral** — deleted when `DisposeAsync` is called.
+By default, `StartAsync()` creates one database named `"default"`, governed by the server auth database. `HttpClient` sends a request the server refuses for want of a credential again with the server's operator key, so a test of data operations needs no credential of its own. Data is **ephemeral** — deleted when `DisposeAsync` is called.
 
 - **`HttpClient`** — Pre-configured for the in-process server; use it for raw HTTP assertions.
 - **`ServerUrl`** — Base URL string (always `"http://localhost"` with TestHost).
 - **`DataPath`** — On-disk directory for this run. With default options, this is a **temporary** folder removed in `DisposeAsync`.
 
-> **Note on typed clients for no-auth databases:** `CreateClient(name)` and `CreateAnonClient(name)` require auth to be enabled for that database — they call `ServiceKey`/`AnonKey` which throw otherwise. For databases without auth, use `server.HttpClient` directly, or construct `AoudaClient` manually pointing at `server.HttpClient`.
+> **Typed clients:** `CreateClient(name)` is an `AoudaClient` with the operator's key, `CreateClient(name, key)` one with the key you give, and `CreateAnonymousClient(name)` one with no credential at all.
 
 ### Configuring the Database Name
 
@@ -152,12 +153,36 @@ await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOpti
 });
 ```
 
-When `EnableAuth: true`, the database is linked to a Aouda auth database (`_auth`) and two API keys are generated automatically.
+When `EnableAuth: true`, the database is linked to an application auth database (`auth`). It makes no key (**BL-1464, 0.16.0**).
 
 ### Accessing the Keys
 
+A key belongs to a principal. Declare the principals, and compute a declared principal's derived key:
+
 ```csharp
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+const string Declaration = """
+{
+  "version": 1,
+  "databases": {
+    "auth": {
+      "kind": "auth",
+      "principals": {
+        "backend": { "roles": ["writer"], "credentials": { "derivedKey": { "version": 1 } } }
+      }
+    },
+    "myapp": { "kind": "data", "authDatabase": "auth" }
+  }
+}
+""";
+
+await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOptions
+{
+    Declaration = Declaration,
+    KeyRoot = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)), // at least 32 bytes; using System.Security.Cryptography
+});
+
+string backendKey = aouda.DerivedKey("auth/backend"); // what the declared backend may do
+string operatorKey = aouda.OperatorKey;               // the built-in admin of the server auth database
 ```
 
 ### OIDC Authority for JWT Validation
@@ -171,24 +196,25 @@ string oidcAuthority = aouda.OidcAuthority("myapp");
 // → Use as: options.Authority = oidcAuthority
 ```
 
-### Using the Service-Role Client
+### Using the Operator's Client
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+The operator holds the built-in role `admin` of the server auth database: every action on every database, with no row condition — use it for admin operations and test setup. Use a declared principal's key for anything whose access you are testing:
 
 ```csharp
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+var adminClient = aouda.CreateClient("myapp");             // the operator's key
+var backend = aouda.CreateClient("myapp", backendKey);     // a declared principal
 await adminClient.GetTable("products").InsertAsync(new { id = 1, name = "Widget", tenant_id = "acme" });
 ```
 
-### Using the Anon Client
+### Using the Anonymous Client
 
-The anon client presents the `anonymous` role — same as an unauthenticated frontend:
+The anonymous client sends no credential — as an unauthenticated browser does:
 
 ```csharp
-var anonClient = aouda.CreateAnonClient("myapp"); // anon key
+var anonymous = aouda.CreateAnonymousClient("myapp");
 
-// Can access auth endpoints (signup, signin)
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+// Can access the public auth endpoints (signup, signin)
+// On the data-plane listener it acts as `anonymous`, which holds nothing until it is given a statement
 ```
 
 ---
@@ -201,7 +227,7 @@ Test setup often needs to create users and obtain tokens. `Aouda.Testing` provid
 
 ```csharp
 string userId = await aouda.CreateUserAsync("myapp", "alice@test.com", "Pass123!");
-// User created with the default "user" role. Returns the new user's ID string.
+// Creates the principal with no role. Returns its ID string.
 ```
 
 ### Signing In (Getting a Token)
@@ -261,9 +287,9 @@ public class AuthControllerTests : IClassFixture<AoudaTestFixture>, IAsyncLifeti
                 {
                     o.ServerUrl    = _aouda.Server.ServerUrl;
                     o.DatabaseName = "derive";
-                    o.ServiceKey   = _aouda.Server.ServiceKey("derive");
+                    o.ServiceKey   = _aouda.Server.OperatorKey; // or a declared principal's DerivedKey
                     o.Authority    = _aouda.Server.OidcAuthority("derive");
-                    o.Audience     = "_auth";
+                    o.Audience     = "*"; // a sign-in with no `databases` limit
                 });
             }));
 
@@ -505,16 +531,17 @@ await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOpti
     [
         new TestDatabase("orders",   EnableAuth: true),
         new TestDatabase("products", EnableAuth: true),
-        new TestDatabase("analytics")              // no auth needed
+        new TestDatabase("analytics")              // governed by the server auth database
     ]
 });
 
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
-string ordersKey   = aouda.ServiceKey("orders");
-string productsKey = aouda.ServiceKey("products");
+// One application auth database governs both; a key belongs to a principal of it, not to a database.
+var orders   = aouda.CreateClient("orders");   // the operator's key
+var products = aouda.CreateClient("products");
 
-// Analytics is open — use HttpClient directly (no auth key)
-var analyticsResponse = await aouda.HttpClient.GetAsync("/api/databases/analytics/tables/events/query");
+// Analytics is governed by the server auth database: HttpClient reaches it as the operator
+var analyticsResponse = await aouda.HttpClient.PostAsJsonAsync(
+    "/api/databases/analytics/query", new { database = "analytics", table = "events", limit = 10 });
 ```
 
 ### Shared Auth Database Across Multiple Databases
@@ -526,14 +553,14 @@ await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOpti
 {
     Databases =
     [
-        // First database with auth creates _auth automatically
+        // First database with auth creates the auth database automatically
         new TestDatabase("orders_db",   EnableAuth: true),
-        // Second database with auth links to the same _auth
+        // Second database with auth links to the same one
         new TestDatabase("products_db", EnableAuth: true),
     ]
 });
 
-// Same users, same sessions across both databases (single _auth database)
+// Same users, same sessions across both databases (single auth database)
 await aouda.CreateUserAsync("orders_db", "alice@test.com", "Pass123!");
 // Alice can now sign in to either orders_db or products_db
 ```
@@ -616,7 +643,7 @@ There is no requirement for:
   run: dotnet test --no-build --verbosity minimal
 ```
 
-Keys generated by `AoudaTestServer` are never printed to stdout or logs. They are only accessible via `ServiceKey()` and `AnonKey()` within the test code.
+Keys generated by `AoudaTestServer` are never printed to stdout or logs. They are only accessible via `OperatorKey` and `DerivedKey()` within the test code.
 
 ---
 

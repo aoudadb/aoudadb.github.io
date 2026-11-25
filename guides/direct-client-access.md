@@ -26,6 +26,8 @@ Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#
 |---|---|
 | See a complete end-to-end example | [Market-data guide](market-data.md) and `examples/p40-browser-tier/` |
 | Turn on the data-plane listener | [Configure dual-listen](#configure-dual-listen) |
+| Let a browser read data | [A browser holds no key](#credentials-on-each-listener) |
+| Let a browser read a materialized-query result | [Opening an artifact to the browser](#opening-an-artifact-to-the-browser) |
 | Connect Studio or Hub | [Studio and Hub](#studio-and-hub) |
 | Put TLS/WAF in front | [Topology](#topology-a-thin-edge) · [Behind a reverse proxy](../deployment/reverse-proxy.md) |
 | Sign users in from a browser | [Authentication that exists](#authentication-that-exists) |
@@ -55,7 +57,7 @@ Keep today's `Aouda:Bind` / `Aouda:Port` (or `--port`) as the **admin** listener
 
 Environment: `Aouda__Listeners__DataPlane__Bind=0.0.0.0:5434` and `Aouda__Listeners__DataPlane__CorsOrigins=https://app.example.com`.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+If `DataPlane:Bind` is **unset**, there is one listener, the admin one, with its CORS settings, and no request acts as `anonymous`: a call with no credential is `401 AUTH_CREDENTIAL_MISSING`.
 
 **CORS is per listener.** Admin defaults include Studio / Hub origins (`https://studio.aouda.com`, `https://hub.aouda.dev`, plus `Aouda:StudioOrigin`) unless `Aouda:CorsOrigins` replaces them. Data-plane origins come **only** from `Aouda:Listeners:DataPlane:CorsOrigins` (empty = no browser origins). The setting accepts `*` — that lets **any** website's JavaScript call public auth POSTs and, after login, any data-plane route the JWT can reach. Prefer an explicit origin list. Do not put the Studio origin on the data-plane.
 
@@ -69,50 +71,66 @@ Allowed: `/health` `/ready` `/startup`, app-auth except `/auth/admin/*`, OIDC/JW
 
 The data-plane listener **ignores `crossPartitionAccess`** (**BL-1227, 0.9.0**): the partition-filter guard decides, and the error says the flag is not accepted there. The flag only waives that guard on the admin listener and never widens what a credential sees — [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Listed named-artifact routes still **do not enumerate names**. On the data-plane, a caller with no `execute` statement for the name (`anonymous` included, whatever table statements it holds) gets **404** `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — not 401 vs 404. Unlisted paths stay empty 404 (D-11). The admin listener keeps 401/403 so operators can tell missing credential from denied. Invalid credentials stay 401 on both listeners.
 
 ---
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+## Credentials on each listener
 
-| Prefix | May call | Listener |
+A **browser holds no key**. With no credential its data-plane request acts as the `anonymous` principal of the auth database that governs the
+database; after sign-in it sends the user's session. There is one key format and no browser kind of key (**BL-1464, 0.16.0**). What a caller may
+do is its statements, whichever credential it sends:
+
+| Caller | May call | Listener |
 |---|---|---|
-| User JWT (Studio operator) | Ad-hoc + admin | Admin |
+| No credential (`anonymous`) | Sign-up, sign-in, refresh; the named queries and mutations `anonymous` has an `execute` statement for, one per request. A batch and a subscription need a credential | Data-plane. On admin → `401 AUTH_CREDENTIAL_MISSING` |
+| A session of an end user | Named query / mutation / subscribe, as its statements allow | Data-plane |
+| A key of a backend's principal | What its statements allow: tables, named artifacts, admin routes with `manage` | Either; **ad-hoc query only on admin** (data-plane `/query` is 404 for everyone) |
+| A session or key of a `_serverauth` principal (Studio operator) | Ad-hoc + admin | Admin |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`GET /api/auth/whoami` (both listeners) says which principal a credential is and which statements it holds. The retired second-token header is
+refused `400 INVALID_REQUEST`: to act as a user, send that user's session or a [limited key](../auth/credentials.md#limited-keys) minted from it.
 
 ---
 
-## Table opt-in (fail-closed)
+## Opening an artifact to the browser
 
+The browser tier reaches named artifacts only, and an artifact is closed until a statement opens it: `anonymous` and `signup` hold
+nothing by default. Give the caller an `execute` statement; nothing is set on the table or the materialized query.
+
+<!-- declaration-example -->
 ```json
 {
-  "tables": {
-    "EquityQuote": {
-      "columns": { }
-    }
+  "version": 1,
+  "databases": {
+    "auth": {
+      "kind": "auth",
+      "signup": {
+        "enabled": true,
+        "statements": [
+          { "actions": ["execute"], "resources": ["trading/query/equity.positions"],
+            "where": { "and": [ { "column": "accountId", "op": "eq", "principal": "id" } ] } }
+        ]
+      },
+      "principals": {
+        "anonymous": {
+          "statements": [
+            { "actions": ["execute"], "resources": ["trading/query/equity.quoteByTicker"] }
+          ]
+        }
+      }
+    },
+    "trading": { "kind": "data", "authDatabase": "auth", "schema": "schema/trading.aouda.schema.json" }
   }
 }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+A materialized-query result is opened the same way: define a named query over the result table, and give `execute` on that query. A table or
+schema document that still carries the old opt-in member is refused `SCHEMA_UNKNOWN_MEMBER`.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-
-```json
-"materializedQueries": {
-  "latest_quote": {
-    "type": "latestPerKey",
-    ...
-  }
-}
-```
-
-Service keys on the data-plane may execute named artifacts over non-opted-in tables. The admin listener ignores the flag.
-
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+A named query nobody may execute from a browser is still **allowed to apply** — operators and services need it. What widens the browser tier is a
+change of statements, so it is in the diff of `aouda.json`; a public statement on a table other statements restrict is refused
+`AUTH_PUBLIC_UNRESTRICTED` unless it says `"unrestricted": true` ([Public reach](../auth/authorization.md#public-reach)).
 
 ---
 
@@ -126,7 +144,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not the device, so a user on a browser, a desktop
 agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
 minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+subscriptions. Two more per-identity bounds apply (**BL-1383, 0.11.0**): a **connection limit** (`MaxConnectionsPerIdentity`, default 16; WebSocket and long-poll sessions together; refused inside the handshake with `IDENTITY_CONNECTION_LIMIT_EXCEEDED`, which a client must treat as final rather than reconnect in a loop) and a **subscribe-rate bucket** (`Aouda:WebSocket:SubscribeRate`, burst 512, 32 per second; `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`). For the subscription and connection limits the identity is the principal, whatever credential it presents: every key and session of one principal shares them, a backend's as a user's. For the request quota (`PermitLimit`) a user's sessions share one window, and each **key** has a window of its own. For `anonymous` it is the visitor's remote address — **provided the server sees the visitor's address**: behind a reverse proxy, configure `Aouda:ForwardedHeaders`, or every visitor shares one quota. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
 (**NativeClients, 0.4.0**).
 
 **Server clock.** Every response carries a `Date` header that a browser can read cross-origin; the SDKs keep the offset from it (`serverClockOffsetMs` / `ServerClockOffset`) so a client can judge a
@@ -168,7 +186,9 @@ Hub     ──────────────────►  Aouda admin  
 
 Application end users today:
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+1. Browser holds the **data-plane URL and database name** — no key. CORS on `Aouda:Listeners:DataPlane:CorsOrigins` is the origin control (unset = no browser origins; `*` = any origin can call public auth POSTs — prefer an explicit list).
+2. `POST /api/databases/{db}/auth/signup` or `/signin` with **no credential** → an access token + refresh token. Signup is **opt-in** (`signup.enabled` on the auth database, default off), and what a signed-up principal may do is that setting's `roles` and `statements`, default nothing. Set it in `aouda.json` or with `PUT /api/auth/{authDatabase}/signup`. Password reset can send email unauthenticated at 20/min/IP; `request-password-reset` does not disclose whether the account exists.
+3. Subsequent named-query calls: `Authorization: Bearer <access token>` on the **data-plane**. Before sign-in they carry nothing and run as `anonymous`.
 4. `POST …/auth/refresh` when the access token expires (also keyless).
 5. WebSocket: first message `auth` with the JWT; later `re_auth` with the refreshed token so subscriptions survive. Failed `re_auth` closes the session.
 
@@ -181,7 +201,7 @@ and the app redeems it for its own session (**NativeClients, 0.4.0**) — [Nativ
 
 OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. That is not a federated login.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+For the browser itself, the supported pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)) with **no key**, or a **backend** that holds a key and never exposes it to the browser.
 
 The **application** holds the consistency token (cookie or header **you** name). The SDK captures `X-Aouda-Token` in memory and **never** `Set-Cookie`. Recreating the client without a shared store loses read-your-writes. See [Freshness](freshness.md).
 
@@ -198,15 +218,11 @@ const dataPlane = "https://data.example.com"; // :5434 behind TLS
 const client = new AoudaClient({
   serverUrl: dataPlane,
   database: "trading",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+  // no apiKey: a browser holds no key
 });
 await client.connect();
 
-const session = await client.auth.signIn({
-  email: "trader@example.com",
-  password: "…",
-});
-// attach session.accessToken per client docs
+await client.auth.signIn("trader@example.com", password); // later calls carry the session, refreshed as it expires
 
 const quote = await client.namedQueries.execute("equity.quoteByTicker", {
   ticker: "AAPL",
@@ -230,12 +246,16 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | Symptom | Cause | Action |
 |---|---|---|
 | Studio connect 404 | URL is the data-plane | Point Studio at the **admin** port |
+| A named-query **batch** is `404 NAMED_QUERY_NOT_FOUND` before sign-in, though each query runs on its own | The batch route needs a credential; `anonymous` has none | Sign in first, or execute the queries one by one |
+| `AUTH_CREDENTIAL_MISSING` from a browser | The admin URL, with no credential; or a subscribe before sign-in | Use the data-plane URL for named queries; sign in before subscribing |
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
-| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | 16 connections per identity (public key: per remote address) | Close unused sockets; terminal for the handshake |
+| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | 16 connections per identity (the principal) | Close unused sockets; terminal for the handshake |
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | Subscribe bucket empty | Wait `retry_after_ms` / `Retry-After` |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
+| Data-plane named-query 404 with no credential | Listed-route non-disclosure: `anonymous` has no `execute` statement for the name. The admin listener answers 401 | Give `anonymous` the statement, or sign in |
+| Data-plane named-mutation 404 with a valid session | Same listed-route non-disclosure: the principal has no `execute` statement for this mutation — a table `write` does not count, and it is **not** the name | Same masked 404 (not 403). Check the principal's statements with `whoami?database=`, before suspecting the artifact name; the server log names the refusal |
 | WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `name` |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| WS `DATA_PLANE_WRITE_STREAM` | `stream_open` on data-plane | Ingest with a backend's key on admin, or HTTP named mutation |
 
 ---
 
@@ -245,7 +265,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
   browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- Subscriptions and named-query batches with no credential (`anonymous` runs named queries and mutations over HTTP, one per request).
 
 ---
 

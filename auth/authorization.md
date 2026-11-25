@@ -26,7 +26,7 @@ One JSON shape, in the declaration, the API, `whoami` and a refusal's remedy:
             {
               "actions": ["write"],
               "resources": ["rates/table/DepositQuote"],
-              "where": { "column": "source", "op": "in", "value": ["tullett"] }
+              "where": { "and": [ { "column": "source", "op": "in", "value": ["tullett"] } ] }
             }
           ]
         }
@@ -76,10 +76,10 @@ A statement on a resource the principal's auth database does not govern is refus
 
 `where` is the row condition. The grammar the server accepts:
 
-- a comparison: `{ "column", "op", "value" }` with `op` one of `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, `nin`
-- a hole: `{ "column", "op": "eq", "principal": "id" }` or `"principal": "name"`, or `{ "column", "op": "in", "principal": "attributes.<name>" }`
+- `{ "and": [ ... ] }`, `{ "or": [ ... ] }`, or `{ "groups": [ ... ] }` of nested ones: a query's own `where`. **One condition is an `and` of one**; a condition that is not in a list is refused (`AUTH_POLICY_INVALID`, `DECLARATION_SHAPE_INVALID` in a plan)
+- a comparison in a list: `{ "column", "op", "value" }` with `op` one of `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, `nin`, `like`
+- a hole in a list: `{ "column", "op": "eq", "principal": "id" }` or `"principal": "name"`, or `{ "column", "op": "in", "principal": "attributes.<name>" }`
 - `ignoreCase` on a string comparison
-- a group: `{ "and": [ ... ] }`, `{ "or": [ ... ] }`
 
 A missing attribute, a value that cannot be bound, or several values under a scalar operator match no row.
 
@@ -147,7 +147,7 @@ Exit `2`. The answer's `remedy.kind` is `grant` and `row.admitted` is `false`.
             {
               "actions": ["read", "write", "delete"],
               "resources": ["shop/table/orders"],
-              "where": { "column": "tenant", "op": "in", "principal": "attributes.tenant" }
+              "where": { "and": [ { "column": "tenant", "op": "in", "principal": "attributes.tenant" } ] }
             }
           ]
         }

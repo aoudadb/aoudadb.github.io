@@ -53,35 +53,38 @@ year before's `RetainedEarnings`. A row condition lets each user see only their 
 
 ## Before you start
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+(**ADR 0072, 0.14.0**) A server with a database `finance` linked to an auth database, and the key of a principal that may manage it. On a
 development machine:
 
 ```bash
 ASPNETCORE_ENVIRONMENT=Development AOUDA_DEV_ADMIN=true aouda start --port 5433 --data-dir "$TMPDIR/aouda-finance"
 # prints one line: AOUDA-DEV-ADMIN email=… password=… key=aouda_…
 export AOUDA=http://localhost:5433
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+export SK=aouda_…                  # the key from that line: the operator
 H=(-H "Content-Type: application/json")
 
 curl -s -X POST "$AOUDA/api/databases" -H "Authorization: Bearer $SK" "${H[@]}" -d '{ "name": "auth", "kind": "auth" }'
 curl -s -X POST "$AOUDA/api/databases" -H "Authorization: Bearer $SK" "${H[@]}" -d '{ "name": "finance", "auth": { "database": "auth" } }'
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+# a principal of the auth database with the built-in role admin, and its key (shown once)
+curl -s -X POST "$AOUDA/api/auth/auth/principals" -H "Authorization: Bearer $SK" "${H[@]}" -d '{ "name": "model", "roles": ["admin"] }'
+export SVC=$(curl -s -X POST "$AOUDA/api/auth/auth/principals/model/keys" -H "Authorization: Bearer $SK" "${H[@]}" -d '{}' | jq -r .key)
 A=(-H "Authorization: Bearer $SVC" -H "Content-Type: application/json")
 ```
 
-See [Development admin](development-admin.md) and [Auth setup](../auth/setup.md#linking-a-data-database-to-an-auth-database). The HTTP
+See [Development admin](development-admin.md) and [Enabling auth on a database](../auth/setup.md#enabling-auth-on-a-database). The HTTP
 steps below use `curl` and [`jq`](https://jqlang.org/). The C# steps use the `Aouda.Client` package and the TypeScript steps
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`@aouda/client`; both connect with the same key:
 
 ```csharp
 using Aouda.Abstractions;                  // AoudaRequestException
 using Aouda.Client;
+using Aouda.Client.Auth;                   // AoudaCredential
 using Aouda.Client.Formulas;               // Formula
 using Aouda.Protocol;                      // ErrorCodes
 using Aouda.Protocol.Schema;               // CreateTableRequest
 using static Aouda.Client.Formulas.FormulaExpr;
 
-using var client = new AoudaClient(new AoudaClientOptions { ServerUrl = url, DatabaseName = "finance", ApiKey = serviceKey });
+using var client = new AoudaClient(new AoudaClientOptions { ServerUrl = url, DatabaseName = "finance", Credential = AoudaCredential.Key(serviceKey) });
 ```
 
 ```typescript
@@ -95,18 +98,10 @@ const client = new AoudaClient({ serverUrl, database, apiKey: serviceKey });
 
 ## Step 1: two tables with a formula column
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+(**ADR 0072, 0.14.0**) Who may see which rows is not the table's: a statement's `where` says it ([step 9](#step-9-who-may-see-and-write-what)).
+A row of these tables is visible to a user when its `dept` is one of the values of the user's attribute `depts`.
 
-```bash
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-  "name": "by_dept",
-  "resolverType": "ColumnMatch",
-  "rules": [ { "ruleOrder": 0, "columnName": "dept", "operator": "In",
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-}'
-```
-
-Then the two tables. They have the same shape: the key, an ordinary `Decimal(18,2)` value column, and an `Expression` column that
+Create the two tables. They have the same shape: the key, an ordinary `Decimal(18,2)` value column, and an `Expression` column that
 **drives** it.
 
 **HTTP** — once with `"name": "pnl"` and once with `"name": "balance"`:
@@ -121,8 +116,7 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables" "${A[@]}" -d '{
     { "name": "year",    "type": "Int32",  "primaryKeyOrder": 3 },
     { "name": "amount",  "type": "Decimal", "precision": 18, "scale": 2, "isNullable": true },
     { "name": "formula", "type": "Expression", "drives": "amount" }
-  ],
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+  ]
 }'
 ```
 
@@ -146,7 +140,6 @@ foreach (var name in new[] { "pnl", "balance" })
             new() { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2, IsNullable = true },
             new() { Name = "formula", Type = "Expression", Drives = "amount" },
         ],
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
     });
 }
 ```
@@ -165,7 +158,6 @@ for (const name of ["pnl", "balance"]) {
       { name: "amount", type: "Decimal", precision: 18, scale: 2, isNullable: true },
       { name: "formula", type: "Expression", drives: "amount" },
     ],
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
   });
 }
 ```
@@ -462,6 +454,10 @@ update MarginGap:      1.67 ->    5.00
 `subscribe` on `ws://localhost:5433/api/databases/finance/ws`:
 
 ```json
+{ "type": "auth", "token": "aouda_…", "database": "finance" }
+```
+
+```json
 { "type": "subscribe", "id": "retail-2026", "target": "pnl",
   "filter": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
                        { "column": "year", "op": "eq", "value": 2026 } ] } }
@@ -747,28 +743,25 @@ only `"formula": null` keeps the last computed value as the input.
 
 ## Step 9: who may see and write what
 
-(**ADR 0072, 0.14.0**) A formula table's security is the table's own, set like any table's. Two people:
+(**ADR 0072, 0.14.0**) A formula table's access is decided as any table's is, by statements. Two people:
 
 - a **viewer** who may read both tables, for the Retail department only;
 - a **planner** who may read and write both tables, for Retail only.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**HTTP** — two roles whose statements read the department from an attribute, and two principals with `depts = ["Retail"]` (an
+administrator's task, with the key above):
 
 ```bash
-curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/roles" "${A[@]}" -d '{ "name": "viewer", "permissions": [
-  { "resourceType": "table", "resourceName": "pnl",     "actions": "read" },
-  { "resourceType": "table", "resourceName": "balance", "actions": "read" } ] }'
-curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/roles" "${A[@]}" -d '{ "name": "planner", "permissions": [
-  { "resourceType": "table", "resourceName": "pnl",     "actions": "read,write" },
-  { "resourceType": "table", "resourceName": "balance", "actions": "read,write" } ] }'
+WHERE='"where": { "and": [ { "column": "dept", "op": "in", "principal": "attributes.depts" } ] }'
+TABLES='"resources": ["finance/table/pnl", "finance/table/balance"]'
+curl -s -X POST "$AOUDA/api/auth/auth/roles" "${A[@]}" \
+     -d "{ \"name\": \"viewer\", \"statements\": [ { \"actions\": [\"read\"], $TABLES, $WHERE } ] }"
+curl -s -X POST "$AOUDA/api/auth/auth/roles" "${A[@]}" \
+     -d "{ \"name\": \"planner\", \"statements\": [ { \"actions\": [\"read\", \"write\"], $TABLES, $WHERE } ] }"
 
 for who in viewer planner; do
-  uid=$(curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/users" "${A[@]}" \
-          -d "{ \"email\": \"$who@example.com\", \"password\": \"Correct-Horse-42!\" }" | jq -r .id)
-  curl -s -X PUT "$AOUDA/api/databases/finance/auth/admin/users/$uid/roles" "${A[@]}" \
-       -d "{ \"roles\": [ { \"roleName\": \"$who\", \"scope\": \"finance\" } ] }"
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-       -d '{ "dimension": "dept", "key": "Retail", "level": "read" }'
+  curl -s -X POST "$AOUDA/api/auth/auth/principals" "${A[@]}" \
+       -d "{ \"name\": \"$who@example.com\", \"password\": \"Correct-Horse-42!\", \"roles\": [\"$who\"], \"attributes\": { \"depts\": [\"Retail\"] } }"
 done
 
 VIEWER=$(curl -s -X POST "$AOUDA/api/databases/finance/auth/signin" "${H[@]}" \
@@ -782,7 +775,7 @@ What each of them gets:
 | Who | Does | Gets |
 |---|---|---|
 | viewer | reads `pnl` where `line = NetIncome` | only Retail's rows: 195.00, 202.80, 243.20 |
-| viewer | updates any row | `403 INSUFFICIENT_PERMISSIONS` |
+| viewer | updates any row | `403 AUTH_POLICY_DENIED` |
 | viewer | `explain`s Online's `Margin` | `kind: "noRow"` — exactly what a key with no row answers |
 | planner | updates Retail's `Opex` | `200` |
 | planner | writes a Retail formula that reads **Online**'s revenue | `403 FORMULA_REFERENCE_NOT_READABLE` |
@@ -806,12 +799,12 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" -H "Authorization
 #      a row its writer may not read; …","code":"FORMULA_REFERENCE_NOT_READABLE",…}
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**C#** — as the signed-in planner, whose session is the client's one credential:
 
 ```csharp
 using var asPlanner = new AoudaClient(new AoudaClientOptions
 {
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+    ServerUrl = url, DatabaseName = "finance", Credential = AoudaCredential.Session(plannerJwt),
 });
 try
 {
@@ -830,7 +823,7 @@ catch (AoudaFormulaRefusedException e) when (e.Kind == FormulaErrorKind.Referenc
 **TypeScript**
 
 ```typescript
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+const asPlanner = new AoudaClient({ serverUrl, database, session: { token: plannerJwt } });
 try {
   await asPlanner.table("pnl").insert({
     dept: "Retail", line: "RevenueVsOnline", year: 2026,
@@ -842,7 +835,7 @@ try {
 }
 ```
 
-Two things follow from security being the table's:
+Two things follow from access being decided by the row:
 
 - **A formula is visible to whoever may read its row.** There are no private formulas; hide a model by its rows or its table.
 - **A value is computed as the database**, once, and shared. A viewer who may read a formula's row sees its value even when the value
@@ -856,4 +849,4 @@ Two things follow from security being the table's:
 - [Formulas](formulas.md) — every rule this guide used, the functions, the limits and what is deliberately not there.
 - [Freshness](freshness.md) — tokens, and why a token read of a formula table on a replica is refused.
 - [Real-time streaming](real-time.md) — subscriptions, resuming, and the `change` message.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [Policy](../auth/authorization.md) — statements, and row conditions beyond one attribute.

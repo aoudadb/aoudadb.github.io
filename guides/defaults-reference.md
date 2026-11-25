@@ -236,7 +236,7 @@ is taken only if nothing of the same or a higher class is waiting — a read's o
 request blocked by its own database's cap holds back only that database (**BL-861, WorkloadCore S18, 0.3.0**; see
 [Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-030)).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+(**WorkloadCore S06, 0.3.0**) **Classes no longer have shares of their own.** The per-class shares of the transient budget
 (`Interactive` 0.35, `Streaming` 0.05, `Ingest` 0.25, `Background` 0.25, `Maintenance` 0.10, with different fractions in
 the `Abundant` resource mode), borrowing of idle headroom between classes, and `Aouda:Memory:PerClassAdmissionEnabled` are
 removed; a class orders the queue and does not cap what it may hold. The resource modes those fractions differed by are
@@ -313,25 +313,25 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 | Subscribe attempts: refill per second (**BL-1383, 0.11.0**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
 | The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
-| Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
+| Changes held back for one [embargoed](../auth/authorization.md#embargo) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
 
 The identity quota and the subscription caps are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
 quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch
 envelope or one named-mutation execute; a subscribe attempt spends **no** permit (**BL-1383, 0.11.0**; before it, a subscribe spent one,
 and a reconnect replay of 60 subscriptions exhausted the window). A heartbeat every 30 s is 2 permits a minute per device, so
-three devices heartbeating spend 6 of the default 60 — leave room for page loads (batch them) and typing indicators, and
+three devices heartbeating spend 6 of the default 60 (each **key** of a principal has a window of its own; `anonymous` one per remote address) — leave room for page loads (batch them) and typing indicators, and
 measure before raising.
 
 A subscribe is bounded by its own **token bucket per identity** (**BL-1383, 0.11.0**): every attempt costs one token, one the server then refuses for another reason included; an attempt the bucket itself refuses costs nothing and is told when to retry,
 on both listeners and on long-poll `/send`, and `Aouda:IdentityQuota:Enabled=false` does not switch it off.
 Over the bound the server answers `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` (a `Retry-After` header on a long-poll
 `/send`). The connection limit counts WebSocket and long-poll sessions together and refuses inside the handshake with
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-is known only if `Aouda:ForwardedHeaders` is configured: without it every visitor of a public key shares the proxy's address, so
-one connection budget, one subscription cap and one subscribe bucket. Configure it before relying on per-visitor limits.
+`IDENTITY_CONNECTION_LIMIT_EXCEEDED`. For these socket limits the identity is the principal, whatever credential it presents (`anonymous` opens no socket). The request quota counts
+`anonymous` per visitor's remote address, so anonymous visitors of one app do not share it. **Behind a reverse proxy** the visitor's address
+is known only if `Aouda:ForwardedHeaders` is configured: without it every anonymous visitor shares the proxy's address, so
+one window. Configure it before relying on per-visitor limits.
 The server refuses to start on a cap below 1, a burst below 1 or a negative refill. `auth_ok.limits` reports `0` for a limit
-that does not apply (a no-auth database has no per-identity limit). The numbers `16`, `64`, `512` and `32` and the
-service-key subscription cap are the current defaults and are provisional. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
+that does not apply. The numbers `16`, `512` and `32` are the current defaults and are provisional. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
 in no guide before).
 
 ## Runtime: GC and thread pool
@@ -359,6 +359,9 @@ not set) counts as not set and is not refused.
 
 | Removed | Replacement |
 |---|---|
+| The keys-file setting (the identities file) and every setting under `Aouda:Auth:Keys` | Declare each key's principal in the declaration file: `databases.<auth>.principals` or `server.principals`, with its `credentials` (a `derivedKey` from the file's `keyRoot`, or a stored key `{ "id", "sha256" }` under `keys`) |
+| `Aouda:Auth:Bootstrap:ServerKey` and every setting under `Aouda:Auth:Bootstrap` | Declare the operator: a `server.principals` entry holding the role `admin`, with a `derivedKey` (from the file's `keyRoot`) or a stored key `{ "id", "sha256" }` |
+| The first-admin email and password settings | Declare the first admin: a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash": ... }`. The seed is applied only when the principal is created, with a forced password change at the first sign-in, never again |
 | The systemd credentials `aouda-server-key` and `aouda-admin-password` (present in `$CREDENTIALS_DIRECTORY`) | Remove the unit's `LoadCredential=` line and declare as above |
 
 A first admin by password seed, and a key-only operator whose key root comes from a secret:
@@ -453,9 +456,8 @@ unlinked" or "must not exist", and a database removed from the file is left alon
 `_auth` and `_settings` are never declarable (`_serverauth` is created by an operator declared in `server.principals`, the dev
 admin, or setup; **BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-(which returns them once; a key that must survive a wipe is a declared principal's credential, **BL-1464, 0.16.0**); a `POST /api/databases` that links still returns
-them as before. Startup order after a wipe: declared databases and links, then `_serverauth` (its declared operators, or setup), then each
+**A declarative link creates no key**, and neither does a `POST /api/databases` that links (**BL-1464, 0.16.0**). A key that must survive a
+wipe is a declared principal's credential. Startup order after a wipe: declared databases and links, then `_serverauth` (its declared operators, or setup), then each
 declared `SchemaFile` (**BL-1388, 0.11.0**), then declared roles (**BL-1392, 0.11.0**) and principals with their credentials
 (**BL-1464, 0.16.0**; they replace the configured keys that came last). `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
 has one line per entry (created, converged or unchanged; linked or already linked).

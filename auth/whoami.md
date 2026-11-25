@@ -43,7 +43,7 @@ The body, for a stored or derived key (ids and the hash are placeholders):
       {
         "actions": ["write"],
         "resources": ["rates/table/DepositQuote"],
-        "where": { "column": "source", "op": "in", "value": ["tullett"] },
+        "where": { "and": [ { "column": "source", "op": "in", "value": ["tullett"] } ] },
         "from": "role:rates-feeder"
       }
     ]

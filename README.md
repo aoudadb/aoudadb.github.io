@@ -62,6 +62,14 @@ python3 scripts/check-code-fences.py                    # code that lost a `()`,
 python3 scripts/check-code-fences.py --base origin/main # and what any page lost since origin/main
 ```
 
+When a concept is removed, write each place that named it again, for what is true now, or delete the line and repair the sentence, list or
+table around it. Never put one sentence in place of many lines (it happened: BL-1867, 344 lines in 41 pages):
+
+```bash
+python3 scripts/check-removed-concepts.py      # a removed name, or a stand-in: one line held three times by a page
+python3 scripts/check-declaration-examples.py  # the marked `aouda.json` examples, against the published schema
+```
+
 A `(**BL-NNN, next train**)` marker must be **removed** once the work ships (do not stamp a version into the page).
 `python3 scripts/check-next-train.py` fails on every marker whose BL id is already in a released section of the `aouda`,
 `aouda-client-ts` or `aouda-studio` changelog (sibling checkouts, their `origin/main`; see
