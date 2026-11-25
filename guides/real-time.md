@@ -331,6 +331,15 @@ A subscription on a partitioned table needs the same partition filter as a read,
 `subscribe` message (see the HTTP/protocol examples below, and
 [a subscription that spans partitions](partitioning.md#a-subscription-that-spans-partitions)).
 
+### When the user changes
+
+A realtime connection belongs to the principal that opened it: what is subscribed on it was read as that principal, and the server refuses
+another's `re_auth`. In the TypeScript client (**BL-1854, next train**) a sign-in as another user, or a sign-out, therefore ends every subscription
+and write stream with `AUTH_SESSION_REPLACED`, and what is made after it is on a new connection; a new token of the same user re-authenticates
+the connection, on both transports (**BL-1858, next train**). See
+[When the user changes](../clients/typescript.md#with-authentication). The .NET client does not do this yet (**BL-1856**, open): when the user
+changes, dispose the `AoudaClient` and make a new one.
+
 ### Horizons and range deletes
 
 (**Horizon, 0.5.0**) Some tables drop old rows without a row event per row: a **windowed materialized query's result**
