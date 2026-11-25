@@ -35,32 +35,32 @@ Two data databases share one application auth database. `shop` applies a schema 
 
 ```jsonc
 {
- "$schema": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
- "version": 1,
- // Comments and trailing commas are allowed.
- "databases": {
- "auth": {
- "kind": "auth",
- "roles": {
- "analyst": {
- "description": "Reads every table",
- "statements": [ { "actions": ["read"], "resources": ["shop/table/*", "reports/table/*"] } ],
- },
- },
- },
- "shop": {
- "kind": "data",
- "authDatabase": "auth",
- "schema": "schema/shop.aouda.schema.json",
- "memoryWeight": 2,
- },
- "reports": {
- "kind": "data",
- "authDatabase": "auth",
- "durability": "os",
- "defaultTemperature": "ColdPreferred",
- },
- },
+  "$schema": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
+  "version": 1,
+  // Comments and trailing commas are allowed.
+  "databases": {
+    "auth": {
+      "kind": "auth",
+      "roles": {
+        "analyst": {
+          "description": "Reads every table",
+          "statements": [ { "actions": ["read"], "resources": ["shop/table/*", "reports/table/*"] } ],
+        },
+      },
+    },
+    "shop": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "schema": "schema/shop.aouda.schema.json",
+      "memoryWeight": 2,
+    },
+    "reports": {
+      "kind": "data",
+      "authDatabase": "auth",
+      "durability": "os",
+      "defaultTemperature": "ColdPreferred",
+    },
+  },
 }
 ```
 
@@ -76,7 +76,7 @@ server started without it declares nothing, and says so: `declaration: none` in 
 
 | Source | Spelling |
 |---|---|
-| Switch | `aouda start --declaration /etc/aouda/aouda.json`, `aouda plan --declaration./aouda.json` |
+| Switch | `aouda start --declaration /etc/aouda/aouda.json`, `aouda plan --declaration ./aouda.json` |
 | Environment | `AOUDA_DECLARATION=/etc/aouda/aouda.json`, or `Aouda__Declaration=…` |
 | `appsettings.json` | `{ "Aouda": { "Declaration": "/etc/aouda/aouda.json" } }` |
 
@@ -110,17 +110,17 @@ file. `Aouda:Environment` is a name (letters, digits, `_`, `.`, `-`), not a path
 **Docker Compose.** Mount the directory that holds the file and name it:
 
 ```yaml
- environment:
- Aouda__Declaration: /etc/aouda/aouda.json
- AOUDA_ENVIRONMENT: prod
- volumes:
- -./aouda:/etc/aouda:ro
+    environment:
+      Aouda__Declaration: /etc/aouda/aouda.json
+      AOUDA_ENVIRONMENT: prod
+    volumes:
+      - ./aouda:/etc/aouda:ro
 ```
 
 with `aouda.json`, `aouda.prod.json` and `schema/shop.aouda.schema.json` in `./aouda`. Mount the **directory**, not the file: an
 edit of a single bind-mounted file is not always seen by the running container, and a reload then reads the old content.
 
-**Check it before you deploy.** `aouda plan --declaration./aouda/aouda.json --env prod` runs the start's checks offline and
+**Check it before you deploy.** `aouda plan --declaration ./aouda/aouda.json --env prod` runs the start's checks offline and
 lists every problem at once, without a data directory ([Plan a declaration](plan.md)). Its report names the file it read, and `--json` carries
 `declaration.file`, `declaration.overlay` and `declaration.environment` (the `Aouda:Environment` it used, or `null`).
 
@@ -145,11 +145,11 @@ A server that declared this in `appsettings.json`:
 
 ```json
 {
- "Aouda": {
- "Databases": {
- "shop": { "AuthDatabase": "auth", "SchemaFile": "schemas/shop.json", "SchemaEnvironment": "prod", "MemoryWeight": 2.0 }
- }
- }
+  "Aouda": {
+    "Databases": {
+      "shop": { "AuthDatabase": "auth", "SchemaFile": "schemas/shop.json", "SchemaEnvironment": "prod", "MemoryWeight": 2.0 }
+    }
+  }
 }
 ```
 

@@ -6,7 +6,7 @@ parent: "Guides"
 
 # How to build apps effortlessly with Aouda
 
-Document status: Complete (BL-183)
+Document status: Complete (BL-183)  
 Last updated: 2026-08-20
 
 Most databases give you a place to put rows. To turn that into an application you then build a tier: a read gateway that translates HTTP into queries, a streaming relay that fans changes out to browsers, an auth proxy, an ingest worker that tidies incoming data, a rollup job, and an endpoint whose entire job is to return a total count. None of those hops add trust or make a decision. They exist because the database could not be spoken to safely from where the user is.
@@ -61,7 +61,7 @@ A complete, production-*shaped* application: a schema under review, a table a br
 ```bash
 dotnet tool install --global Aouda.Cli
 
-aouda start --port 5433 --data-dir./data
+aouda start --port 5433 --data-dir ./data
 # in another terminal
 aouda databases create --name tasks
 ```
@@ -72,54 +72,54 @@ aouda databases create --name tasks
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "tasks",
- "tables": {
- "Task": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "ownerId": { "type": "String" },
- "title": { "type": "String" },
- "titleNorm": { "type": "String", "derived": { "type": "call", "fn": "trim", "args": [{ "type": "colRef", "col": "title" }] } },
- "done": { "type": "Bool" },
- "createdAt": { "type": "Timestamp" }
- },
- "clusterColumns": ["createdAt"],
- "checks": {
- "title_not_empty": { "and": [{ "column": "title", "op": "ne", "value": "" }] }
- }
- }
- },
- "namedQueries": {
- "tasks.page": {
- "table": "Task",
- "select": ["id", "title", "done", "createdAt"],
- "limit": 25,
- "limitParam": "pageSize",
- "offsetParam": "pageOffset",
- "count": true,
- "orderBy": [{ "column": "createdAt", "descending": true }],
- "where": { "and": [{ "column": "done", "op": "eq", "param": "done" }] },
- "params": {
- "done": { "required": true },
- "pageSize": { "min": 1, "max": 25 },
- "pageOffset": { "min": 0, "max": 5000 }
- },
- "version": "v1"
- }
- },
- "namedMutations": {
- "tasks.setDone": {
- "op": "update",
- "table": "Task",
- "limit": 1,
- "where": { "and": [{ "column": "id", "op": "eq", "param": "id" }] },
- "set": { "done": { "param": "done" } },
- "returning": ["id", "done"],
- "params": { "id": { "required": true }, "done": { "required": true } },
- "version": "v1"
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "tasks",
+  "tables": {
+    "Task": {
+      "columns": {
+        "id":        { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+        "ownerId":   { "type": "String" },
+        "title":     { "type": "String" },
+        "titleNorm": { "type": "String", "derived": { "type": "call", "fn": "trim", "args": [{ "type": "colRef", "col": "title" }] } },
+        "done":      { "type": "Bool" },
+        "createdAt": { "type": "Timestamp" }
+      },
+      "clusterColumns": ["createdAt"],
+      "checks": {
+        "title_not_empty": { "and": [{ "column": "title", "op": "ne", "value": "" }] }
+      }
+    }
+  },
+  "namedQueries": {
+    "tasks.page": {
+      "table": "Task",
+      "select": ["id", "title", "done", "createdAt"],
+      "limit": 25,
+      "limitParam": "pageSize",
+      "offsetParam": "pageOffset",
+      "count": true,
+      "orderBy": [{ "column": "createdAt", "descending": true }],
+      "where": { "and": [{ "column": "done", "op": "eq", "param": "done" }] },
+      "params": {
+        "done":       { "required": true },
+        "pageSize":   { "min": 1, "max": 25 },
+        "pageOffset": { "min": 0, "max": 5000 }
+      },
+      "version": "v1"
+    }
+  },
+  "namedMutations": {
+    "tasks.setDone": {
+      "op": "update",
+      "table": "Task",
+      "limit": 1,
+      "where": { "and": [{ "column": "id", "op": "eq", "param": "id" }] },
+      "set": { "done": { "param": "done" } },
+      "returning": ["id", "done"],
+      "params": { "id": { "required": true }, "done": { "required": true } },
+      "version": "v1"
+    }
+  }
 }
 ```
 
@@ -128,16 +128,16 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ### 3. Apply it
 
 ```bash
-aouda schema diff --file aouda.schema.json # review before you change anything
+aouda schema diff  --file aouda.schema.json   # review before you change anything
 aouda schema apply --file aouda.schema.json
 ```
 
 ### 4. Generate optional Args/Row types
 
 ```bash
-npx @aouda/client generate --server http://localhost:5433 --database tasks --output./src/generated/aouda.ts
-# or, offline from the file, for.NET:
-aouda generate csharp --file aouda.schema.json --output./Generated/NamedQueries.cs
+npx @aouda/client generate --server http://localhost:5433 --database tasks --output ./src/generated/aouda.ts
+# or, offline from the file, for .NET:
+aouda generate csharp --file aouda.schema.json --output ./Generated/NamedQueries.cs
 ```
 
 ### 5. Call it from the browser
@@ -147,18 +147,18 @@ import { createAoudaClient } from "@aouda/client";
 import { tasksPage, tasksSetDone } from "./generated/aouda";
 
 const client = createAoudaClient({
- serverUrl: "https://data.example.com", // the data-plane listener
- database: "tasks",
-// client.whoami — apiKey is an aouda_ key, or session, never both.
+  serverUrl: "https://data.example.com",   // the data-plane listener
+  database: "tasks",
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
-await client.connect;
+await client.connect();
 
 await client.auth.signIn("ada@example.com", "correct-horse");
 
 const page = await client.namedQueries.execute("tasks.page", {
- done: false,
- pageSize: 25,
- pageOffset: 0,
+  done: false,
+  pageSize: 25,
+  pageOffset: 0,
 });
 render(page.rows, `1–${page.rows.length} of ${page.totalMatches}`);
 
@@ -172,26 +172,26 @@ await client.namedMutations.execute("tasks.setDone", { id: 42, done: true });
 ## The architecture you are building toward
 
 ```
- ┌───────────────────────────────────────────┐
- Browser / mobile ──┤ Thin edge (TLS, WAF, CDN) │
- │ — moves bytes, does not parse the body │
- └───────┬───────────────────────┬───────────┘
- │ │
- app.example.com │ │ data.example.com
- ▼ ▼
- ┌──────────────────┐ ┌──────────────────────────┐
- │ Your services │ │ Aouda DATA-PLANE :5434 │
- │ (only where a │ │ auth · named query · │
- │ hop adds trust │ │ named mutation · ws │
- │ or calls out) │ │ everything else → 404 │
- └────────┬─────────┘ └────────────┬─────────────┘
+                     ┌───────────────────────────────────────────┐
+  Browser / mobile ──┤  Thin edge (TLS, WAF, CDN)                │
+                     │  — moves bytes, does not parse the body   │
+                     └───────┬───────────────────────┬───────────┘
+                             │                       │
+             app.example.com │                       │ data.example.com
+                             ▼                       ▼
+                  ┌──────────────────┐    ┌──────────────────────────┐
+                  │ Your services    │    │ Aouda DATA-PLANE :5434   │
+                  │ (only where a    │    │ auth · named query ·     │
+                  │  hop adds trust  │    │ named mutation · ws      │
+                  │  or calls out)   │    │ everything else → 404    │
+                  └────────┬─────────┘    └────────────┬─────────────┘
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
- ▼ ▼
- ┌────────────────────────────────────────────────┐
- │ Aouda ADMIN :5433 │
- │ never published — schema apply, ad-hoc query, │
- │ bulk load, admin/*, Studio, Hub │
- └────────────────────────────────────────────────┘
+                           ▼                           ▼
+                  ┌────────────────────────────────────────────────┐
+                  │            Aouda ADMIN :5433                   │
+                  │  never published — schema apply, ad-hoc query, │
+                  │  bulk load, admin/*, Studio, Hub               │
+                  └────────────────────────────────────────────────┘
 ```
 
 Four rules hold this together, and every one of them is enforced rather than documented:
@@ -228,25 +228,25 @@ Steps 1–4 are load-bearing: everything after them assumes the schema file exis
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "appdb",
- "tables": {
- "Order": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
- "tenantId": { "type": "String" },
- "customerId": { "type": "Int64", "references": "Customer.id" },
- "reference": { "type": "String", "unique": true },
- "status": { "type": "String" },
- "total": { "type": "Decimal", "precision": 18, "scale": 2 },
- "createdAt": { "type": "Timestamp" }
- },
- "partitionKey": [{ "column": "tenantId" }],
- "clusterColumns": ["createdAt"],
- "policy": { "storageTemperature": "Auto" },
- "durability": { "level": "strict" }
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "appdb",
+  "tables": {
+    "Order": {
+      "columns": {
+        "id":         { "type": "Int64",  "primaryKey": 1, "autoIncrement": true },
+        "tenantId":   { "type": "String" },
+        "customerId": { "type": "Int64",  "references": "Customer.id" },
+        "reference":  { "type": "String", "unique": true },
+        "status":     { "type": "String" },
+        "total":      { "type": "Decimal", "precision": 18, "scale": 2 },
+        "createdAt":  { "type": "Timestamp" }
+      },
+      "partitionKey":   [{ "column": "tenantId" }],
+      "clusterColumns": ["createdAt"],
+      "policy":         { "storageTemperature": "Auto" },
+      "durability":     { "level": "strict" }
+    }
+  }
 }
 ```
 
@@ -272,7 +272,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 Indexes are deliberately absent: zone maps, bloom filters, and sparse primary-key indexes are maintained for you and there is no index DDL to get wrong. See [Primary key indexing and memory](pk-indexing.md) for what that costs in RAM and how to bound it.
 
-**Alternatives.** Prototyping, or you do not yet know the shape? **Schema-on-write** creates tables and columns on first insert — see [Schema lifecycle](schema.md) for inference modes, and `schema export` when you are ready to freeze what you discovered into a file. Writing a single-process.NET app or a test suite? **Embedded mode** runs the engine in-process with no server and no network at all.
+**Alternatives.** Prototyping, or you do not yet know the shape? **Schema-on-write** creates tables and columns on first insert — see [Schema lifecycle](schema.md) for inference modes, and `schema export` when you are ready to freeze what you discovered into a file. Writing a single-process .NET app or a test suite? **Embedded mode** runs the engine in-process with no server and no network at all.
 
 #### 2. Put the schema in git and gate it in CI
 
@@ -283,12 +283,12 @@ Indexes are deliberately absent: zone maps, bloom filters, and sparse primary-ke
 ```bash
 aouda schema validate --file aouda.schema.json
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-aouda schema apply --file aouda.schema.json
+aouda schema apply    --file aouda.schema.json
 ```
 
 Add the gate **now**, on day one. Adding it after ten named queries exist means approving ten findings at once, which means approving them without reading them. Ready-made workflows for both toolchains: [Schema CI/CD](schema-cicd.md). What the gate compares and how to write the identities fixture: [Access-surface diff](../auth/authorization.md#audit).
 
-**Alternatives.** `schema diff --access` ships in the **C# `aouda` CLI only** — `npx @aouda/client schema diff` has no `--access` flag ([BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176)). If your pipeline already touches.NET this costs one line: `dotnet tool install --global Aouda.Cli`. If it is pure Node, either add that one step, or call `POST …/schema/diff?access=true` on the admin listener from your existing job. Adding.NET to CI is the price of the gate, and it is worth paying.
+**Alternatives.** `schema diff --access` ships in the **C# `aouda` CLI only** — `npx @aouda/client schema diff` has no `--access` flag ([BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176)). If your pipeline already touches .NET this costs one line: `dotnet tool install --global Aouda.Cli`. If it is pure Node, either add that one step, or call `POST …/schema/diff?access=true` on the admin listener from your existing job. Adding .NET to CI is the price of the gate, and it is worth paying.
 
 ### Phase 2 — Secure
 
@@ -302,9 +302,9 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 # Verify, do not assume
 Q='{"database":"appdb","table":"Order","limit":1}'
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://data.example.com/api/databases/appdb/query \
- -H "Content-Type: application/json" -d "$Q" # expect 404
+  -H "Content-Type: application/json" -d "$Q"   # expect 404
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://admin.internal/api/databases/appdb/query \
- -H "Content-Type: application/json" -d "$Q" # expect 200 (401 without a credential when auth is on)
+  -H "Content-Type: application/json" -d "$Q"   # expect 200 (401 without a credential when auth is on)
 ```
 
 Configuration, the full data-plane allowlist, and the quota surface: [Direct client access](direct-client-access.md). What that listener refuses and why: [What a browser-tier read cannot do](browser-tier-read-limits.md).
@@ -349,26 +349,26 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```json
 "orders.page": {
- "table": "Order",
- "select": ["id", "reference", "status", "total", "createdAt"],
- "limit": 25,
- "limitParam": "pageSize",
- "offsetParam": "pageOffset",
- "count": true,
- "orderBy": [{ "column": "createdAt", "descending": true }],
- "where": {
- "and": [
- { "column": "tenantId", "op": "eq", "param": "tenantId" },
- { "column": "status", "op": "in", "param": "statuses" }
- ]
- },
- "params": {
- "tenantId": { "required": true },
- "statuses": { "required": true, "maxItems": 8 },
- "pageSize": { "min": 1, "max": 25 },
- "pageOffset": { "min": 0, "max": 5000 }
- },
- "version": "v1"
+  "table": "Order",
+  "select": ["id", "reference", "status", "total", "createdAt"],
+  "limit": 25,
+  "limitParam": "pageSize",
+  "offsetParam": "pageOffset",
+  "count": true,
+  "orderBy": [{ "column": "createdAt", "descending": true }],
+  "where": {
+    "and": [
+      { "column": "tenantId", "op": "eq",  "param": "tenantId" },
+      { "column": "status",   "op": "in",  "param": "statuses" }
+    ]
+  },
+  "params": {
+    "tenantId":   { "required": true },
+    "statuses":   { "required": true, "maxItems": 8 },
+    "pageSize":   { "min": 1, "max": 25 },
+    "pageOffset": { "min": 0, "max": 5000 }
+  },
+  "version": "v1"
 }
 ```
 
@@ -382,9 +382,9 @@ The fields that make a real UI possible, each of which is often the reason a tea
 
 ```typescript
 const [summary, recent, alerts] = await client.namedQueries.batch([
- { name: "orders.summary", args: { tenantId } },
- { name: "orders.page", args: { tenantId, statuses: ["open"], pageSize: 10 } },
- { name: "alerts.open", args: { tenantId } },
+  { name: "orders.summary", args: { tenantId } },
+  { name: "orders.page",    args: { tenantId, statuses: ["open"], pageSize: 10 } },
+  { name: "alerts.open",    args: { tenantId } },
 ]);
 ```
 
@@ -400,8 +400,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```json
 "transforms": [
- { "name": "to_quotes", "kind": "route", "when": { "and": [{ "column": "kind", "op": "eq", "value": "quote" }] }, "to": "Quote" },
- { "name": "to_quarantine", "kind": "route", "when": { "and": [{ "column": "kind", "op": "ne", "value": "quote" }] }, "to": "Quarantine" }
+  { "name": "to_quotes",     "kind": "route", "when": { "and": [{ "column": "kind", "op": "eq", "value": "quote" }] }, "to": "Quote" },
+  { "name": "to_quarantine", "kind": "route", "when": { "and": [{ "column": "kind", "op": "ne", "value": "quote" }] }, "to": "Quarantine" }
 ]
 ```
 
@@ -422,17 +422,17 @@ The expression substrate is deliberately closed: `literal`, `colRef`, `arithmeti
 
 ```typescript
 const sub = client.namedQueries.subscribe(
- "orders.live",
- { tenantId, statuses: ["open", "picking"] },
- {
- conflate: { key: ["id"], interval_ms: 100 },
- onSnapshot: (rows, version) => grid.reset(rows, version),
- onChange: (event) => grid.apply(event),
- onError: (error) => log(error),
- },
+  "orders.live",
+  { tenantId, statuses: ["open", "picking"] },
+  {
+    conflate: { key: ["id"], interval_ms: 100 },
+    onSnapshot: (rows, version) => grid.reset(rows, version),
+    onChange:   (event) => grid.apply(event),
+    onError:    (error) => log(error),
+  },
 );
 // later
-await sub.unsubscribe;
+await sub.unsubscribe();
 ```
 
 Do not hand-roll the frames. Both SDKs return the same subscription object as table subscribe, so paging, `gap` → `resume_from`, reconnect, `re_auth`, and slow-consumer recovery are transport paths you already have.
@@ -462,25 +462,25 @@ So: **make subscriptions collection-shaped, not item-shaped.** A named query tak
 
 ```json
 "materializedQueries": {
- "latest_quote": {
- "type": "latestPerKey",
- "sourceTable": "Quote",
- "groupBy": ["ticker"],
- "orderBy": "ts",
- "descending": true,
- "select": ["ticker", "price", "ts"]
- },
- "candles_1h": {
- "type": "aggregate",
- "sourceTable": "Quote",
- "groupBy": ["ticker", { "column": "ts", "function": "TruncateToHour", "outputName": "hour" }],
- "aggregates": [
- { "function": "max", "sourceColumn": "price", "outputName": "high" },
- { "function": "min", "sourceColumn": "price", "outputName": "low" },
- { "function": "first", "sourceColumn": "price", "outputName": "open" },
- { "function": "last", "sourceColumn": "price", "outputName": "close" }
- ]
- }
+  "latest_quote": {
+    "type": "latestPerKey",
+    "sourceTable": "Quote",
+    "groupBy": ["ticker"],
+    "orderBy": "ts",
+    "descending": true,
+    "select": ["ticker", "price", "ts"]
+  },
+  "candles_1h": {
+    "type": "aggregate",
+    "sourceTable": "Quote",
+    "groupBy": ["ticker", { "column": "ts", "function": "TruncateToHour", "outputName": "hour" }],
+    "aggregates": [
+      { "function": "max",   "sourceColumn": "price", "outputName": "high" },
+      { "function": "min",   "sourceColumn": "price", "outputName": "low" },
+      { "function": "first", "sourceColumn": "price", "outputName": "open" },
+      { "function": "last",  "sourceColumn": "price", "outputName": "close" }
+    ]
+  }
 }
 ```
 
@@ -501,13 +501,13 @@ Lifecycle, refresh, incremental maintenance, and auto-routing (an ad-hoc query c
 | Shape | Use | Notes |
 |---|---|---|
 | A user clicked save | Named mutation, or `insert` / `update` from a trusted service | |
-| A steady stream of events | **Write stream** over WebSocket, `mode: "insert"` or `"upsert"` | Acked, back-pressured. This is also the **only** upsert path — there is no `upsert` on the table builder |
+| A steady stream of events | **Write stream** over WebSocket, `mode: "insert"` or `"upsert"` | Acked, back-pressured. This is also the **only** upsert path — there is no `upsert()` on the table builder |
 | A migration, a nightly file, a backfill | **Bulk load** | Single- or multi-table and atomic across tables; idempotency keys; identity-insert to preserve source ids; `applyTransforms` / `preTransformed` to control whether step 6's checks and routes run |
 
 ```typescript
 const stream = await client.table("Event").openWriteStream({ mode: "upsert" });
 await stream.write(batch);
-await stream.close;
+await stream.close();
 ```
 
 Bulk load into a table carrying checks or transforms requires an **explicit intent flag** — deliberately, so a 50-million-row import cannot silently skip the validation your interactive path enforces. Throughput characteristics, resumability, and replication interaction: [Bulk load](bulk-load.md).
@@ -517,9 +517,9 @@ Bulk load into a table carrying checks or transforms requires an **explicit inte
 **What you do.** Optionally generate Args/Row types from the schema. The identity is a string literal from `aouda.schema.json`.
 
 ```bash
-npx @aouda/client generate --server $AOUDA_URL --database appdb --output./src/generated/aouda.ts
-aouda generate typescript --file aouda.schema.json --output./src/generated/aouda.ts # offline, from the file
-aouda generate csharp --file aouda.schema.json --output./Generated/Queries.cs
+npx @aouda/client generate --server $AOUDA_URL --database appdb --output ./src/generated/aouda.ts
+aouda generate typescript --file aouda.schema.json --output ./src/generated/aouda.ts   # offline, from the file
+aouda generate csharp     --file aouda.schema.json --output ./Generated/Queries.cs
 ```
 
 You get optional argument and row types per definition. Editing a definition under the same name changes behaviour at apply time — coexistence is two names (`quoteByTicker` + `quoteByTickerV2`). Deprecate with `deprecatedAt` / `sunsetAt`; execute still returns 200 plus a `NAMED_QUERY_DEPRECATED` warning. There is no runtime registration endpoint. A frontend that never runs codegen is fully functional. [Types (optional codegen)](named-queries.md#types-optional-codegen) · [TypeScript client](../clients/typescript.md) · [SDK compatibility](../clients/compatibility.md).
@@ -576,8 +576,8 @@ The showcase, and the table to check your feature list against. If something you
 | Sign-up, sign-in, refresh, password change | Application auth, called directly from the browser | [Setup and flows](../auth/setup.md) |
 | MFA | TOTP enrolment and verification (HTTP; not wrapped by the SDKs) | [Auth reference](../auth/reference.md) |
 | Password-reset emails, OTP by SMS | Notification providers (SendGrid, GatewayAPI, console for local) | [Email, SMS & notifications](../auth/notifications.md) |
-| Semantic search / recommendations | `Vector` / `MdVector` columns and nearest-neighbour search — **engine and.NET only**, not in `@aouda/client` | [Graph and vector](graph-vector.md) |
-| Relationship traversal (who follows whom) | Edge tables, traverse / k-hop / shortest-path — **engine and.NET only** | [Graph and vector](graph-vector.md) |
+| Semantic search / recommendations | `Vector` / `MdVector` columns and nearest-neighbour search — **engine and .NET only**, not in `@aouda/client` | [Graph and vector](graph-vector.md) |
+| Relationship traversal (who follows whom) | Edge tables, traverse / k-hop / shortest-path — **engine and .NET only** | [Graph and vector](graph-vector.md) |
 | Market data, quotes, OHLC candles | The end-to-end worked use case | [Market data and stock quotes](market-data.md) |
 | Reporting and ad-hoc analysis | Ad-hoc queries with joins and grouped aggregates from a **trusted** caller on the admin listener | [Query execution](query.md) |
 | A data export | Ad-hoc query or bulk read from a service; paged named query for a user-facing export | [Query execution](query.md) |
@@ -598,10 +598,10 @@ The path above is the one that removes the most work. It is not the only support
 |---|---|---|---|
 | No WebSockets survive your network path | Keep subscriptions; the client falls back to **HTTP long-poll** automatically | Some latency; more connections | [Real-time](real-time.md) |
 | Streaming is off the table entirely | Poll a named query on an interval | Latency, and permits — measure against the 60/60 s quota | [Direct client access](direct-client-access.md#quotas-and-cost) |
-| Pure Node/JS CI, cannot add.NET | Call `POST …/schema/diff?access=true` on admin from your existing job | Convenience only — the gate still runs | [BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176) |
+| Pure Node/JS CI, cannot add .NET | Call `POST …/schema/diff?access=true` on admin from your existing job | Convenience only — the gate still runs | [BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176) |
 | Your team needs SQL | A trusted service using the fluent query builder; ad-hoc queries on admin | There is **no SQL surface** | [Query execution](query.md) |
 | Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and run the access gate | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
-| Single-process.NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
+| Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
 | You already have an application | Start from the existing-app branch below | Nothing — it is the same destination | [Adoption](adoption.md) |
 
 ---
@@ -683,9 +683,9 @@ Errors are structured and designed to be acted on programmatically:
 
 ```json
 {
- "error": "TABLE_NOT_FOUND",
- "message": "Table 'Order' was not found.",
- "requestId": "req_01J..."
+  "error": "TABLE_NOT_FOUND",
+  "message": "Table 'Order' was not found.",
+  "requestId": "req_01J..."
 }
 ```
 
@@ -709,16 +709,16 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 Before reporting the work complete:
 
-- Every table, query, mutation, and MQ is declared in `aouda.schema.json`; no imperative catalog call anywhere.
-- `aouda schema validate` is clean.
-- Every named query has an explicit `select`, a capped `limit`, and ≤ 3 joins.
+- [ ] Every table, query, mutation, and MQ is declared in `aouda.schema.json`; no imperative catalog call anywhere.
+- [ ] `aouda schema validate` is clean.
+- [ ] Every named query has an explicit `select`, a capped `limit`, and ≤ 3 joins.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- Names are string literals from the schema; codegen is optional Args/Row types.
-- Subscriptions are collection-shaped; the count per connection is well under 32.
-- Independent panels use the batch envelope.
-- `conflate` is not used on an insert-only stream, or its no-op is stated where used.
-- `aouda schema diff --access` runs and passes.
-- No API, field, or capability was used that is not in the docs — anything absent was reported as absent, with the alternative.
+- [ ] Names are string literals from the schema; codegen is optional Args/Row types.
+- [ ] Subscriptions are collection-shaped; the count per connection is well under 32.
+- [ ] Independent panels use the batch envelope.
+- [ ] `conflate` is not used on an insert-only stream, or its no-op is stated where used.
+- [ ] `aouda schema diff --access` runs and passes.
+- [ ] No API, field, or capability was used that is not in the docs — anything absent was reported as absent, with the alternative.
 
 ---
 
@@ -743,22 +743,22 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ## Production checklist
 
-- `aouda.schema.json` is in git; `schema validate` is clean against **every** environment overlay.
-- `schema diff` runs on every PR; `schema apply` runs on merge; neither is done by hand.
+- [ ] `aouda.schema.json` is in git; `schema validate` is clean against **every** environment overlay.
+- [ ] `schema diff` runs on every PR; `schema apply` runs on merge; neither is done by hand.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- The admin listener is unreachable from outside the private network — **probed, not assumed**.
-- `POST …/query` and `GET /api/databases` return 404 on the data-plane listener.
+- [ ] The admin listener is unreachable from outside the private network — **probed, not assumed**.
+- [ ] `POST …/query` and `GET /api/databases` return 404 on the data-plane listener.
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- Every named query has an explicit `select`, a capped `limit`, and ≤ 3 joins.
-- Subscriptions are collection-shaped; the measured count per connection is well under 32.
-- Measured permits/minute per identity is recorded, and `PermitLimit` is set **from** that measurement.
-- Independent panels use the batch envelope; dependent ones use joins.
-- Rejected-row handling is defined for every table carrying a `check`, and every `route` set has a catch-all.
-- `storageTemperature` and the memory budget are set deliberately, and sizing was checked against expected data volume.
-- Backups are configured **and a restore has been performed** into a scratch database.
-- Metrics and health probes are scraped; alerts exist for memory-budget pressure and replication lag.
-- Tests cover at least one cross-tenant isolation case that must fail.
-- Client, server, and Studio versions are a supported combination — [SDK compatibility](../clients/compatibility.md).
+- [ ] Every named query has an explicit `select`, a capped `limit`, and ≤ 3 joins.
+- [ ] Subscriptions are collection-shaped; the measured count per connection is well under 32.
+- [ ] Measured permits/minute per identity is recorded, and `PermitLimit` is set **from** that measurement.
+- [ ] Independent panels use the batch envelope; dependent ones use joins.
+- [ ] Rejected-row handling is defined for every table carrying a `check`, and every `route` set has a catch-all.
+- [ ] `storageTemperature` and the memory budget are set deliberately, and sizing was checked against expected data volume.
+- [ ] Backups are configured **and a restore has been performed** into a scratch database.
+- [ ] Metrics and health probes are scraped; alerts exist for memory-budget pressure and replication lag.
+- [ ] Tests cover at least one cross-tenant isolation case that must fail.
+- [ ] Client, server, and Studio versions are a supported combination — [SDK compatibility](../clients/compatibility.md).
 
 ---
 
@@ -807,7 +807,7 @@ Two lists. The first is *not yet*; the second is *not ever*, on purpose.
 | `schema diff --access` in the npm CLI | The C# `aouda` CLI, or `POST …/schema/diff?access=true` on admin |
 | A SQL query surface | The fluent query builder, or named queries |
 | Full-text search | A stored `derived` normalized column plus prefix/`in` predicates |
-| Graph traversal and vector search from `@aouda/client` | The.NET client or the engine API |
+| Graph traversal and vector search from `@aouda/client` | The .NET client or the engine API |
 | Server-side MCP data tools | `@aouda/client` does ship cluster MCP tool types |
 | Bare internet exposure with no edge | A thin edge — TLS, WAF, CDN |
 

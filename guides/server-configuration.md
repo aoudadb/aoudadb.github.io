@@ -8,7 +8,7 @@ nav_order: 2
 
 This page is the **canonical reference** for how the Aouda server loads settings, what overrides what, and what survives a process restart.
 
-{:.important }
+{: .important }
 **End users installing via `Aouda.Setup` or `install-aouda.ps1` do not need `appsettings.json`.** Install tools register the Windows Service or systemd unit with `--data-path` and `--port` on the command line. Operational tuning is done in Studio or via the `/admin/config` API.
 
 ---
@@ -42,13 +42,13 @@ When the server process starts, `AoudaServerOptions` and related host settings a
 
 ```
 1. C# property defaults (AoudaServerOptions)
-2. appsettings.json (optional; content root — see §3)
-3. appsettings.{Environment}.json (optional; e.g. Production)
-4. User secrets (Development only)
-5. Environment variables (unprefixed ASP.NET / hosting vars)
-6. Command-line arguments (generic host args from CreateBuilder)
-7. AOUDA_* environment variables (mapped into Aouda: section — see §2.1)
-8. Mapped CLI flags (--data-path, --port, --bind, --join, …)
+2. appsettings.json          (optional; content root — see §3)
+3. appsettings.{Environment}.json   (optional; e.g. Production)
+4. User secrets                (Development only)
+5. Environment variables       (unprefixed ASP.NET / hosting vars)
+6. Command-line arguments      (generic host args from CreateBuilder)
+7. AOUDA_* environment variables   (mapped into Aouda: section — see §2.1)
+8. Mapped CLI flags              (--data-path, --port, --bind, --join, …)
 ```
 
 **Practical rule:** for production service installs, bootstrap values come from the **service command line** (layer 8). For Docker/Kubernetes, use **`AOUDA_*` env vars** (layer 7) — see §2.1 for naming rules. For local `dotnet run` / `aouda start` from a dev tree, an optional **`appsettings.json` beside the project** (layers 2–3) is convenient.
@@ -96,7 +96,7 @@ All server settings exposed through `AoudaServerOptions` can be set with environ
 
 ```bash
 # Docker / Kubernetes — typical bootstrap
-AOUDA_DATA_PATH=/data # alias; same as AOUDA_DATAPATH
+AOUDA_DATA_PATH=/data          # alias; same as AOUDA_DATAPATH
 AOUDA_PORT=5433
 
 # Nested settings — note double underscore between levels
@@ -191,14 +191,14 @@ To change data path or port after install, update the **service command line** (
 | **Optional appsettings.json** | Operator-placed file | Yes (re-read each start) | Yes if file kept outside binary folder |
 | **`aouda.json`** (`Aouda:Declaration`) | Operator-mounted file, named by the setting | Yes (re-read each start) **and by every `aouda reload`** | Yes |
 
-{:.note }
+{: .note }
 Runtime config from `PATCH /admin/config` is **not** written back to `appsettings.json` or environment variables. Only backup schedule changes that go through `RuntimeBackupConfig` are persisted to disk automatically.
 
 ---
 
 ## 4a) The declaration file, and what a reload can change {#declaration-file}
 
-What exists — databases, schema files, roles, principals and credentials — is one file, `aouda.json`, named by **`Aouda:Declaration`** (`--declaration`, `AOUDA_DECLARATION`). There is **no default path** and no `AOUDA_CONFIG_FILE`. A server started without the setting declares nothing (`declaration: none`). The file's shape is `{ "version": 1, "databases": {... } }`. `Aouda:Databases`, the identities file and the bootstrap key settings are refused (`SETTING_REMOVED`). The whole file is [Declare a server in one file](declaration.md) (**BL-1463, 0.16.0**).
+What exists — databases, schema files, roles, principals and credentials — is one file, `aouda.json`, named by **`Aouda:Declaration`** (`--declaration`, `AOUDA_DECLARATION`). There is **no default path** and no `AOUDA_CONFIG_FILE`. A server started without the setting declares nothing (`declaration: none`). The file's shape is `{ "version": 1, "databases": { ... } }`. `Aouda:Databases`, the identities file and the bootstrap key settings are refused (`SETTING_REMOVED`). The whole file is [Declare a server in one file](declaration.md) (**BL-1463, 0.16.0**).
 
 | To name the file | |
 |---|---|
@@ -237,11 +237,11 @@ A reload refuses as a whole, changing nothing, when any finding is an error (`42
 Replica-set membership follows a **separate** priority chain at startup (see `ReplicationHostedService`):
 
 ```
-1. In-memory ActiveConfig (same process — restart API)
-2. {DataPath}/cluster-state.json (API join / cluster lifecycle — wins over static config)
-3. --join CLI flag (first boot; may write cluster-state.json)
+1. In-memory ActiveConfig     (same process — restart API)
+2. {DataPath}/cluster-state.json   (API join / cluster lifecycle — wins over static config)
+3. --join CLI flag            (first boot; may write cluster-state.json)
 4. Aouda:ReplicaSet in startup config (appsettings / env / CLI — static operator config)
-5. Standalone mode (no replica set)
+5. Standalone mode            (no replica set)
 ```
 
 If `cluster-state.json` exists, it **overrides** static `Aouda:ReplicaSet` from appsettings or env on every restart until deleted via the cluster API.
@@ -254,9 +254,9 @@ When a backup runs, destination resolution order is:
 
 ```
 1. Explicit destination on the backup request
-2. The saved destination in the `_settings` database (from API / Studio / PATCH /admin/config)
+2. The saved destination in the `_settings` database  (from API / Studio / PATCH /admin/config)
 3. Aouda:Archive:Destination from startup config (env / appsettings / CLI)
-4. {DataPath}/backups (implicit local fallback for on-demand triggers)
+4. {DataPath}/backups             (implicit local fallback for on-demand triggers)
 ```
 
 ---
@@ -292,12 +292,12 @@ Worked Compose example (the 120 s default can be omitted; shown here so the two 
 
 ```yaml
 services:
- aouda:
- image: ghcr.io/aoudadb/aouda-server
- stop_grace_period: 130s
- environment:
- AOUDA_DATA_PATH: /data
- AOUDA_SHUTDOWNTIMEOUT: "00:02:00"
+  aouda:
+    image: ghcr.io/aoudadb/aouda-server
+    stop_grace_period: 130s
+    environment:
+      AOUDA_DATA_PATH: /data
+      AOUDA_SHUTDOWNTIMEOUT: "00:02:00"
 ```
 
 When the server is ready it logs `Start timings: …` — each start step's duration, the schema files and the slowest one's database

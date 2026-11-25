@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Adopting Aouda in an existing application
 
-Document status: Complete (P37, BL-183)
+Document status: Complete (P37, BL-183)  
 Last updated: 2026-08-20
 
 This is the page to read when you already have an application — a frontend, a gateway, some domain services — and you want to know **what the architecture should look like now** and **what you should delete**.
@@ -33,26 +33,26 @@ It is the **existing-application branch** of [How to build apps effortlessly wit
 ## Reference architecture
 
 ```
- ┌───────────────────────────────────────────┐
- Browser / mobile ──┤ Thin edge (TLS, WAF, CDN) │
- │ — moves bytes, does not parse the body │
- └───────┬───────────────────────┬───────────┘
- │ │
- app.example.com │ │ data.example.com
- ▼ ▼
- ┌──────────────────┐ ┌──────────────────────────┐
- │ Your services │ │ Aouda DATA-PLANE :5434 │
- │ (orchestration, │ │ auth · named query · │
- │ workflow, │ │ named mutation · ws │
- │ vendor I/O) │ │ everything else → 404 │
- └────────┬─────────┘ └────────────┬─────────────┘
+                     ┌───────────────────────────────────────────┐
+  Browser / mobile ──┤  Thin edge (TLS, WAF, CDN)                │
+                     │  — moves bytes, does not parse the body   │
+                     └───────┬───────────────────────┬───────────┘
+                             │                       │
+             app.example.com │                       │ data.example.com
+                             ▼                       ▼
+                  ┌──────────────────┐    ┌──────────────────────────┐
+                  │ Your services    │    │ Aouda DATA-PLANE :5434   │
+                  │ (orchestration,  │    │ auth · named query ·     │
+                  │  workflow,       │    │ named mutation · ws      │
+                  │  vendor I/O)     │    │ everything else → 404    │
+                  └────────┬─────────┘    └────────────┬─────────────┘
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
- ▼ ▼
- ┌────────────────────────────────────────────────┐
- │ Aouda ADMIN :5433 │
- │ never published — schema apply, ad-hoc query, │
- │ bulk load, admin/*, Studio, Hub │
- └────────────────────────────────────────────────┘
+                           ▼                           ▼
+                  ┌────────────────────────────────────────────────┐
+                  │            Aouda ADMIN :5433                    │
+                  │  never published — schema apply, ad-hoc query,  │
+                  │  bulk load, admin/*, Studio, Hub                │
+                  └────────────────────────────────────────────────┘
 ```
 
 Four rules hold this together:
@@ -123,14 +123,14 @@ The wire protocol and the client SDKs are not at the same level of coverage. Pla
 | `re_auth` on token refresh | ✅ | ✅ handled in the transport | ✅ |
 | **Subscribe by name (required on the data-plane)** | ✅ | ✅ `client.namedQueries.subscribe(name, args, { conflate })` | ✅ `client.NamedQueries.SubscribeAsync(name, args, options)` |
 | Declaring MQs in `aouda.schema.json` | ✅ `materializedQueries` map | ✅ via `schema apply` | ✅ via `schema apply` |
-| String / rounding functions in write-time expressions | ✅ `call` allowlist | ✅ `$upper` … `$cast` in `.update` | ✅ `SetExpr` builder |
+| String / rounding functions in write-time expressions | ✅ `call` allowlist | ✅ `$upper` … `$cast` in `.update()` | ✅ `SetExpr` builder |
 | `aouda schema diff --access` | ✅ | ❌ not shipped | ✅ (the `aouda` C# CLI) |
 | Materialized-query create / list **at runtime** | ✅ admin HTTP | ❌ | ❌ (`RefreshAsync` only) |
 
 Two caveats that still shape a plan:
 
-- **`schema diff --access` is C#-CLI only.** The CI gate that stops accidental access widening needs the `aouda` tool (`dotnet tool install --global Aouda.Cli`). If your pipeline already runs.NET anywhere, this costs one line. If it is a pure Node pipeline, adding.NET to CI is the price of the gate — and it is worth paying.
-- **Runtime MQ management is still.NET-only.** Declaring MQs in the schema file covers provisioning, which is what most applications need. Creating one dynamically at runtime is not something the TypeScript client can do.
+- **`schema diff --access` is C#-CLI only.** The CI gate that stops accidental access widening needs the `aouda` tool (`dotnet tool install --global Aouda.Cli`). If your pipeline already runs .NET anywhere, this costs one line. If it is a pure Node pipeline, adding .NET to CI is the price of the gate — and it is worth paying.
+- **Runtime MQ management is still .NET-only.** Declaring MQs in the schema file covers provisioning, which is what most applications need. Creating one dynamically at runtime is not something the TypeScript client can do.
 
 ### Subscribing on the data-plane
 
@@ -139,24 +139,24 @@ Two caveats that still shape a plan:
 ```typescript
 // Watchlist — table emits value updates (upsert), conflate works:
 const sub = client.namedQueries.subscribe(
- "equity.quotes",
- { tickers: ["AAPL", "MSFT"] },
- {
- conflate: { key: ["ticker"], interval_ms: 100 },
- onSnapshot: (rows, version) => grid.reset(rows, version),
- onChange: (event) => grid.apply(event),
- }
+  "equity.quotes",
+  { tickers: ["AAPL", "MSFT"] },
+  {
+    conflate: { key: ["ticker"], interval_ms: 100 },
+    onSnapshot: (rows, version) => grid.reset(rows, version),
+    onChange: (event) => grid.apply(event),
+  }
 );
 
 // Insert-only tick table — add collapse_inserts to throttle, or use a latestPerKey MQ:
 const lastPrice = client.namedQueries.subscribe(
- "quotes.lastPrice",
- { tickers: ["AAPL"], source: "nasdaq" },
- {
- conflate: { collapse_inserts: true },
- onSnapshot: (rows) => grid.reset(rows),
- onChange: (event) => grid.apply(event),
- }
+  "quotes.lastPrice",
+  { tickers: ["AAPL"], source: "nasdaq" },
+  {
+    conflate: { collapse_inserts: true },
+    onSnapshot: (rows) => grid.reset(rows),
+    onChange: (event) => grid.apply(event),
+  }
 );
 ```
 
@@ -220,17 +220,17 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 Hand this to whoever (or whatever) is writing the plan.
 
-- Server is `0.1.8`+ and the four trusted-surface breaks have been checked against current usage
-- `aouda.schema.json` is in git and `schema validate` is clean against every environment
-- Admin listener is unreachable from outside the private network — probed, not assumed
+- [ ] Server is `0.1.8`+ and the four trusted-surface breaks have been checked against current usage
+- [ ] `aouda.schema.json` is in git and `schema validate` is clean against every environment
+- [ ] Admin listener is unreachable from outside the private network — probed, not assumed
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- `aouda schema diff --access` runs on every PR that touches the schema
-- Named queries have `select` (never `*`), a capped `limit`, and ≤3 joins
-- Subscriptions are collection-shaped; measured count per connection is well under 32
-- Measured permits/minute per identity is recorded and `PermitLimit` is set from it
-- Independent panels use the batch envelope; dependent ones use joins
-- Rejected-row handling is defined for every table that gained a `check`
-- Every deletion is a separate PR from the construction that replaces it, and the rollback has been exercised
+- [ ] `aouda schema diff --access` runs on every PR that touches the schema
+- [ ] Named queries have `select` (never `*`), a capped `limit`, and ≤3 joins
+- [ ] Subscriptions are collection-shaped; measured count per connection is well under 32
+- [ ] Measured permits/minute per identity is recorded and `PermitLimit` is set from it
+- [ ] Independent panels use the batch envelope; dependent ones use joins
+- [ ] Rejected-row handling is defined for every table that gained a `check`
+- [ ] Every deletion is a separate PR from the construction that replaces it, and the rollback has been exercised
 
 ---
 

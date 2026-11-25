@@ -24,7 +24,7 @@ If your question is "How do I store and query graph edges?", start with:
 - §2.11 API coverage: `.NET` edge examples
 - §2.12 Scenario: Build and traverse a social graph
 
-If your question is "How do I do this over HTTP, from a language without the.NET engine?", start with:
+If your question is "How do I do this over HTTP, from a language without the .NET engine?", start with:
 - §2.11 [REST endpoints](#rest-endpoints)
 
 If your question is "How do I store embeddings and run nearest-neighbor search?", start with:
@@ -267,34 +267,34 @@ Aouda extends its columnar storage model with two new primitives alongside the e
 - Builds and exposes adjacency-aware traversal operators over the table — its sealed CSR segments (pruned by their `src` / `dst` statistics) and its write buffer, on one snapshot per traversal (**BL-813, 0.3.0**).
 - Late-arriving edges are flushed inline like any other edge; `_delta/` segments are removed (**ColumnarRead, 0.3.0**).
 - Stores **edge properties** — every column besides the source, destination and label — as ordinary columns (ADR 0027), scalars
- and arrays alike. What each write path stores in them:
+  and arrays alike. What each write path stores in them:
 
- | Write path | A property column |
- |---|---|
- | Bulk load (`BulkLoadAsync`, `:append` JSON rows or ACB2 frames) | what the row sent; an absent or null cell as on a tabular table (the column's `default`, else `null`; under `coerce` a `NOT NULL` column with no default takes its type's default) |
- | Row API (`InsertRowsAsync`, `POST …/rows`; `PATCH`, `POST …/rows/batch` to change one) | what the row sent, as on a tabular table |
- | `InsertEdgesAsync`, `POST …/edges` (source, destination and label only) | `null`. A table with a property that cannot be `null` — `NOT NULL`, with a `default`, or computed on write — refuses the call (`400 INVALID_REQUEST`, nothing written): write those edges through the row API or a bulk load |
+  | Write path | A property column |
+  |---|---|
+  | Bulk load (`BulkLoadAsync`, `:append` JSON rows or ACB2 frames) | what the row sent; an absent or null cell as on a tabular table (the column's `default`, else `null`; under `coerce` a `NOT NULL` column with no default takes its type's default) |
+  | Row API (`InsertRowsAsync`, `POST …/rows`; `PATCH`, `POST …/rows/batch` to change one) | what the row sent, as on a tabular table |
+  | `InsertEdgesAsync`, `POST …/edges` (source, destination and label only) | `null`. A table with a property that cannot be `null` — `NOT NULL`, with a `default`, or computed on write — refuses the call (`400 INVALID_REQUEST`, nothing written): write those edges through the row API or a bulk load |
 
- Before, a bulk load stored every property at its type's default (`0`, `false`, an empty GUID, `null` for a string) whatever the
- row sent, and so did `InsertEdgesAsync` / `POST …/edges`; only the row API kept them.
+  Before, a bulk load stored every property at its type's default (`0`, `false`, an empty GUID, `null` for a string) whatever the
+  row sent, and so did `InsertEdgesAsync` / `POST …/edges`; only the row API kept them.
 
- An edge inserted through `POST …/edges` keeps the `null` it was stored with when a property's `default` or nullability changes
- later: the change first writes the table's buffered rows and edges to segments, so it reaches only edges
- written after it — in the running server and after a crash replays the log. If they cannot be written out at that moment, the
- change is refused with nothing changed; retry it. A property **added** after an edge was stored reads as on a tabular table (the
- column's `default` at the change, else `null`).
+  An edge inserted through `POST …/edges` keeps the `null` it was stored with when a property's `default` or nullability changes
+  later: the change first writes the table's buffered rows and edges to segments, so it reaches only edges
+  written after it — in the running server and after a crash replays the log. If they cannot be written out at that moment, the
+  change is refused with nothing changed; retry it. A property **added** after an edge was stored reads as on a tabular table (the
+  column's `default` at the change, else `null`).
 
 Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, not separate tables. They may appear on any tabular table:
 - `DataType.Vector` — fixed-dimension dense float vectors. Each insert batch is WAL-framed, buffered in a per-column `VectorHraBuffer`, and flushed per IVF cell. Cold sealing optionally writes RaBitQ or PQ companion files.
 - `DataType.MdVector` — variable-length multi-vector storage (ColBERT / ColPali style). Written to `col_{colId}_mdvec.bin`. The companion FDE column for MaxSim retrieval is deferred to Stage 2.
 - **An inserted vector is found by `NearestNeighborsAsync` only after its buffer flushes** (BL-1728, open). The insert is acknowledged and
- durable — its frame is logged and replayed after a crash — but the search reads flushed vector segments only, not the write buffer, so a
- vector inserted a moment ago is not in its answer until the buffer flushes: the background pass's interval or row threshold, a clean
- close, a [backup](backup.md)'s seal, or a vector export (`aouda dump`). (The graph operators do read the buffered edges.)
+  durable — its frame is logged and replayed after a crash — but the search reads flushed vector segments only, not the write buffer, so a
+  vector inserted a moment ago is not in its answer until the buffer flushes: the background pass's interval or row threshold, a clean
+  close, a [backup](backup.md)'s seal, or a vector export (`aouda dump`). (The graph operators do read the buffered edges.)
 - **A flush that failed does not lose the buffer**. A graceful restart after an edge or vector flush
- failed replays the WAL for those rows — the open is slower, nothing is lost; before, the clean-shutdown marker was written before the
- last flush and a failed one lost the buffered edges or vectors. An edge or vector flush takes its segment ids from the catalog's allocator
- like every other producer, so a flush can no longer mint an id another segment holds.
+  failed replays the WAL for those rows — the open is slower, nothing is lost; before, the clean-shutdown marker was written before the
+  last flush and a failed one lost the buffered edges or vectors. An edge or vector flush takes its segment ids from the catalog's allocator
+  like every other producer, so a flush can no longer mint an id another segment holds.
 - **A table query does not return vectors.** A vector column is read by `NearestNeighborsAsync` (and the graph operators), not by `Where` / `Select` / `ToListAsync` / `ToColumnarAsync`, which read the table's own segments: there a vector column reads as **null in every row** (a projection, `ORDER BY`, `DISTINCT`, `COUNT(vec)` = 0, `WHERE vec IS NULL` matches every row). (**ColumnarRead, 0.3.0**) Before, a query that projected a vector column threw.
 
 **Key invariant:** Edge and vector storage reuse all existing engine primitives (column-per-file, HRA freeze-and-swap, WAL replay, hot/cold tiering, partition pruning, zone maps). They are not parallel subsystems.
@@ -334,8 +334,8 @@ Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissi
 - `null` permissions means embedded mode, with no auth context: unrestricted on a table no auth database governs, and **empty** on an
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - A credential that holds an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) on the
- table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
- and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, 0.9.0**)
+  table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
+  and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, 0.9.0**)
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
@@ -347,36 +347,36 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```
 InsertEdgesAsync / InsertVectorsAsync
- │
- ├─ WAL frame append (EdgeInsertV2 / VectorInsertV2)
- │
- ├─ EdgeHraBuffer / VectorHraBuffer (hot write area)
- │ │
- │ └─ HraManager: freeze-and-swap trigger
- │ │
- │ ├─ EdgeSegmentFlusher → CSR segments + csc_* files
- │ └─ VectorSegmentFlusher → fp32 pages + *.rabitq/*.pq companions
- │ └─ IvfCentroidStore: cell assignment at flush
- │
- └─ Cold segment registry & manifest updated → operator visibility
+    │
+    ├─ WAL frame append (EdgeInsertV2 / VectorInsertV2)
+    │
+    ├─ EdgeHraBuffer / VectorHraBuffer  (hot write area)
+    │       │
+    │       └─ HraManager: freeze-and-swap trigger
+    │               │
+    │               ├─ EdgeSegmentFlusher → CSR segments + csc_* files
+    │               └─ VectorSegmentFlusher → fp32 pages + *.rabitq/*.pq companions
+    │                       └─ IvfCentroidStore: cell assignment at flush
+    │
+    └─ Cold segment registry & manifest updated → operator visibility
 
 TraverseAsync / KHopNeighborhoodAsync / ShortestPathAsync
- └─ TraverseOperator / KHopNeighborhoodOperator / ShortestPathOperator
- └─ Scans CSR sealed segments; optional CSC for bidirectional BFS
+    └─ TraverseOperator / KHopNeighborhoodOperator / ShortestPathOperator
+           └─ Scans CSR sealed segments; optional CSC for bidirectional BFS
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
 
 NearestNeighborsAsync
- └─ NearestNeighborsOperator
- └─ IVF cell pruning → brute-force distance over fp32 / decoded RaBitQ pages
+    └─ NearestNeighborsOperator
+           └─ IVF cell pruning → brute-force distance over fp32 / decoded RaBitQ pages
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
- └─ Multi-partition fan-out merge (ADR 0032 M2 fix)
+           └─ Multi-partition fan-out merge (ADR 0032 M2 fix)
 ```
 
 ### 2.8.1 Critical path walk-throughs
 
 **Walk-through 1: Edge insert → CSR sealed segment → traversal**
 
-1. Caller invokes `AoudaEngine.InsertEdgesAsync("relations", srcs, dsts,...)`.
+1. Caller invokes `AoudaEngine.InsertEdgesAsync("relations", srcs, dsts, ...)`.
 2. Engine resolves table entry; validates `Kind == EdgeTable`.
 3. `AwaitBulkLoadLockReleaseAsync` blocks if a bulk-load job holds the table lock (Stage 1 defensive; bulk-load on edge tables gated by BL-071).
 4. Edges grouped by source-node partition key (if partitioned); each group dispatched to its `EdgeHraBuffer`.
@@ -424,7 +424,7 @@ Relevant tests: `tests/Aouda.Engine.Wal.Tests/` (WAL replay); `tests/Aouda.Engin
 2. `ShortestPathOperator.ShortestPathAsync` is invoked with `tableDef`.
 3. If `tableDef.EdgeConfig.StoreCsc == true`: bidirectional BFS — forward BFS from node `a` over CSR segments + backward BFS from node `b` over CSC segments. Both fronts advance alternately until they meet.
 4. If `StoreCsc == false`: unidirectional BFS over CSR only (potentially slower for long paths).
-5. Returns node sequence `[a,..., b]`; empty if no path exists.
+5. Returns node sequence `[a, ..., b]`; empty if no path exists.
 
 Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTests.cs`.
 
@@ -506,7 +506,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ### API coverage matrix
 
-| Capability |.NET API | TypeScript API | HTTP/Protocol | Status |
+| Capability | .NET API | TypeScript API | HTTP/Protocol | Status |
 |---|---|---|---|---|
 | Create edge table | `AoudaEngine.CreateEdgeTableAsync` | Not documented (see §2.20) | `POST …/edge-tables` | Implemented |
 | Insert edges | `AoudaEngine.InsertEdgesAsync` | Not documented | `POST …/tables/{name}/edges` | Implemented |
@@ -517,7 +517,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Insert vectors | `AoudaEngine.InsertVectorsAsync` | Not documented | `POST …/tables/{name}/vectors/{column}` (the table from `POST …/tables/{name}:create-vector-column`) | Implemented |
 | Delete vector | `AoudaEngine.DeleteVectorAsync` | Not documented | No route | Implemented |
 | ANN nearest neighbors | `AoudaEngine.NearestNeighborsAsync` | Not documented | `POST …/tables/{name}/vectors/{column}:nearest` | Implemented |
-| Bulk load (edge/vector via tabular bulk-load) | `AoudaEngine.BulkLoadAsync`, `AoudaClient.BulkLoadAsync` | `client.table(name).bulkLoad(...)` | `POST.../bulk-load:begin` etc. | Implemented — see §2.18 for edge/vector bulk-load status |
+| Bulk load (edge/vector via tabular bulk-load) | `AoudaEngine.BulkLoadAsync`, `AoudaClient.BulkLoadAsync` | `client.table(name).bulkLoad(...)` | `POST .../bulk-load:begin` etc. | Implemented — see §2.18 for edge/vector bulk-load status |
 
 ### Missing API matrix
 
@@ -556,20 +556,20 @@ object per result). `vectorData` is row-major: the vectors one after another, `r
 ```bash
 # The follow graph of Scenario 1, over HTTP
 curl -X POST "$AOUDA/api/databases/social/edge-tables" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
- -d '{ "name": "follows", "srcColumn": "src_id", "dstColumn": "dst_id", "storeCsc": true }'
+  -d '{ "name": "follows", "srcColumn": "src_id", "dstColumn": "dst_id", "storeCsc": true }'
 
 curl -X POST "$AOUDA/api/databases/social/tables/follows/edges" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
- -d '{ "srcs": [1, 1, 2], "dsts": [2, 3, 4] }'
+  -d '{ "srcs": [1, 1, 2], "dsts": [2, 3, 4] }'
 
 curl -X POST "$AOUDA/api/databases/social/tables/follows/edges:khop" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
- -d '{ "startNodeId": 1, "k": 2 }'
+  -d '{ "startNodeId": 1, "k": 2 }'
 # → { "nodeIds": [2, 3, 4], "hops": [1, 1, 2], "executionMs": 1 }
 ```
 
 The reads (`edges:traverse`, `edges:khop`, `edges:shortest-path`, `:nearest`) take the same freshness parameters as `POST …/query`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-###.NET examples
+### .NET examples
 
 **Create an edge table:**
 
@@ -578,17 +578,17 @@ using Aouda.Engine.Core.Schema;
 using Aouda.Engine.Api;
 
 var tableId = await engine.CreateEdgeTableAsync(
- name: "follows",
- edgeConfig: new EdgeTableConfig(
- SrcColumn: "src_id",
- DstColumn: "dst_id",
- EdgeLabel: "follows",
- StoreCsc: true), // enable bidirectional BFS
- columns: new
- {
- ("src_id", DataType.Int64, EncoderPreference.Auto, false, /*pk order*/1, /*partition*/null, /*cluster*/1, /*partFn*/null),
- ("dst_id", DataType.Int64, EncoderPreference.Auto, false, null, null, 2, null),
- });
+    name: "follows",
+    edgeConfig: new EdgeTableConfig(
+        SrcColumn: "src_id",
+        DstColumn: "dst_id",
+        EdgeLabel: "follows",
+        StoreCsc: true),            // enable bidirectional BFS
+    columns: new[]
+    {
+        ("src_id", DataType.Int64, EncoderPreference.Auto, false, /*pk order*/1, /*partition*/null, /*cluster*/1, /*partFn*/null),
+        ("dst_id", DataType.Int64, EncoderPreference.Auto, false, null, null, 2, null),
+    });
 ```
 
 **Insert edges:**
@@ -596,18 +596,18 @@ var tableId = await engine.CreateEdgeTableAsync(
 ```csharp
 // Insert edges: node 1 follows nodes 2 and 3; node 2 follows node 4
 await engine.InsertEdgesAsync(
- tableName: "follows",
- srcs: new long { 1, 1, 2 },
- dsts: new long { 2, 3, 4 });
+    tableName: "follows",
+    srcs: new long[] { 1, 1, 2 },
+    dsts: new long[] { 2, 3, 4 });
 ```
 
 **Traverse 1-hop neighbors:**
 
 ```csharp
-long oneHopNeighbors = await engine.TraverseAsync(
- tableName: "follows",
- startNodeId: 1,
- hops: 1);
+long[] oneHopNeighbors = await engine.TraverseAsync(
+    tableName: "follows",
+    startNodeId: 1,
+    hops: 1);
 // Returns [2, 3]
 ```
 
@@ -615,19 +615,19 @@ long oneHopNeighbors = await engine.TraverseAsync(
 
 ```csharp
 var neighborhood = await engine.KHopNeighborhoodAsync(
- tableName: "follows",
- startNodeId: 1,
- k: 2);
+    tableName: "follows",
+    startNodeId: 1,
+    k: 2);
 // Returns [(NodeId: 2, Hops: 1), (NodeId: 3, Hops: 1), (NodeId: 4, Hops: 2)]
 ```
 
 **Shortest path:**
 
 ```csharp
-long path = await engine.ShortestPathAsync(
- tableName: "follows",
- a: 1,
- b: 4);
+long[] path = await engine.ShortestPathAsync(
+    tableName: "follows",
+    a: 1,
+    b: 4);
 // Returns [1, 2, 4] when StoreCsc: true (bidirectional BFS)
 // or unidirectional BFS result when StoreCsc: false
 ```
@@ -641,55 +641,55 @@ long path = await engine.ShortestPathAsync(
 ```csharp
 // Step 1: create a tabular table with a vector column
 var tableId = await engine.CreateTableAsync(
- name: "documents",
- columns: new
- {
- new ColumnDef(new ColumnId(1), "chunk_id", DataType.Int64, new ColumnOptions),
- new ColumnDef(new ColumnId(2), "text", DataType.String, new ColumnOptions),
- new ColumnDef(new ColumnId(3), "embedding", DataType.Vector, new ColumnOptions),
- },
- policy: new TablePolicy(
- vectorColumns: new Dictionary<ColumnId, VectorColumnConfig>
- {
- [new ColumnId(3)] = new VectorColumnConfig(
- Dimensions: 1536,
- Distance: VectorDistance.Cosine,
- Quantization: VectorQuantization.RaBitQ,
- IvfCells: 32,
- EmbeddingModel: "openai/text-embedding-3-large",
- EmbeddingModelVersion: "v1")
- }));
+    name: "documents",
+    columns: new[]
+    {
+        new ColumnDef(new ColumnId(1), "chunk_id",  DataType.Int64,   new ColumnOptions()),
+        new ColumnDef(new ColumnId(2), "text",      DataType.String,  new ColumnOptions()),
+        new ColumnDef(new ColumnId(3), "embedding", DataType.Vector,  new ColumnOptions()),
+    },
+    policy: new TablePolicy(
+        vectorColumns: new Dictionary<ColumnId, VectorColumnConfig>
+        {
+            [new ColumnId(3)] = new VectorColumnConfig(
+                Dimensions: 1536,
+                Distance: VectorDistance.Cosine,
+                Quantization: VectorQuantization.RaBitQ,
+                IvfCells: 32,
+                EmbeddingModel: "openai/text-embedding-3-large",
+                EmbeddingModelVersion: "v1")
+        }));
 ```
 
 **Insert vectors (row-major float array):**
 
 ```csharp
 // rowKeys are the chunk_id values for the rows being vectorized
-var rowKeys = new long { 1001, 1002, 1003 };
-var vectors = new float { /* 1001: 1536 floats */, /* 1002: 1536 floats */, /* 1003: 1536 floats */ };
+var rowKeys  = new long[]  { 1001, 1002, 1003 };
+var vectors  = new float[] { /* 1001: 1536 floats */, /* 1002: 1536 floats */, /* 1003: 1536 floats */ };
 
 await engine.InsertVectorsAsync(
- tableName: "documents",
- columnName: "embedding",
- rowKeys: rowKeys,
- vectorData: vectors,
- embeddingModelVersion: "v1");
+    tableName: "documents",
+    columnName: "embedding",
+    rowKeys: rowKeys,
+    vectorData: vectors,
+    embeddingModelVersion: "v1");
 ```
 
 **Nearest-neighbor search:**
 
 ```csharp
-float queryEmbedding = /* 1536-float query vector */;
+float[] queryEmbedding = /* 1536-float query vector */;
 
 IReadOnlyList<(long RowKey, float Distance)> top10 = await engine.NearestNeighborsAsync(
- tableName: "documents",
- vectorColumnName: "embedding",
- queryEmbedding: queryEmbedding,
- k: 10,
- partitionKey: null); // pass a partition key to restrict to one tenant
+    tableName: "documents",
+    vectorColumnName: "embedding",
+    queryEmbedding: queryEmbedding,
+    k: 10,
+    partitionKey: null);          // pass a partition key to restrict to one tenant
 
 foreach (var (rowKey, dist) in top10)
- Console.WriteLine($"RowKey={rowKey} Distance={dist:F4}");
+    Console.WriteLine($"RowKey={rowKey}  Distance={dist:F4}");
 ```
 
 **Common mistake (vector):** Passing `queryEmbedding.Length != VectorColumnConfig.Dimensions` throws `ArgumentException("Query embedding has N dimensions but column expects M.")`. Always confirm the embedding model output dimension matches the column config.
@@ -713,13 +713,13 @@ TypeScript graph/vector method APIs (Traverse, NearestNeighbors, etc.) are not y
 ```csharp
 // 1. Create edge table with CSC for bidirectional lookups
 await engine.CreateEdgeTableAsync(
- name: "follows",
- edgeConfig: new EdgeTableConfig("src", "dst", StoreCsc: true),
- columns: new
- {
- ("src", DataType.Int64, EncoderPreference.Auto, false, 1, null, 1, null),
- ("dst", DataType.Int64, EncoderPreference.Auto, false, null, null, 2, null),
- });
+    name: "follows",
+    edgeConfig: new EdgeTableConfig("src", "dst", StoreCsc: true),
+    columns: new[]
+    {
+        ("src", DataType.Int64, EncoderPreference.Auto, false, 1, null, 1, null),
+        ("dst", DataType.Int64, EncoderPreference.Auto, false, null, null, 2, null),
+    });
 
 // 2. Bulk-load initial graph (or use InsertEdgesAsync for online writes)
 // Bulk-load path: see docs/dev/Functionality-Bulk-Load.md
@@ -729,12 +729,12 @@ var hood = await engine.KHopNeighborhoodAsync("follows", startNodeId: 42, k: 2);
 var secondDegree = hood.Where(n => n.Hops == 2).Select(n => n.NodeId);
 
 // 4. Find shortest path between users 42 and 99
-long path = await engine.ShortestPathAsync("follows", 42, 99);
+long[] path = await engine.ShortestPathAsync("follows", 42, 99);
 ```
 
 **Expected result checks:**
 - `hood` is ordered by `(Hops ascending, NodeId ascending)`.
-- `path` is `[42,..., 99]` (both endpoints included) or empty if unreachable.
+- `path` is `[42, ..., 99]` (both endpoints included) or empty if unreachable.
 - Traversal only considers edges in sealed CSR segments; edges still in `EdgeHraBuffer` become visible after flush.
 
 ---
@@ -747,21 +747,21 @@ long path = await engine.ShortestPathAsync("follows", 42, 99);
 
 ```csharp
 // 1. Create table with Vector column
-await engine.CreateTableAsync("docs", columns:..., policy: new TablePolicy(
- vectorColumns: new Dictionary<ColumnId, VectorColumnConfig>
- {
- [embColId] = new VectorColumnConfig(1536, VectorDistance.Cosine, VectorQuantization.RaBitQ, IvfCells: 64,
- EmbeddingModelVersion: "text-embedding-3-large@v1")
- }));
+await engine.CreateTableAsync("docs", columns: ..., policy: new TablePolicy(
+    vectorColumns: new Dictionary<ColumnId, VectorColumnConfig>
+    {
+        [embColId] = new VectorColumnConfig(1536, VectorDistance.Cosine, VectorQuantization.RaBitQ, IvfCells: 64,
+            EmbeddingModelVersion: "text-embedding-3-large@v1")
+    }));
 
 // 2. Insert text chunks and embeddings (supply external embeddings)
-long rowKeys = /* chunk IDs */;
-float allEmbeddings = /* N * 1536 floats, row-major */;
+long[] rowKeys = /* chunk IDs */;
+float[] allEmbeddings = /* N * 1536 floats, row-major */;
 await engine.InsertVectorsAsync("docs", "embedding", rowKeys, allEmbeddings,
- embeddingModelVersion: "text-embedding-3-large@v1");
+    embeddingModelVersion: "text-embedding-3-large@v1");
 
 // 3. Query (at search time)
-float queryVec = embedder.Embed(userQuery); // caller provides embedding
+float[] queryVec = embedder.Embed(userQuery);   // caller provides embedding
 var results = await engine.NearestNeighborsAsync("docs", "embedding", queryVec, k: 10);
 ```
 
@@ -781,11 +781,11 @@ var results = await engine.NearestNeighborsAsync("docs", "embedding", queryVec, 
 ```csharp
 // 1. Existing corpus was inserted with model v1
 await engine.InsertVectorsAsync("docs", "embedding", oldRowKeys, oldEmbeddings,
- embeddingModelVersion: "text-embedding-3-large@v1");
+    embeddingModelVersion: "text-embedding-3-large@v1");
 
 // 2. New embeddings arrive with model v2 (e.g., higher-dimension model updated columns on same rowkeys)
 await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
- embeddingModelVersion: "text-embedding-3-large@v2");
+    embeddingModelVersion: "text-embedding-3-large@v2");
 
 // Both model versions coexist as separate segments (SegmentManifest.EmbeddingModelVersion tracks each).
 // Queries against NearestNeighborsAsync see all sealed segments regardless of model version.
@@ -911,7 +911,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Stage 4 | Planned (P23) | No frozen object-storage tier; billion-vector corpora must reside on local disk | Ultra-scale vector lakes blocked on frozen tier |
 | MdVector retrieval | Stage 2 | `DataType.MdVector` data is stored but not queryable for MaxSim retrieval | Callers who insert `MdVector` in Stage 1 should plan to re-run `BulkLoadAsync` after Stage 2 lands to populate FDE |
 | TypeScript graph/vector method APIs | Missing | TS SDK consumers cannot traverse edges or run ANN natively | Evidence in P20-COMPLETION §5.2 is cross-repo only; no TS source confirmed in this workspace |
-| HTTP REST graph/vector endpoints | Partial | An HTTP client can create edge tables and vector tables, insert edges and vectors, traverse, take a k-hop neighborhood or a shortest path, and search nearest neighbors ([REST endpoints](#rest-endpoints)); it cannot delete an edge or a vector | No route for `DeleteEdgeAsync` / `DeleteVectorAsync`. — and a table with a `Vector` column, which commits and is searched by `NearestNeighborsAsync` : every such load failed at its commit, `Missing column N in manifest`). A load names its `embeddingModelVersion`; an ACB2 frame cannot carry a `Vector` column (`400 INVALID_REQUEST` at `:append`), so a vector-bearing table loads from JSON rows or the engine. `MdVector` columns are not bulk-loaded | A load's segments are visible only once it commits : a traversal or a nearest-neighbour search could see an uncommitted or aborted edge or vector load's segments) |
+| HTTP REST graph/vector endpoints | Partial | An HTTP client can create edge tables and vector tables, insert edges and vectors, traverse, take a k-hop neighborhood or a shortest path, and search nearest neighbors ([REST endpoints](#rest-endpoints)); it cannot delete an edge or a vector | No route for `DeleteEdgeAsync` / `DeleteVectorAsync`. (**Pass-10**: this row said the operators had no controller; `GraphVectorController` exposes them) |
+| Edge/vector bulk-load native support | Available | `BulkLoadAsync` (and `:begin` / `:append` / `:commit`) loads an edge table — every column, properties included — and a table with a `Vector` column, which commits and is searched by `NearestNeighborsAsync`: every such load failed at its commit, `Missing column N in manifest`). A load names its `embeddingModelVersion`; an ACB2 frame cannot carry a `Vector` column (`400 INVALID_REQUEST` at `:append`), so a vector-bearing table loads from JSON rows or the engine. `MdVector` columns are not bulk-loaded | A load's segments are visible only once it commits: a traversal or a nearest-neighbour search could see an uncommitted or aborted edge or vector load's segments) |
 
 ---
 

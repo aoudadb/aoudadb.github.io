@@ -36,16 +36,16 @@ If your question is "What is implemented vs missing?", jump to:
 Aouda is in-memory-first at execution time, but production use requires durable state, restart recovery, and retention boundaries that are operationally predictable.
 
 - User problem solved:
- - Keep table/catalog state durable across process restart and node failover.
- - Replay committed changes safely after crash without full rebuild.
- - Bound WAL growth while preserving replication and recovery safety.
+  - Keep table/catalog state durable across process restart and node failover.
+  - Replay committed changes safely after crash without full rebuild.
+  - Bound WAL growth while preserving replication and recovery safety.
 - Operational outcomes:
- - Deterministic on-disk layout for databases, tables, WAL, and metadata.
- - Restart semantics that combine catalog + segment files + WAL replay.
- - Backup/archive building blocks for long-term restore and PITR.
+  - Deterministic on-disk layout for databases, tables, WAL, and metadata.
+  - Restart semantics that combine catalog + segment files + WAL replay.
+  - Backup/archive building blocks for long-term restore and PITR.
 - Scope boundaries:
- - This doc covers storage layout, catalog persistence, WAL durability/replay/lifecycle, and backup/archive/restore implementation state.
- - It does not duplicate deep hot/cold policy behavior (covered in `Functionality-HotCold-And-Memory.md`) or full cluster behavior details.
+  - This doc covers storage layout, catalog persistence, WAL durability/replay/lifecycle, and backup/archive/restore implementation state.
+  - It does not duplicate deep hot/cold policy behavior (covered in `Functionality-HotCold-And-Memory.md`) or full cluster behavior details.
 
 ## 2.2 Discovery and navigation map
 
@@ -75,51 +75,51 @@ Aouda is in-memory-first at execution time, but production use requires durable 
 ### Source map
 
 - Task/report evidence:
- - `docs/tasks/P3/P3-Task7-HotSegmentPersistence-Report.md`
- - `docs/tasks/P3/P3-BugFix-HotSegmentPersistence-AllDataTypes-Report.md`
- - `docs/tasks/P4/P4-EpicD-Task1-BackupManifest-Report.md`
- - `docs/tasks/P4/P4-EpicD-Task3-IncrementalBackupEngine-Report.md`
- - `docs/tasks/P4/P4-EpicD-Task5-BackupLifecycleManagement-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task2-WalArchiveWorker-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task5-BackupIntegration-Report.md`
- - `docs/tasks/P6/P6-EpicA-Task4-TableNameBasedDirectoryStorage-Report.md`
- - `docs/tasks/P6/P6-EpicA-Task5-PerTableWalAndReplicationControl-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
+  - `docs/tasks/P3/P3-Task7-HotSegmentPersistence-Report.md`
+  - `docs/tasks/P3/P3-BugFix-HotSegmentPersistence-AllDataTypes-Report.md`
+  - `docs/tasks/P4/P4-EpicD-Task1-BackupManifest-Report.md`
+  - `docs/tasks/P4/P4-EpicD-Task3-IncrementalBackupEngine-Report.md`
+  - `docs/tasks/P4/P4-EpicD-Task5-BackupLifecycleManagement-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task2-WalArchiveWorker-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task5-BackupIntegration-Report.md`
+  - `docs/tasks/P6/P6-EpicA-Task4-TableNameBasedDirectoryStorage-Report.md`
+  - `docs/tasks/P6/P6-EpicA-Task5-PerTableWalAndReplicationControl-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
 - Core code:
- - `src/Aouda.Engine.Storage/StorageConstants.cs`
- - `src/Aouda.Engine.Storage/Layout/ServerDirectoryLayout.cs`
- - `src/Aouda.Engine.Storage/Layout/DatabaseDirectoryLayout.cs`
- - `src/Aouda.Engine.Catalog/CatalogStore.cs`
- - `src/Aouda.Engine.Wal/WalWriter.cs`
- - `src/Aouda.Engine.Storage/Bootstrap/StorageBootstrap.cs`
- - `src/Aouda.Engine.Storage/WalIntegration/WalReplayDriver.cs`
- - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
- - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
- - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
- - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
- - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
- - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
- - `src/Aouda.Server/Controllers/DatabasesController.cs`
- - `src/Aouda.Server/Controllers/ReplicationController.cs`
- - `src/Aouda.Server/Controllers/MetricsController.cs`
+  - `src/Aouda.Engine.Storage/StorageConstants.cs`
+  - `src/Aouda.Engine.Storage/Layout/ServerDirectoryLayout.cs`
+  - `src/Aouda.Engine.Storage/Layout/DatabaseDirectoryLayout.cs`
+  - `src/Aouda.Engine.Catalog/CatalogStore.cs`
+  - `src/Aouda.Engine.Wal/WalWriter.cs`
+  - `src/Aouda.Engine.Storage/Bootstrap/StorageBootstrap.cs`
+  - `src/Aouda.Engine.Storage/WalIntegration/WalReplayDriver.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
+  - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
+  - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
+  - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
+  - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
+  - `src/Aouda.Server/Controllers/DatabasesController.cs`
+  - `src/Aouda.Server/Controllers/ReplicationController.cs`
+  - `src/Aouda.Server/Controllers/MetricsController.cs`
 - TypeScript client code (cross-repo):
- - `../aouda-client-ts/src/databases.ts`
- - `../aouda-client-ts/src/admin/server.ts`
- - `../aouda-client-ts/src/types.ts`
+  - `../aouda-client-ts/src/databases.ts`
+  - `../aouda-client-ts/src/admin/server.ts`
+  - `../aouda-client-ts/src/types.ts`
 - Tests:
- - `tests/Aouda.Engine.Catalog.Tests/CatalogPersistenceTests.cs`
- - `tests/Aouda.Engine.Catalog.Tests/CatalogWalTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/EndToEndRestartTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/WalReplayDriverTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/WalCheckpointIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/WalFastForwardRestartTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/WalRetentionTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/BackupEngineIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/RestoreIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/LifecycleIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/PitrFromArchivedWalTests.cs`
- - `tests/Aouda.Server.Tests/ConfigurationIntegrationTests.cs`
- - `../aouda-client-ts/tests/databases.test.ts`
+  - `tests/Aouda.Engine.Catalog.Tests/CatalogPersistenceTests.cs`
+  - `tests/Aouda.Engine.Catalog.Tests/CatalogWalTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/EndToEndRestartTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/WalReplayDriverTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/WalCheckpointIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/WalFastForwardRestartTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/WalRetentionTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/BackupEngineIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/RestoreIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/LifecycleIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/PitrFromArchivedWalTests.cs`
+  - `tests/Aouda.Server.Tests/ConfigurationIntegrationTests.cs`
+  - `../aouda-client-ts/tests/databases.test.ts`
 
 ## 2.3 Defaults and zero-config behavior
 
@@ -152,42 +152,42 @@ If you run server defaults and do not set per-database overrides:
 ### Available now
 
 - Durable directory model:
- - Server root: `Server/` metadata + `Databases/` directories.
- - Per-database layout: `catalog/`, `wal/`, `tables/`, `materialized/`.
- - Table directories are named by table id (`tables/t{id}/...`, e.g. `t0005`), not by table name.
+  - Server root: `Server/` metadata + `Databases/` directories.
+  - Per-database layout: `catalog/`, `wal/`, `tables/`, `materialized/`.
+  - Table directories are named by table id (`tables/t{id}/...`, e.g. `t0005`), not by table name.
 - Catalog durability:
- - `CatalogStore` JSON snapshot persistence (`catalog/catalog.json`) with atomic temp-write + move.
- - Additional catalog WAL/checkpoint classes (`FileCatalog`, `CatalogWal`, `CatalogCheckpoint`) are implemented in catalog layer.
- - (**BL-980, 0.4.0**) The catalog reads only what this build writes, and refuses the rest with an error naming what it
- found: a catalog-WAL record in an older layout or of an unknown type (they were skipped), an unknown `PartitionOptions`
- member, a table without a data directory (made before BL-398), a segment entry without a row count. Pre-1.0 nothing is
- migrated: a database written by an older build is restored from a backup taken by this version, or re-created.
+  - `CatalogStore` JSON snapshot persistence (`catalog/catalog.json`) with atomic temp-write + move.
+  - Additional catalog WAL/checkpoint classes (`FileCatalog`, `CatalogWal`, `CatalogCheckpoint`) are implemented in catalog layer.
+  - (**BL-980, 0.4.0**) The catalog reads only what this build writes, and refuses the rest with an error naming what it
+    found: a catalog-WAL record in an older layout or of an unknown type (they were skipped), an unknown `PartitionOptions`
+    member, a table without a data directory (made before BL-398), a segment entry without a row count. Pre-1.0 nothing is
+    migrated: a database written by an older build is restored from a backup taken by this version, or re-created.
 - WAL durability and replay:
- - Append-only WAL frame writes (`WalWriter`), replay on restart (`WalReplayDriver`, `WalReplayer` paths), segment rolling and retention components.
- - Per-table durability override model (`TableDurabilityOptions`) is implemented.
+  - Append-only WAL frame writes (`WalWriter`), replay on restart (`WalReplayDriver`, `WalReplayer` paths), segment rolling and retention components.
+  - Per-table durability override model (`TableDurabilityOptions`) is implemented.
 - Restart semantics:
- - Storage bootstrap can load persisted segment state and replay WAL.
- - Hot segment persistence/reload and fallback behavior are implemented (P3 Task 7 + fix).
+  - Storage bootstrap can load persisted segment state and replay WAL.
+  - Hot segment persistence/reload and fallback behavior are implemented (P3 Task 7 + fix).
 - WAL lifecycle safety:
- - Slot-based retention boundary model (system/replication/backup/archive slots) implemented.
- All four slot types are live when the corresponding consumer exists (archive slot when
- `Archive.Enabled` + destination).
- - Retention worker infrastructure implemented and running. **Archive worker runs** when archive
- is configured — see `2.8.1` Walk-through D and
- [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
+  - Slot-based retention boundary model (system/replication/backup/archive slots) implemented.
+    All four slot types are live when the corresponding consumer exists (archive slot when
+    `Archive.Enabled` + destination).
+  - Retention worker infrastructure implemented and running. **Archive worker runs** when archive
+    is configured — see `2.8.1` Walk-through D and
+    [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
 - Backup/restore engines:
- - `BackupEngine`, `RestoreEngine`, and `BackupLifecycleManager` implemented and tested, for **exact** restore and **PITR**.
- - **Point-in-time recovery (PITR) is implemented.** Replay is the crash-recovery path, at
- transaction-commit granularity, reachable over HTTP and both SDKs. The local window is a
- write-volume bound (`MaxSlotWalKeepBytes`), not a duration. See
- [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
+  - `BackupEngine`, `RestoreEngine`, and `BackupLifecycleManager` implemented and tested, for **exact** restore and **PITR**.
+  - **Point-in-time recovery (PITR) is implemented.** Replay is the crash-recovery path, at
+    transaction-commit granularity, reachable over HTTP and both SDKs. The local window is a
+    write-volume bound (`MaxSlotWalKeepBytes`), not a duration. See
+    [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
 
 ### Planned / proposed
 
 - Broader cloud destination operationalization:
- - Archive destination abstraction exists; Azure/GCS still throw `NotSupportedException`.
+  - Archive destination abstraction exists; Azure/GCS still throw `NotSupportedException`.
 - Per-database checkpoint synchronization in replication:
- - Current replication hosted service explicitly documents first-database checkpoint limitation.
+  - Current replication hosted service explicitly documents first-database checkpoint limitation.
 
 ### Reserved / not yet wired
 
@@ -212,7 +212,7 @@ If you run server defaults and do not set per-database overrides:
 | Stable server/database/table storage layout | Yes | No | No | `StorageConstants.cs`, layout classes, P6 Task4 report | Table-name path model is active |
 | Catalog snapshot durability (`catalog.json`) | Yes | No | No | `CatalogStore.cs`, catalog tests | Atomic temp-write + move |
 | WAL append durability and replay | Yes | No | No | `WalWriter.cs`, replay/bootstrap paths, restart tests | Core durability path shipped |
-| Per-table durability level | Yes | No | No | P6 Task5 report, `AoudaEngine` durability resolution, Lead S26 | (**Lead S26, 0.6.0**) A table names `strict`, `unlogged` or `memory`, or inherits the database's level; `strict` needs a database with a WAL (`strict` or `os`;), `os` is a database level only |
+| Per-table durability level | Yes | No | No | P6 Task5 report, `AoudaEngine` durability resolution, Lead S26 | (**Lead S26, 0.6.0**) A table names `strict`, `unlogged` or `memory`, or inherits the database's level; `strict` needs a database with a WAL (`strict` or `os`), `os` is a database level only |
 | Per-database WAL replication framing | Yes | No | No | P6 EpicE Task1 report, replication streaming code | v2 frame model with DB tagging |
 | Hot segment file persistence and restart hot-load | Yes | No | No | P3 Task7 report + bugfix report, hot persistence tests | Type-complete persistence added |
 | WAL slot lifecycle management (`system/replication/backup/archive`) | Yes | No | No | ADR 0016 + P4 Epic I + BL-186 S05 | Retention boundaries consumer-aware. Archive slot is created when archiving is configured |
@@ -228,87 +228,87 @@ If you run server defaults and do not set per-database overrides:
 ## 2.7 Core concepts and mental model
 
 - **Server root layout**
- - `Server/` holds server-level metadata (including DB registry).
- - `Databases/{db}/` is each logical database root.
+  - `Server/` holds server-level metadata (including DB registry).
+  - `Databases/{db}/` is each logical database root.
 - **Database persistence planes**
- - `catalog/` for schema/policy snapshot.
- - `wal/` for write-ahead durability and replay.
- - `tables/` for table segment files.
- - `materialized/` for materialized definition/state files.
+  - `catalog/` for schema/policy snapshot.
+  - `wal/` for write-ahead durability and replay.
+  - `tables/` for table segment files.
+  - `materialized/` for materialized definition/state files.
 - **Table segment file types** (P30 additions):
- - `.col` — cold column segment file (always produced by the demotion path)
- - `.hot` — immutable hot segment file (produced at flush; P30 hot-first invariant)
- - `.hra` — HRA snapshot on graceful shutdown; included in backup since P30 (Gap C)
- - `.mkt` — mutable keyed tier serialisation; included in backup since P30 (Gap C)
- - `.spr` — sparse PK index for cold segments
- - `.tombstone` — durable retirement tombstone preventing orphaned cold file resurrection after crash (P30 S11)
- - `_deleted.pages` — a segment's deletion mask. (**ColumnarCore S12, 0.2.0**) A merge that tombstones rows now
- appends a small record (each with its own CRC; a torn one is ignored) instead of rewriting the whole mask: the file
- is the whole bitmap followed by those records, rewritten whole when the records outgrow the bitmap. That is its only
- layout. A mask that exists but cannot be read fails the read, naming the table and segment, instead of being taken
- as nothing deleted (**BL-725, 0.2.0**). Its header records how many rows the bitmap deletes, and a mask whose
- count disagrees with its bitmap is unreadable (**ColumnarRead, 0.3.0**).
- - `segment.manifest` — a cold segment's footer (**ColumnarRead, 0.3.0**): every page's location and statistics
- (min / max, null count, sortedness, run count, first / last value, sums, small value sets), the first and last
- sort-key value of each 8,192-row group, each series' row range, and the primary-key range. CRC-checked; a footer
- written by an earlier build is refused.
+  - `.col` — cold column segment file (always produced by the demotion path)
+  - `.hot` — immutable hot segment file (produced at flush; P30 hot-first invariant)
+  - `.hra` — HRA snapshot on graceful shutdown; included in backup since P30 (Gap C)
+  - `.mkt` — mutable keyed tier serialisation; included in backup since P30 (Gap C)
+  - `.spr` — sparse PK index for cold segments
+  - `.tombstone` — durable retirement tombstone preventing orphaned cold file resurrection after crash (P30 S11)
+  - `_deleted.pages` — a segment's deletion mask. (**ColumnarCore S12, 0.2.0**) A merge that tombstones rows now
+    appends a small record (each with its own CRC; a torn one is ignored) instead of rewriting the whole mask: the file
+    is the whole bitmap followed by those records, rewritten whole when the records outgrow the bitmap. That is its only
+    layout. A mask that exists but cannot be read fails the read, naming the table and segment, instead of being taken
+    as nothing deleted (**BL-725, 0.2.0**). Its header records how many rows the bitmap deletes, and a mask whose
+    count disagrees with its bitmap is unreadable (**ColumnarRead, 0.3.0**).
+  - `segment.manifest` — a cold segment's footer (**ColumnarRead, 0.3.0**): every page's location and statistics
+    (min / max, null count, sortedness, run count, first / last value, sums, small value sets), the first and last
+    sort-key value of each 8,192-row group, each series' row range, and the primary-key range. CRC-checked; a footer
+    written by an earlier build is refused.
 - **Table segment layout**
- - A table's directory is `tables/t{id}`: its catalog id, zero-padded to four digits (`t0005`), set at create and never
- changed; a rename does not move it.
- - A dropped table's directory is deleted with the drop. If that delete fails (a file held open, a permission) or the
- process stops between the drop and the delete, the next open removes it: a `t{id}` directory that no table holds,
- whose id is below the catalog's table-id allocator. The open leaves it while the database has a branch, a restore
- stopped part-way, or a point-in-time restore is pending (**BL-1255, 0.9.0**).
- - Default non-partitioned path uses `data/seg_*`.
- - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, 0.3.0**).
- - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
- catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, 0.3.0**).
+  - A table's directory is `tables/t{id}`: its catalog id, zero-padded to four digits (`t0005`), set at create and never
+    changed; a rename does not move it.
+  - A dropped table's directory is deleted with the drop. If that delete fails (a file held open, a permission) or the
+    process stops between the drop and the delete, the next open removes it: a `t{id}` directory that no table holds,
+    whose id is below the catalog's table-id allocator. The open leaves it while the database has a branch, a restore
+    stopped part-way, or a point-in-time restore is pending (**BL-1255, 0.9.0**).
+  - Default non-partitioned path uses `data/seg_*`.
+  - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, 0.3.0**).
+  - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
+    catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, 0.3.0**).
 - **Upgrading from 0.2.x: export and reload** (**architecture review, 0.3.0**)
- - The catalog format is **6** (**RR-A2-4, 0.3.0**; 5 before WorkloadCore added segment fields, 4 in 0.2.x). A data
- directory in any other catalog format — 0.2.x's 4, a development build's 5, a newer build's — is **refused at open**
- with `CatalogFormatException` naming the version found and version 6; there is no migration from any older format,
- the flat format-1 `catalog.json` included. For 0.2.x: export the data with the 0.2.x build that wrote it and load it into a fresh
- data directory with this build. There is no in-place upgrade — this build cannot read 0.2.x cold pages, footers or
- `.hot` files. Before, the catalog version had not moved, so a 0.2.x directory opened and its cold segments read as
- **zero rows, with no error**. The reverse holds too: a 0.2.x build refuses a directory this build wrote ("newer than
- this build supports").
- - A cold segment whose footer is another version fails the read that reaches it with
- `SegmentFormatUnsupportedException`, naming the table, the segment and the version — never an empty read. A 0.2.x
- **backup** does not get that far: the restore refuses it as backup format 1 or 2 (**BL-840, 0.3.0**), before it
- touches the target ([Backup](backup.md#10-errors)).
- - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
- taken with the older build is what carries them over.
- - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
- - (**Horizon, 0.5.0**) The catalog format is **10** (8: a windowed result's horizon; 9: a table's row-id floor, kept when
- whole segments are retired; 10: a table's retention), and a materialized-query definition file is version **2**. A directory
- written by 0.4.0 (catalog format 7), or by any other format, is refused at open naming the version found and the version
- expected; there is no migration. The WAL gains a `RangeDelete` frame (tag 73), which an older build does not know.
- - (**Lead S20a, 0.6.0**) The catalog format is **11**: a bulk load's commit record (a catalog journal record) carries the
- job's idempotency key, rows, commit time and token, and a table's shard keeps those for the idempotency window. The two side
- files `bulk-load-idempotency.log` and `bulk-load-outcomes.log` are gone. A directory in catalog format 10 (0.5.0) is refused at
- open naming 10 and 11; there is no migration — reload the data from its source.
- - (**Lead S26, 0.6.0**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
- a table records its durability level, and a database its level in place of `enableWal`. A data directory written by an
- earlier build is refused at open naming the version found and the version expected; there is no migration.
- - (**BL-1378, 0.11.0**) The catalog format is **17**: an auth database's `_api_keys` table and its per-user permission table carry
- a `source` column (where a key or permission row came from: created through the API, or declared in configuration). The format version
- marks the **whole data directory**. A directory written by 0.10.0 or earlier (format 16) makes the **server refuse to start**:
- before any database is opened the registry is read and the first database whose catalog declares another format ends the
- start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
- written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
- first with the build that wrote it, then delete the data directory and start fresh. Principals and keys declared in `aouda.json`
+  - The catalog format is **6** (**RR-A2-4, 0.3.0**; 5 before WorkloadCore added segment fields, 4 in 0.2.x). A data
+    directory in any other catalog format — 0.2.x's 4, a development build's 5, a newer build's — is **refused at open**
+    with `CatalogFormatException` naming the version found and version 6; there is no migration from any older format,
+    the flat format-1 `catalog.json` included. For 0.2.x: export the data with the 0.2.x build that wrote it and load it into a fresh
+    data directory with this build. There is no in-place upgrade — this build cannot read 0.2.x cold pages, footers or
+    `.hot` files. Before, the catalog version had not moved, so a 0.2.x directory opened and its cold segments read as
+    **zero rows, with no error**. The reverse holds too: a 0.2.x build refuses a directory this build wrote ("newer than
+    this build supports").
+  - A cold segment whose footer is another version fails the read that reaches it with
+    `SegmentFormatUnsupportedException`, naming the table, the segment and the version — never an empty read. A 0.2.x
+    **backup** does not get that far: the restore refuses it as backup format 1 or 2 (**BL-840, 0.3.0**), before it
+    touches the target ([Backup](backup.md#10-errors)).
+  - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
+    taken with the older build is what carries them over.
+  - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
+  - (**Horizon, 0.5.0**) The catalog format is **10** (8: a windowed result's horizon; 9: a table's row-id floor, kept when
+    whole segments are retired; 10: a table's retention), and a materialized-query definition file is version **2**. A directory
+    written by 0.4.0 (catalog format 7), or by any other format, is refused at open naming the version found and the version
+    expected; there is no migration. The WAL gains a `RangeDelete` frame (tag 73), which an older build does not know.
+  - (**Lead S20a, 0.6.0**) The catalog format is **11**: a bulk load's commit record (a catalog journal record) carries the
+    job's idempotency key, rows, commit time and token, and a table's shard keeps those for the idempotency window. The two side
+    files `bulk-load-idempotency.log` and `bulk-load-outcomes.log` are gone. A directory in catalog format 10 (0.5.0) is refused at
+    open naming 10 and 11; there is no migration — reload the data from its source.
+  - (**Lead S26, 0.6.0**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
+    a table records its durability level, and a database its level in place of `enableWal`. A data directory written by an
+    earlier build is refused at open naming the version found and the version expected; there is no migration.
+  - (**BL-1378, 0.11.0**) The catalog format is **17**: an auth database's `_api_keys` table and its per-user permission table carry
+    a `source` column (where a key or permission row came from: created through the API, or declared in configuration). The format version
+    marks the **whole data directory**. A directory written by 0.10.0 or earlier (format 16) makes the **server refuse to start**:
+    before any database is opened the registry is read and the first database whose catalog declares another format ends the
+    start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
+    written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
+    first with the build that wrote it, then delete the data directory and start fresh. Principals and keys declared in `aouda.json`
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
- - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
+  - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - **Durability layering**
- - Catalog snapshot durability and WAL durability are complementary, not alternatives.
- - WAL allows replay of committed deltas between snapshots/checkpoints.
+  - Catalog snapshot durability and WAL durability are complementary, not alternatives.
+  - WAL allows replay of committed deltas between snapshots/checkpoints.
 - **Slot-governed WAL lifecycle**
- - Retention delete boundary is controlled by minimum active consumer position.
- - Consumers include replication, backup, and archive paths.
+  - Retention delete boundary is controlled by minimum active consumer position.
+  - Consumers include replication, backup, and archive paths.
 - **Engine vs server integration**
- - Backup/archive/restore engines are feature-rich in storage layer.
- - Public server APIs today expose replication/admin metrics, but not full backup orchestration operations.
+  - Backup/archive/restore engines are feature-rich in storage layer.
+  - Public server APIs today expose replication/admin metrics, but not full backup orchestration operations.
 
 Invariants:
 
@@ -322,17 +322,17 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 Row deletes keep their model — a deletion mask (`_deleted.pages`) per segment, read through — and lose four wastes:
 
 - **`TRUNCATE` retires the table's segments** instead of writing a mask over every row of every segment. The statement is still one
- WAL record and still atomic for readers; the segments leave in one catalog batch right after its commit, and the disk is freed at
- once. A segment another mechanism owns at that instant (a flush in progress) keeps the old mask path.
+  WAL record and still atomic for readers; the segments leave in one catalog batch right after its commit, and the disk is freed at
+  once. A segment another mechanism owns at that instant (a flush in progress) keeps the old mask path.
 - **A segment with no live row is retired whole** by the hot or cold coalescer's next pass — one catalog batch, nothing rewritten, its
- files (with its deletion mask and the mask's directory) gone once no reader that pinned it still holds it. Before, it stayed on disk
- and in every scan until some merge happened to pick it up, and a hot one never was.
+  files (with its deletion mask and the mask's directory) gone once no reader that pinned it still holds it. Before, it stayed on disk
+  and in every scan until some merge happened to pick it up, and a hot one never was.
 - **A cold segment with at least 25 % of its rows deleted is rewritten alone within one coalescer tick, whatever its size.** Before,
- only cold segments under 65,536 rows were ever merged, so a large bulk-loaded segment kept its deleted rows for ever. Measured:
- 200,000 rows at 30 % deleted, rewritten in one tick (1.2 s) into 140,000; at 20 %, left alone; 1,048,576 rows at 30 %, one tick,
- 4.0 s. That holds for a segment whose metadata is resident; one not loaded is judged when it is next loaded. On a table with a
- horizon (a windowed result, or a table with [retention](retention.md)) only a segment wholly at or after
- the horizon, inside one time slice, is rewritten; one reaching below it is left for expiry to drop whole.
+  only cold segments under 65,536 rows were ever merged, so a large bulk-loaded segment kept its deleted rows for ever. Measured:
+  200,000 rows at 30 % deleted, rewritten in one tick (1.2 s) into 140,000; at 20 %, left alone; 1,048,576 rows at 30 %, one tick,
+  4.0 s. That holds for a segment whose metadata is resident; one not loaded is judged when it is next loaded. On a table with a
+  horizon (a windowed result, or a table with [retention](retention.md)) only a segment wholly at or after
+  the horizon, inside one time slice, is rewritten; one reaching below it is left for expiry to drop whole.
 - **A scan does not plan a segment, or visit a row group, whose rows are all deleted** — no page is loaded.
 
 Retiring the segment that holds a table's highest row id would lower the row-id watermark, which is computed from the catalogued
@@ -357,35 +357,35 @@ High-level path:
 Key implementation anchors:
 
 - Layout and pathing:
- - `src/Aouda.Engine.Storage/StorageConstants.cs`
- - `src/Aouda.Engine.Storage/Layout/ServerDirectoryLayout.cs`
- - `src/Aouda.Engine.Storage/Layout/DatabaseDirectoryLayout.cs`
+  - `src/Aouda.Engine.Storage/StorageConstants.cs`
+  - `src/Aouda.Engine.Storage/Layout/ServerDirectoryLayout.cs`
+  - `src/Aouda.Engine.Storage/Layout/DatabaseDirectoryLayout.cs`
 - Registry/catalog:
- - `src/Aouda.Engine.Storage/Registry/DatabaseRegistryStore.cs`
- - `src/Aouda.Engine.Catalog/CatalogStore.cs`
- - `src/Aouda.Engine.Catalog/CatalogApi.cs`
+  - `src/Aouda.Engine.Storage/Registry/DatabaseRegistryStore.cs`
+  - `src/Aouda.Engine.Catalog/CatalogStore.cs`
+  - `src/Aouda.Engine.Catalog/CatalogApi.cs`
 - WAL/recovery:
- - `src/Aouda.Engine.Wal/WalWriter.cs`
- - `src/Aouda.Engine.Storage/Bootstrap/StorageBootstrap.cs`
- - `src/Aouda.Engine.Storage/WalIntegration/WalReplayDriver.cs`
- - `src/Aouda.Engine.Storage/WalIntegration/WalCheckpointer.cs`
+  - `src/Aouda.Engine.Wal/WalWriter.cs`
+  - `src/Aouda.Engine.Storage/Bootstrap/StorageBootstrap.cs`
+  - `src/Aouda.Engine.Storage/WalIntegration/WalReplayDriver.cs`
+  - `src/Aouda.Engine.Storage/WalIntegration/WalCheckpointer.cs`
 - Backup/archive/restore:
- - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
- - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
- - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
- - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
+  - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
+  - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
 - Server wiring:
- - `src/Aouda.Server/Startup/AoudaHostedService.cs`
- - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
- - `src/Aouda.Server/Controllers/DatabasesController.cs`
- - `src/Aouda.Server/Controllers/ReplicationController.cs`
- - `src/Aouda.Server/Controllers/MetricsController.cs`
+  - `src/Aouda.Server/Startup/AoudaHostedService.cs`
+  - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
+  - `src/Aouda.Server/Controllers/DatabasesController.cs`
+  - `src/Aouda.Server/Controllers/ReplicationController.cs`
+  - `src/Aouda.Server/Controllers/MetricsController.cs`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
 ### Walk-through A: Startup/open database -> durable layout + WAL-ready engine
 
-1. `AoudaHostedService.StartAsync` creates `ServerDirectoryLayout` for configured data root.
+1. `AoudaHostedService.StartAsync()` creates `ServerDirectoryLayout` for configured data root.
 2. It initializes `DatabaseRegistry`/`DatabaseManager` from persisted registry snapshot.
 3. For each database, manager opens engine through `AoudaEngine.OpenAsync(...)`.
 4. `OpenAsync` ensures database directories, loads catalog snapshot, creates `FilePageStore`, conditionally creates `WalWriter`.
@@ -407,8 +407,8 @@ Primary tests:
 
 1. Write enters engine mutation path (`InsertRowsAsync`/update path).
 2. `ResolveWalWriter(tableEntry)` decides effective writer:
- - Database at `unlogged` or `memory` -> no writer (**Lead S26, 0.6.0**).
- - A table at `unlogged` or `memory` (its own level) -> no writer, even when the database has a WAL.
+   - Database at `unlogged` or `memory` -> no writer (**Lead S26, 0.6.0**).
+   - A table at `unlogged` or `memory` (its own level) -> no writer, even when the database has a WAL.
 3. If writer exists, `WalWriter.AppendAsync(...)` writes framed WAL record and flushes.
 4. On restart, `StorageBootstrap` + `WalReplayDriver` consume checkpoint boundaries and replay frames into HRA/storage state.
 
@@ -428,10 +428,10 @@ Primary tests:
 
 1. Caller invokes `BackupEngine.CreateBackupAsync(...)`.
 2. Engine takes one image of the catalog store — every table and segment entry, with keys, partitioning, cluster order,
- nullability and policies — pins the segments it names until they are uploaded, then captures WAL position/fencing token
- (**BL-840, 0.3.0**; it wrote a catalog checkpoint, `catalog.chk`, which held only column ids, names, types and encoders).
- The backup format is 3; a restore puts the catalog store back as it was and refuses an older format before it touches the
- target.
+   nullability and policies — pins the segments it names until they are uploaded, then captures WAL position/fencing token
+   (**BL-840, 0.3.0**; it wrote a catalog checkpoint, `catalog.chk`, which held only column ids, names, types and encoders).
+   The backup format is 3; a restore puts the catalog store back as it was and refuses an older format before it touches the
+   target.
 3. Manifest builder computes SHA256 across eligible files and compares against base manifest for incremental mode.
 4. New blobs are uploaded (parallelism-limited), dedup by content hash.
 5. Manifest/index is written.
@@ -462,47 +462,47 @@ it is neither, and the sections were never separated. They are now.
 #### D.1 — The sound part: physical layout, positions, and reclamation
 
 1. **Physical layout.** The production WAL is a segmented log under `{db}/wal/`: segments named
- `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json` (it carries the WAL root's id; (**BL-980, 0.4.0**) a
- published manifest without one — only a build before BL-330 / BL-438 wrote one — is refused when the WAL root opens), a crash-recovery control
- file `CHECKPOINT`, and a portioned-recovery resume sidecar `RECOVERY`. Segment size is
- `clamp(MaxWalBytes / 16, 8 MB, 64 MB)`. A leftover monolithic `insert.wal` from before
- segmentation is refused at open — (**BL-934, 0.4.0**) for good: `aouda wal convert` is removed, so restore from a backup
- taken by this version, or delete `insert.wal` to discard the writes it holds that were never checkpointed.
+   `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json` (it carries the WAL root's id; (**BL-980, 0.4.0**) a
+   published manifest without one — only a build before BL-330 / BL-438 wrote one — is refused when the WAL root opens), a crash-recovery control
+   file `CHECKPOINT`, and a portioned-recovery resume sidecar `RECOVERY`. Segment size is
+   `clamp(MaxWalBytes / 16, 8 MB, 64 MB)`. A leftover monolithic `insert.wal` from before
+   segmentation is refused at open — (**BL-934, 0.4.0**) for good: `aouda wal convert` is removed, so restore from a backup
+   taken by this version, or delete `insert.wal` to discard the writes it holds that were never checkpointed.
 2. **Position model.** Every WAL position — in a slot, in the checkpoint, on the ladder below — is
- a **cumulative byte offset into a virtual, infinite log** (the PostgreSQL LSN model), not a row
- count and not a file offset. `WalManifest` tracks a pruned base offset so absolute positions
- survive segment deletion. Any WAL-related number that is not in this unit is a bug.
-3. **Reclamation boundary.** `WalSlotManager.GetSafeDeleteBoundary` returns the **minimum**
- `LastConsumedPosition` across every active slot (`system`, `backup`, `replication` per
- subscriber, and `archive` when one exists — see D.2). WAL is never deleted past the slowest
- consumer, by construction.
+   a **cumulative byte offset into a virtual, infinite log** (the PostgreSQL LSN model), not a row
+   count and not a file offset. `WalManifest` tracks a pruned base offset so absolute positions
+   survive segment deletion. Any WAL-related number that is not in this unit is a bug.
+3. **Reclamation boundary.** `WalSlotManager.GetSafeDeleteBoundary()` returns the **minimum**
+   `LastConsumedPosition` across every active slot (`system`, `backup`, `replication` per
+   subscriber, and `archive` when one exists — see D.2). WAL is never deleted past the slowest
+   consumer, by construction.
 4. **Checkpoint horizon (the `system` slot).** On each flush and periodically, the engine computes
- a watermark from the compaction state and the WAL's own safe-redo position, writes an
- `HraCheckpoint` frame per table, and rewrites `{db}/wal/CHECKPOINT` with that watermark as the
- redo start position. This horizon lets crash recovery **fast-forward** past already-flushed WAL
- — it never by itself authorizes **deletion**; deletion is always `MIN(all slots)` (previous
- point), a distinction that matters because it is easy to conflate the two.
+   a watermark from the compaction state and the WAL's own safe-redo position, writes an
+   `HraCheckpoint` frame per table, and rewrites `{db}/wal/CHECKPOINT` with that watermark as the
+   redo start position. This horizon lets crash recovery **fast-forward** past already-flushed WAL
+   — it never by itself authorizes **deletion**; deletion is always `MIN(all slots)` (previous
+   point), a distinction that matters because it is easy to conflate the two.
 5. **Retention worker cycle** — (**WorkloadCore S16, 0.3.0**) on demand: when the log crosses 85 % of `MaxWalBytes`
- (`T26`), when an append is refused at 95 %, and after every checkpoint; it used to run every
- `RetentionCheckInterval` (5 minutes), which is gone. It computes the safe
- delete boundary; applies an archive-before-delete constraint if configured; invalidates (deletes)
- any slot but `system` whose lag from the current WAL head exceeds `MaxSlotWalKeepBytes`; recompute
- the boundary; prune whole segment files below it, always keeping the active segment; publish the
- reduced manifest before deleting files (a crash between the two leaves unmanifested files, which
- open reconciles); update WAL-on-disk / WAL-reclaimable inventory metrics.
+   (`T26`), when an append is refused at 95 %, and after every checkpoint; it used to run every
+   `RetentionCheckInterval` (5 minutes), which is gone. It computes the safe
+   delete boundary; applies an archive-before-delete constraint if configured; invalidates (deletes)
+   any slot but `system` whose lag from the current WAL head exceeds `MaxSlotWalKeepBytes`; recompute
+   the boundary; prune whole segment files below it, always keeping the active segment; publish the
+   reduced manifest before deleting files (a crash between the two leaves unmanifested files, which
+   open reconciles); update WAL-on-disk / WAL-reclaimable inventory metrics.
 6. **The size ladder** (`WalSizeGovernor`, one per WAL root) is the backstop: `MaxWalBytes` derived
- from free disk space at open and (**BL-787, 0.3.0**) recomputed after reclaims from the disk and the largest working set
- the log has held — see [Sizing](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-030), whose `[WAL]` log
- lines show each crossing — a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, 0.3.0**)
- (it was an insert-throttle rung: a fixed delay inside the commit; the writer is now slowed before
- it takes any lock, by the ingest stall curve — see the sizing guide), an
- insert-refusal rung (`WAL_CAPACITY_EXCEEDED`, HTTP 503 + a `Retry-After` estimated from the rate
- retention frees log) at 95%, and a
- slot-keep-bytes rung (`MaxSlotWalKeepBytes`, roughly half of `MaxWalBytes`, clamped to 128 MB–2
- GB) — the **only** mechanism that ever forces a slot to give up WAL it has not consumed. This is
- also the local PITR window's true shape: a bound on **write volume since the
- last backup**, never a duration and never unbounded, because exempting the backup slot from this
- ladder would reintroduce the unbounded-WAL-growth failure it exists to prevent.
+   from free disk space at open and (**BL-787, 0.3.0**) recomputed after reclaims from the disk and the largest working set
+   the log has held — see [Sizing](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-030), whose `[WAL]` log
+   lines show each crossing — a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, 0.3.0**)
+   (it was an insert-throttle rung: a fixed delay inside the commit; the writer is now slowed before
+   it takes any lock, by the ingest stall curve — see the sizing guide), an
+   insert-refusal rung (`WAL_CAPACITY_EXCEEDED`, HTTP 503 + a `Retry-After` estimated from the rate
+   retention frees log) at 95%, and a
+   slot-keep-bytes rung (`MaxSlotWalKeepBytes`, roughly half of `MaxWalBytes`, clamped to 128 MB–2
+   GB) — the **only** mechanism that ever forces a slot to give up WAL it has not consumed. This is
+   also the local PITR window's true shape: a bound on **write volume since the
+   last backup**, never a duration and never unbounded, because exempting the backup slot from this
+   ladder would reintroduce the unbounded-WAL-growth failure it exists to prevent.
 
 Net effect today: a server that never takes a backup and never archives keeps WAL bounded purely by
 the ladder in point 6. A server that takes backups keeps the backup slot's WAL around until the
@@ -514,11 +514,11 @@ next backup or until the ladder invalidates it — whichever comes first.
 an archive destination. `Aouda.Server` does this when `Archive.Enabled` is true and `Destination`
 is set (standalone `Aouda:Archive`, or a replica-set Backup node's `ThisNode.Archive`).
 
-1. `WalArchiveWorker.RunOnceAsync` loads the local WAL manifest and the archive manifest.
+1. `WalArchiveWorker.RunOnceAsync()` loads the local WAL manifest and the archive manifest.
 2. It archives completed (non-active) segments with compression and content-addressable upload.
 3. Archive slot is advanced after successful archive writes (positions are cumulative byte offsets).
 4. Cleanup path removes archived entries older than `WalRetentionDays` while respecting the oldest backup's
- WAL boundary.
+   WAL boundary.
 
 `RequireArchiveBeforeDelete = true` is rejected at startup unless archive is enabled and destinationed.
 
@@ -545,7 +545,7 @@ Primary tests:
 
 ## 2.10 Configuration and settings reference (complete surface)
 
-{:.note }
+{: .note }
 **Precedence and restart:** [Server configuration](server-configuration.md). Startup keys bind from code defaults, optional `appsettings.json`, `AOUDA_*` env, or CLI (CLI highest). Release installs use service `--data-path` / `--port` only.
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
@@ -567,38 +567,38 @@ Primary tests:
 | `Archive.Destination` | string | empty | URI/path | startup config | Required when archive enabled |
 | `Archive.WalRetentionDays` | int | `7` | >=1 | startup config | Archive retention (not the local PITR window) |
 | `Archive.RequireArchiveBeforeDelete` | bool | `false` | true/false | startup config | Rejected at startup unless archive is enabled + destinationed |
-| `BackupOptions.Parallelism` | int | engine default | >=1 |.NET engine call | Backup engine only, not server API config |
-| `RestoreOptions.Parallelism` | int | engine default | >=1 |.NET engine call | Restore engine only |
-| `RestoreOptions.TargetTime` | datetime? | null | any valid timestamp |.NET engine call | Enables PITR flow |
+| `BackupOptions.Parallelism` | int | engine default | >=1 | .NET engine call | Backup engine only, not server API config |
+| `RestoreOptions.Parallelism` | int | engine default | >=1 | .NET engine call | Restore engine only |
+| `RestoreOptions.TargetTime` | datetime? | null | any valid timestamp | .NET engine call | Enables PITR flow |
 
 Configuration precedence and behavior notes:
 
 - CLI mappings available for core server settings:
- - `--data-path`, `--port`, `--max-memory`, `--max-hot-bytes`, `--max-cache-bytes`
- - short aliases include `-d`, `-p`, `-m`
+  - `--data-path`, `--port`, `--max-memory`, `--max-hot-bytes`, `--max-cache-bytes`
+  - short aliases include `-d`, `-p`, `-m`
 - Startup validation rejects invalid server/database/archive settings (`AoudaServerOptionsValidator`).
 - Dynamic vs restart-required:
- - `DatabasesController.CreateDatabase` can add DBs dynamically.
- - WAL enablement changes for existing DBs are effectively restart-sensitive (host warns when reconciled config differs from opened engine).
+  - `DatabasesController.CreateDatabase` can add DBs dynamically.
+  - WAL enablement changes for existing DBs are effectively restart-sensitive (host warns when reconciled config differs from opened engine).
 - Safety-gated:
- - Invalid database names and invalid enum values are rejected.
- - Table-level durability cannot override disabled database WAL/replication to `true`.
+  - Invalid database names and invalid enum values are rejected.
+  - Table-level durability cannot override disabled database WAL/replication to `true`.
 - Reserved/partial:
- - Backup/restore knobs are rich in engine APIs; HTTP restore accepts `targetTime`. Studio has no PITR control.
+  - Backup/restore knobs are rich in engine APIs; HTTP restore accepts `targetTime`. Studio has no PITR control.
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-###.NET example (embedded/server-side engine)
+### .NET example (embedded/server-side engine)
 
 ```csharp
 var engine = await AoudaEngine.OpenAsync(
- dataPath: "./data/Databases/appdb",
- durability: DurabilityLevel.Strict, // Lead S26, 0.6.0 (replaces enableWal)
- enableReplication: true);
+    dataPath: "./data/Databases/appdb",
+    durability: DurabilityLevel.Strict,   // Lead S26, 0.6.0 (replaces enableWal)
+    enableReplication: true);
 
 await engine.CreateTableAsync(
- "orders",
- new { ("id", DataType.Int64, EncoderPreference.Auto, false) });
+    "orders",
+    new[] { ("id", DataType.Int64, EncoderPreference.Auto, false) });
 ```
 
 Expected result: engine opens persistent layout with a WAL written through, and table is created under a table-id-based storage path (`tables/t{id}`).
@@ -609,17 +609,17 @@ Common mistake: assuming `AoudaEngine` backup/restore APIs are automatically exp
 
 ```typescript
 const client = createAoudaClient({
- serverUrl: "http://localhost:5000",
- database: "appdb",
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
 });
 
 await client.databases.create("analytics", {
- durability: "strict",
- replicationMode: "Replicate",
- defaultTemperature: "Auto",
+  durability: "strict",
+  replicationMode: "Replicate",
+  defaultTemperature: "Auto",
 });
 
-const dbs = await client.databases.list;
+const dbs = await client.databases.list();
 console.log(dbs.map((d) => d.name));
 ```
 
@@ -634,10 +634,10 @@ POST /api/databases
 Content-Type: application/json
 
 {
- "name": "appdb",
- "durability": "strict",
- "replicationMode": "Replicate",
- "defaultTemperature": "Auto"
+  "name": "appdb",
+  "durability": "strict",
+  "replicationMode": "Replicate",
+  "defaultTemperature": "Auto"
 }
 ```
 
@@ -651,9 +651,9 @@ Common mistake: using `/api/admin/metrics` backup counters as if they are backup
 
 ### A) API coverage matrix
 
-| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Open durable engine at a durability level | `AoudaEngine.OpenAsync(durability:...)` | `databases.create(name, { durability })` | DB create `durability` sets the DB level (**Lead S26, 0.6.0**) | Implemented | DB-level and table-level durability both available |
+| Open durable engine at a durability level | `AoudaEngine.OpenAsync(durability: ...)` | `databases.create(name, { durability })` | DB create `durability` sets the DB level (**Lead S26, 0.6.0**) | Implemented | DB-level and table-level durability both available |
 | Create DB with persistence options | `DatabaseManager.CreateDatabaseAsync` (server-side) | `client.databases.create(...)` | `POST /api/databases` | Implemented | Good parity for core options |
 | Per-table durability overrides | `CreateTableAsync(... durability)` / `AlterTableDurabilityAsync` | Schema document `durability.level` | Declarative schema `durability.level`; table GET reports `durability` (**Lead S26, 0.6.0**) | Partial | The level is surfaced; replication / write concern overrides are engine-only |
 | Replication persistence status | `ReplicationState`/host services | `client.admin.replication.status/topology/coverage` | `/admin/replication/*` | Implemented | Monitoring and topology surface available |
@@ -669,7 +669,7 @@ Common mistake: using `/api/admin/metrics` backup counters as if they are backup
 | Trigger restore over server API | REST + TS SDK wrappers | — | Shipped (P16 SA4) | — |
 | Trigger PITR over HTTP/SDK | — | Studio UI and MCP tool stay exact-restore-only | Shipped (BL-186 S07) | — |
 | Manage archive worker lifecycle (start/stop/state) via API | Archive admin endpoints | Inspect metrics and server logs; custom host wiring | P4/P6 operationalization follow-up | Medium |
-| Table durability endpoint parity | REST/TS update path for table `EnableReplication` / write concern (the level goes through the declarative schema since Lead S26) | Use.NET engine/catalog API | P6 + API parity follow-up | Medium |
+| Table durability endpoint parity | REST/TS update path for table `EnableReplication` / write concern (the level goes through the declarative schema since Lead S26) | Use .NET engine/catalog API | P6 + API parity follow-up | Medium |
 | Per-database checkpoint sync controls in replication API | Explicit API/status for each DB checkpoint sync state | Current first-database checkpoint behavior | P6 replication checkpoint follow-up | Medium |
 
 ## 2.12 Scenario playbooks (minimum three)
@@ -680,7 +680,7 @@ When to use:
 - New single-node deployment where you want standard durability defaults.
 
 Steps:
-1. Start server with `aouda start --data-dir./data --port 5433` (or optional local `appsettings.json` — see [Server configuration](server-configuration.md)).
+1. Start server with `aouda start --data-dir ./data --port 5433` (or optional local `appsettings.json` — see [Server configuration](server-configuration.md)).
 2. Create a database using `POST /api/databases` (or `client.databases.create`).
 3. Create one table and insert sample data.
 4. Restart server and query table again.
@@ -697,8 +697,8 @@ When to use:
 
 Steps:
 1. Create two DBs:
- - `durable_db` with `durability: "strict"`
- - `ephemeral_db` with `durability: "unlogged"`
+   - `durable_db` with `durability: "strict"`
+   - `ephemeral_db` with `durability: "unlogged"`
 2. Write similar traffic to both.
 3. Inspect behavior via logs/metrics and WAL file presence per DB.
 4. Validate per-table durability override constraints in durable DB (optional).
@@ -718,7 +718,7 @@ Steps:
 1. Use `BackupEngine.CreateBackupAsync(...)` for full backup.
 2. Apply additional writes and run incremental backup.
 3. Use `RestoreEngine.RestoreAsync(...)` (or `POST /admin/backup/restore/{id}`) for an exact restore,
- or pass `targetTime` for PITR (see [Backup and restore](backup.md#1-what-is-and-is-not-available)).
+   or pass `targetTime` for PITR (see [Backup and restore](backup.md#1-what-is-and-is-not-available)).
 
 Expected result checks:
 - Incremental manifest marks unchanged files as not new.
@@ -731,28 +731,28 @@ Expected result checks:
 Monitor first:
 
 - Storage/recovery path:
- - Restart/replay errors and checkpoint/replay duration metrics.
+  - Restart/replay errors and checkpoint/replay duration metrics.
 - WAL lifecycle:
- - Slot positions (system/replication/backup/archive), retention prune counters.
+  - Slot positions (system/replication/backup/archive), retention prune counters.
 - Backup/archive:
- - Backup operation counters, upload bytes, failure counters.
- - Archive cycles, archived segments, compression ratio, archive errors.
+  - Backup operation counters, upload bytes, failure counters.
+  - Archive cycles, archived segments, compression ratio, archive errors.
 - API-level posture:
- - Replication status endpoints for lag and per-db positions.
- - Admin metrics backup subsystem for operational signals.
+  - Replication status endpoints for lag and per-db positions.
+  - Admin metrics backup subsystem for operational signals.
 
 Cold-page integrity (**BL-815, 0.3.0**):
 
 - Every cold page carries a CRC. A reader checks it the first time it reads the page, and a **background scrubber** checks
- every cold page again against the disk: the first pass 15 minutes after the database opens, then one every 24 hours, under
- 64 MiB/s of disk reads, yielding while queries are waiting. It covers the tables currently loaded (a table not yet touched since
- open is checked by its first read instead).
+  every cold page again against the disk: the first pass 15 minutes after the database opens, then one every 24 hours, under
+  64 MiB/s of disk reads, yielding while queries are waiting. It covers the tables currently loaded (a table not yet touched since
+  open is checked by its first read instead).
 - A page whose CRC no longer matches is **reported** — an `Error` log line naming the table, segment, column and offset, repeated
- on every pass until the segment is replaced — and is **never returned as data**: reads that need that page fail with a
- corruption error, while the rest of the table reads normally. The scrubber does not repair; restore the table from a backup or
- re-sync it from a replica.
+  on every pass until the segment is replaced — and is **never returned as data**: reads that need that page fail with a
+  corruption error, while the rest of the table reads normally. The scrubber does not repair; restore the table from a backup or
+  re-sync it from a replica.
 - Between two passes, a page corrupted after its first read can still be read from disk unchecked. Checking every read from disk
- instead costs 51–75 % of the read, which is why it is not done.
+  instead costs 51–75 % of the read, which is why it is not done.
 
 Recovery/restart expectations:
 
@@ -780,7 +780,7 @@ Suggested tuning sequence:
 | `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 12 only" (6 in 0.3.0, 10 in 0.5.0; 12 since **Lead S26, 0.6.0**) | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, 0.5.0 wrote 10, a newer build writes more (**architecture review, RR-A2-4, 0.3.0**). A shard or journal naming another version under the root's format is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
 | A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#10-errors)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
-| WAL file not growing for a table | The table's effective level is `unlogged` or `memory` (its own, or the database's) | Check `GET.../tables/{table}` → `durability` (`level`, `source`) and the database's `options.durability` (**Lead S26, 0.6.0**) |
+| WAL file not growing for a table | The table's effective level is `unlogged` or `memory` (its own, or the database's) | Check `GET .../tables/{table}` → `durability` (`level`, `source`) and the database's `options.durability` (**Lead S26, 0.6.0**) |
 | Database refuses to open after its `Durability` was set to `unlogged` or `memory`: `WAL_RETIREMENT_REFUSED` | The open at a level without a WAL replays and flushes the WAL it finds, then retires it; it refuses, keeping the WAL, when (among others) the flush cannot finish in time, an `os` load has not been promoted, a bulk load or an edge or vector buffer is still owed to the WAL, the WAL archive cannot take every frame, or `RequireArchiveBeforeDelete` is set | Fix what the message names and open again — the next open tries again — or open it at `strict` or `os` ([Changing a level](write-durability.md#changing-a-level)) |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
 | Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
@@ -831,66 +831,66 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
 ## 2.18 Known gaps and undone work
 
 - Public backup/restore orchestration surface:
- - HTTP `/admin/backup/*` and both SDKs ship exact restore and PITR (`targetTime`). Studio UI is exact-restore-only (BL-332).
+  - HTTP `/admin/backup/*` and both SDKs ship exact restore and PITR (`targetTime`). Studio UI is exact-restore-only (BL-332).
 - Archive destinations:
- - Local and S3 ship; Azure/GCS throw `NotSupportedException`.
+  - Local and S3 ship; Azure/GCS throw `NotSupportedException`.
 - Replication checkpoint sync:
- - `ReplicationHostedService` checkpoint path still uses first available database; atomic apply of replica catch-up is BL-328.
+  - `ReplicationHostedService` checkpoint path still uses first available database; atomic apply of replica catch-up is BL-328.
 - Persistence-policy ADR breadth:
- - ADR 0005 policy language (`MemoryOnly`, `DiskOnly`, `Hybrid`) is broader than currently explicit HTTP/TS policy modeling.
- - User impact: policy intent should be mapped to actual shipped knobs (the `durability` level — `strict`, `os`, `unlogged`, `memory` — and table/db options), not ADR labels alone.
+  - ADR 0005 policy language (`MemoryOnly`, `DiskOnly`, `Hybrid`) is broader than currently explicit HTTP/TS policy modeling.
+  - User impact: policy intent should be mapped to actual shipped knobs (the `durability` level — `strict`, `os`, `unlogged`, `memory` — and table/db options), not ADR labels alone.
 
 ## 2.19 References
 
 - ADRs:
- - `docs/decisions/0001-column-per-file.md`
- - `docs/decisions/0002-json-catalog-persistence.md`
- - `docs/decisions/0003-write-ahead-log.md`
- - `docs/decisions/0005-persistence-policies.md`
- - `docs/decisions/0016-wal-lifecycle-management.md`
+  - `docs/decisions/0001-column-per-file.md`
+  - `docs/decisions/0002-json-catalog-persistence.md`
+  - `docs/decisions/0003-write-ahead-log.md`
+  - `docs/decisions/0005-persistence-policies.md`
+  - `docs/decisions/0016-wal-lifecycle-management.md`
 - Task docs/reports:
- - `docs/tasks/P3/P3-Task7-HotSegmentPersistence-Report.md`
- - `docs/tasks/P3/P3-BugFix-HotSegmentPersistence-AllDataTypes-Report.md`
- - `docs/tasks/P4/P4-EpicD-Task1-BackupManifest-Report.md`
- - `docs/tasks/P4/P4-EpicD-Task3-IncrementalBackupEngine-Report.md`
- - `docs/tasks/P4/P4-EpicD-Task5-BackupLifecycleManagement-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task2-WalArchiveWorker-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task5-BackupIntegration-Report.md`
- - `docs/tasks/P6/P6-EpicA-Task4-TableNameBasedDirectoryStorage-Report.md`
- - `docs/tasks/P6/P6-EpicA-Task5-PerTableWalAndReplicationControl-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
+  - `docs/tasks/P3/P3-Task7-HotSegmentPersistence-Report.md`
+  - `docs/tasks/P3/P3-BugFix-HotSegmentPersistence-AllDataTypes-Report.md`
+  - `docs/tasks/P4/P4-EpicD-Task1-BackupManifest-Report.md`
+  - `docs/tasks/P4/P4-EpicD-Task3-IncrementalBackupEngine-Report.md`
+  - `docs/tasks/P4/P4-EpicD-Task5-BackupLifecycleManagement-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task2-WalArchiveWorker-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task5-BackupIntegration-Report.md`
+  - `docs/tasks/P6/P6-EpicA-Task4-TableNameBasedDirectoryStorage-Report.md`
+  - `docs/tasks/P6/P6-EpicA-Task5-PerTableWalAndReplicationControl-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
 - Code paths:
- - `src/Aouda.Engine.Storage/StorageConstants.cs`
- - `src/Aouda.Engine.Storage/Layout/ServerDirectoryLayout.cs`
- - `src/Aouda.Engine.Storage/Layout/DatabaseDirectoryLayout.cs`
- - `src/Aouda.Engine.Storage/Registry/DatabaseRegistryStore.cs`
- - `src/Aouda.Engine.Catalog/CatalogStore.cs`
- - `src/Aouda.Engine.Wal/WalWriter.cs`
- - `src/Aouda.Engine.Storage/Bootstrap/StorageBootstrap.cs`
- - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
- - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
- - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
- - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
- - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
- - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
- - `src/Aouda.Server/Controllers/DatabasesController.cs`
- - `src/Aouda.Server/Controllers/ReplicationController.cs`
- - `src/Aouda.Server/Controllers/MetricsController.cs`
- - `../aouda-client-ts/src/databases.ts`
- - `../aouda-client-ts/src/admin/server.ts`
+  - `src/Aouda.Engine.Storage/StorageConstants.cs`
+  - `src/Aouda.Engine.Storage/Layout/ServerDirectoryLayout.cs`
+  - `src/Aouda.Engine.Storage/Layout/DatabaseDirectoryLayout.cs`
+  - `src/Aouda.Engine.Storage/Registry/DatabaseRegistryStore.cs`
+  - `src/Aouda.Engine.Catalog/CatalogStore.cs`
+  - `src/Aouda.Engine.Wal/WalWriter.cs`
+  - `src/Aouda.Engine.Storage/Bootstrap/StorageBootstrap.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
+  - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
+  - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
+  - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
+  - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
+  - `src/Aouda.Server/Controllers/DatabasesController.cs`
+  - `src/Aouda.Server/Controllers/ReplicationController.cs`
+  - `src/Aouda.Server/Controllers/MetricsController.cs`
+  - `../aouda-client-ts/src/databases.ts`
+  - `../aouda-client-ts/src/admin/server.ts`
 - Test files:
- - `tests/Aouda.Engine.Catalog.Tests/CatalogPersistenceTests.cs`
- - `tests/Aouda.Engine.Catalog.Tests/CatalogWalTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/EndToEndRestartTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/WalReplayDriverTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/WalCheckpointIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/BackupEngineIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/RestoreIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/LifecycleIntegrationTests.cs`
- - `tests/Aouda.Engine.Storage.Tests/Backup/PitrFromArchivedWalTests.cs`
- - `tests/Aouda.Server.Tests/ConfigurationIntegrationTests.cs`
- - `../aouda-client-ts/tests/databases.test.ts`
- - `../aouda-client-ts/tests/admin.test.ts`
+  - `tests/Aouda.Engine.Catalog.Tests/CatalogPersistenceTests.cs`
+  - `tests/Aouda.Engine.Catalog.Tests/CatalogWalTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/EndToEndRestartTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/WalReplayDriverTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/WalCheckpointIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/BackupEngineIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/RestoreIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/LifecycleIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/PitrFromArchivedWalTests.cs`
+  - `tests/Aouda.Server.Tests/ConfigurationIntegrationTests.cs`
+  - `../aouda-client-ts/tests/databases.test.ts`
+  - `../aouda-client-ts/tests/admin.test.ts`
 
 ## 2.20 What is missing from this document? (meta completeness)
 

@@ -6,8 +6,8 @@ parent: "Guides"
 
 # Market Data and Stock Quotes
 
-Document status: Approved baseline
-Primary owner: Aouda maintainers
+Document status: Approved baseline  
+Primary owner: Aouda maintainers  
 Last updated: 2026-10-27
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -21,7 +21,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - [Insert-time transforms](insert-transforms.md) — replace a quote ingest worker with `route` / derived columns
 - [Division of responsibility](division-of-responsibility.md) — what stays in a workflow service
 
-**Conformance fixture:** `examples/p40-browser-tier/` in this repo — `aouda.schema.json`, `seed.json`, `expected.json`. Run the fixture against a live engine with `POST.../schema/apply` (see §3). CI exercises it in `P40BrowserTierConformanceTests`.
+**Conformance fixture:** `examples/p40-browser-tier/` in this repo — `aouda.schema.json`, `seed.json`, `expected.json`. Run the fixture against a live engine with `POST .../schema/apply` (see §3). CI exercises it in `P40BrowserTierConformanceTests`.
 
 ---
 
@@ -35,7 +35,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 You cannot (data-plane restrictions):
 
-- Call `POST.../query` ad-hoc — 404 on the data-plane.
+- Call `POST .../query` ad-hoc — 404 on the data-plane.
 - Create tables, MQs, or named queries via HTTP.
 - Use `crossPartitionAccess` — the data-plane listener ignores it, and a named-query definition cannot set it. A named-query call accepts it only on the admin listener. (**BL-1227, 0.9.0**)
 - Select internal MQ accumulator columns (`_max_bid`, `_first_open_val`, …) — `outputName` aliases are the public surface.
@@ -50,180 +50,180 @@ All tables, materialized queries, and named queries for the market-data fixture 
 
 ```json
 {
- "$schema": "https://aouda.io/schema/v1.json",
- "database": "finance",
- "tables": {
- "quotes": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1 },
- "ticker": { "type": "String" },
- "source": { "type": "String" },
- "time": { "type": "Timestamp" },
- "bid": { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true },
- "ask": { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true }
- },
- "partitionKey": [{ "column": "ticker" }, { "column": "source" }],
- "clusterColumns": ["time"],
- },
- "trades": {
- "columns": {
- "id": { "type": "Int64", "primaryKey": 1 },
- "ticker": { "type": "String" },
- "source": { "type": "String" },
- "time": { "type": "Timestamp" },
- "price": { "type": "Double" },
- "size": { "type": "Int64" }
- },
- "partitionKey": [{ "column": "ticker" }, { "column": "source" }],
- "clusterColumns": ["time"],
- },
- "listings": {
- "columns": {
- "ticker": { "type": "String", "primaryKey": 1 },
- "currency": { "type": "String" },
- "sector": { "type": "String" },
- "country": { "type": "String" },
- "mcap": { "type": "Int64" }
- },
- }
- },
- "materializedQueries": {
- "latest_quote": {
- "type": "latestPerKey",
- "sourceTable": "quotes",
- "groupBy": ["ticker", "source"],
- "orderBy": "time",
- "descending": true,
- "select": ["ticker", "source", "bid", "ask", "time"],
- "updateMode": "sync",
- "storage": { "storageTemperature": "HotOnly" }
- },
- "candles_bid_1h": {
- "type": "aggregate",
- "sourceTable": "quotes",
- "groupBy": [
- { "column": "ticker" },
- { "column": "time", "function": "TruncateToHour", "outputName": "time" }
- ],
- "aggregates": [
- { "function": "max", "outputName": "high", "sourceColumn": "bid" },
- { "function": "min", "outputName": "low", "sourceColumn": "bid" },
- { "function": "first", "outputName": "open", "sourceColumn": "bid", "orderByColumn": "time" },
- { "function": "last", "outputName": "close", "sourceColumn": "bid", "orderByColumn": "time" }
- ],
- "updateMode": "sync",
- "storage": { "storageTemperature": "ColdPreferred" }
- },
- "bars_with_change": {
- "type": "aggregate",
- "sourceTable": "trades",
- "groupBy": [{ "column": "ticker" }],
- "aggregates": [
- { "function": "first", "outputName": "open", "sourceColumn": "price", "orderByColumn": "time" },
- { "function": "last", "outputName": "close", "sourceColumn": "price", "orderByColumn": "time" }
- ],
- "computed": [
- {
- "outputName": "changePct",
- "type": "Double",
- "expr": {
- "type": "arithmetic", "op": "/",
- "left": { "type": "arithmetic", "op": "-",
- "left": { "type": "colRef", "col": "close" },
- "right": { "type": "colRef", "col": "open" } },
- "right": { "type": "colRef", "col": "open" }
- }
- }
- ],
- "updateMode": "sync",
- "storage": { "storageTemperature": "HotOnly" }
- }
- },
- "namedQueries": {
- "quotes.watchlist": {
- "table": "quotes",
- "select": ["ticker", "source", "time", "bid", "ask"],
- "where": {
- "and": [
- { "column": "ticker", "op": "in", "param": "tickers" },
- { "column": "source", "op": "eq", "param": "source" }
- ]
- },
- "orderBy": [{ "column": "time", "descending": true }],
- "limit": 100,
- "count": true,
- "params": {
- "tickers": { "required": true, "maxItems": 64 },
- "source": { "required": true, "maxLength": 32 }
- }
- },
- "quotes.lastPrice": {
- "table": "latest_quote",
- "select": ["ticker", "source", "bid", "ask", "time"],
- "where": {
- "and": [
- { "column": "ticker", "op": "in", "param": "tickers" },
- { "column": "source", "op": "eq", "param": "source" }
- ]
- },
- "limit": 32,
- "params": {
- "tickers": { "required": true, "maxItems": 64 },
- "source": { "required": true, "maxLength": 32 }
- }
- },
- "candles.byTicker": {
- "table": "candles_bid_1h",
- "select": ["ticker", "time", "open", "high", "low", "close"],
- "where": {
- "and": [
- { "column": "ticker", "op": "eq", "param": "ticker" }
- ]
- },
- "orderBy": [{ "column": "time", "descending": false }],
- "limit": 500,
- "params": {
- "ticker": { "required": true, "maxLength": 16 }
- }
- },
- "listings.screener": {
- "table": "listings",
- "select": ["ticker", "currency", "sector", "country", "mcap"],
- "where": {
- "and": [
- { "column": "currency", "op": "in", "param": "currency", "whenParamPresent": true },
- { "column": "sector", "op": "eq", "param": "sector", "whenParamPresent": true },
- { "column": "mcap", "op": "gte", "param": "minMcap", "whenParamPresent": true },
- { "column": "country", "op": "eq", "param": "country", "whenParamPresent": true }
- ]
- },
- "orderBy": [{ "column": "ticker", "descending": false }],
- "limit": 25,
- "limitParam": "pageSize",
- "offset": 1000,
- "offsetParam": "pageOffset",
- "count": true,
- "params": {
- "currency": { "required": false },
- "sector": { "required": false, "maxLength": 64 },
- "minMcap": { "required": false },
- "country": { "required": false, "maxLength": 8 },
- "pageSize": { "required": false, "min": 1, "max": 25 },
- "pageOffset": { "required": false, "min": 0, "max": 1000 }
- }
- },
- "gainers.top": {
- "table": "bars_with_change",
- "select": ["ticker", "open", "close", "changePct"],
- "orderBy": [{ "column": "changePct", "descending": true }],
- "orderByChoices": [
- [{ "column": "changePct", "descending": true }],
- [{ "column": "ticker", "descending": false }]
- ],
- "limit": 20,
- "params": {}
- }
- }
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "finance",
+  "tables": {
+    "quotes": {
+      "columns": {
+        "id":     { "type": "Int64",      "primaryKey": 1 },
+        "ticker": { "type": "String" },
+        "source": { "type": "String" },
+        "time":   { "type": "Timestamp" },
+        "bid":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true },
+        "ask":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true }
+      },
+      "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
+      "clusterColumns": ["time"],
+    },
+    "trades": {
+      "columns": {
+        "id":     { "type": "Int64",   "primaryKey": 1 },
+        "ticker": { "type": "String" },
+        "source": { "type": "String" },
+        "time":   { "type": "Timestamp" },
+        "price":  { "type": "Double" },
+        "size":   { "type": "Int64" }
+      },
+      "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
+      "clusterColumns": ["time"],
+    },
+    "listings": {
+      "columns": {
+        "ticker":   { "type": "String", "primaryKey": 1 },
+        "currency": { "type": "String" },
+        "sector":   { "type": "String" },
+        "country":  { "type": "String" },
+        "mcap":     { "type": "Int64" }
+      },
+    }
+  },
+  "materializedQueries": {
+    "latest_quote": {
+      "type":        "latestPerKey",
+      "sourceTable": "quotes",
+      "groupBy":     ["ticker", "source"],
+      "orderBy":     "time",
+      "descending":  true,
+      "select":      ["ticker", "source", "bid", "ask", "time"],
+      "updateMode":  "sync",
+      "storage":     { "storageTemperature": "HotOnly" }
+    },
+    "candles_bid_1h": {
+      "type":        "aggregate",
+      "sourceTable": "quotes",
+      "groupBy": [
+        { "column": "ticker" },
+        { "column": "time", "function": "TruncateToHour", "outputName": "time" }
+      ],
+      "aggregates": [
+        { "function": "max",   "outputName": "high",  "sourceColumn": "bid" },
+        { "function": "min",   "outputName": "low",   "sourceColumn": "bid" },
+        { "function": "first", "outputName": "open",  "sourceColumn": "bid", "orderByColumn": "time" },
+        { "function": "last",  "outputName": "close", "sourceColumn": "bid", "orderByColumn": "time" }
+      ],
+      "updateMode": "sync",
+      "storage":    { "storageTemperature": "ColdPreferred" }
+    },
+    "bars_with_change": {
+      "type":        "aggregate",
+      "sourceTable": "trades",
+      "groupBy":     [{ "column": "ticker" }],
+      "aggregates": [
+        { "function": "first", "outputName": "open",  "sourceColumn": "price", "orderByColumn": "time" },
+        { "function": "last",  "outputName": "close", "sourceColumn": "price", "orderByColumn": "time" }
+      ],
+      "computed": [
+        {
+          "outputName": "changePct",
+          "type": "Double",
+          "expr": {
+            "type": "arithmetic", "op": "/",
+            "left":  { "type": "arithmetic", "op": "-",
+                       "left":  { "type": "colRef", "col": "close" },
+                       "right": { "type": "colRef", "col": "open" } },
+            "right": { "type": "colRef", "col": "open" }
+          }
+        }
+      ],
+      "updateMode": "sync",
+      "storage":    { "storageTemperature": "HotOnly" }
+    }
+  },
+  "namedQueries": {
+    "quotes.watchlist": {
+      "table":  "quotes",
+      "select": ["ticker", "source", "time", "bid", "ask"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "in",  "param": "tickers" },
+          { "column": "source", "op": "eq",  "param": "source"  }
+        ]
+      },
+      "orderBy": [{ "column": "time", "descending": true }],
+      "limit": 100,
+      "count": true,
+      "params": {
+        "tickers": { "required": true, "maxItems": 64 },
+        "source":  { "required": true, "maxLength": 32 }
+      }
+    },
+    "quotes.lastPrice": {
+      "table":  "latest_quote",
+      "select": ["ticker", "source", "bid", "ask", "time"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "in", "param": "tickers" },
+          { "column": "source", "op": "eq", "param": "source"  }
+        ]
+      },
+      "limit": 32,
+      "params": {
+        "tickers": { "required": true, "maxItems": 64 },
+        "source":  { "required": true, "maxLength": 32 }
+      }
+    },
+    "candles.byTicker": {
+      "table":  "candles_bid_1h",
+      "select": ["ticker", "time", "open", "high", "low", "close"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "eq", "param": "ticker" }
+        ]
+      },
+      "orderBy": [{ "column": "time", "descending": false }],
+      "limit": 500,
+      "params": {
+        "ticker": { "required": true, "maxLength": 16 }
+      }
+    },
+    "listings.screener": {
+      "table":  "listings",
+      "select": ["ticker", "currency", "sector", "country", "mcap"],
+      "where": {
+        "and": [
+          { "column": "currency", "op": "in",  "param": "currency",  "whenParamPresent": true },
+          { "column": "sector",   "op": "eq",  "param": "sector",    "whenParamPresent": true },
+          { "column": "mcap",     "op": "gte", "param": "minMcap",   "whenParamPresent": true },
+          { "column": "country",  "op": "eq",  "param": "country",   "whenParamPresent": true }
+        ]
+      },
+      "orderBy": [{ "column": "ticker", "descending": false }],
+      "limit":       25,
+      "limitParam":  "pageSize",
+      "offset":      1000,
+      "offsetParam": "pageOffset",
+      "count": true,
+      "params": {
+        "currency":   { "required": false },
+        "sector":     { "required": false, "maxLength": 64 },
+        "minMcap":    { "required": false },
+        "country":    { "required": false, "maxLength": 8 },
+        "pageSize":   { "required": false, "min": 1, "max": 25 },
+        "pageOffset": { "required": false, "min": 0, "max": 1000 }
+      }
+    },
+    "gainers.top": {
+      "table":  "bars_with_change",
+      "select": ["ticker", "open", "close", "changePct"],
+      "orderBy": [{ "column": "changePct", "descending": true }],
+      "orderByChoices": [
+        [{ "column": "changePct", "descending": true  }],
+        [{ "column": "ticker",    "descending": false }]
+      ],
+      "limit": 20,
+      "params": {}
+    }
+  }
 }
 ```
 
@@ -238,7 +238,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ## 3. Apply, then ingest
 
-Schema and data are separate steps. Schema objects enter only via `schema/apply`. Data enters via `POST.../rows`.
+Schema and data are separate steps. Schema objects enter only via `schema/apply`. Data enters via `POST .../rows`.
 
 ### Apply the schema
 
@@ -248,8 +248,8 @@ Content-Type: application/json
 Authorization: Bearer <service-key>
 
 {
- "schema": {... },
- "options": { "allowDestructive": false, "dryRun": false }
+  "schema": { ... },
+  "options": { "allowDestructive": false, "dryRun": false }
 }
 ```
 
@@ -263,10 +263,10 @@ Content-Type: application/json
 Authorization: Bearer <service-key>
 
 {
- "database": "finance",
- "table": "quotes",
- "columns": ["id", "ticker", "source", "time", "bid", "ask"],
- "data": [[1], ["AAPL"], ["nasdaq"], ["2023-11-15T10:00:00Z"], [150.0], [150.5]]
+  "database": "finance",
+  "table": "quotes",
+  "columns": ["id", "ticker", "source", "time", "bid", "ask"],
+  "data": [[1], ["AAPL"], ["nasdaq"], ["2023-11-15T10:00:00Z"], [150.0], [150.5]]
 }
 ```
 
@@ -284,10 +284,10 @@ their maintainer after the commit, so read with the insert's consistency token t
 
 ```json
 {
- "args": {
- "tickers": ["AAPL", "MSFT"],
- "source": "nasdaq"
- }
+  "args": {
+    "tickers": ["AAPL", "MSFT"],
+    "source": "nasdaq"
+  }
 }
 ```
 
@@ -307,12 +307,12 @@ Response includes `totalMatches` (from `count: true`), `columns`, `rowCount`, an
 
 ```json
 { "type": "subscribe", "id": "wl", "name": "quotes.watchlist",
- "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" } }
+  "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" } }
 ```
 
 The server sends snapshot rows then a `snapshot_complete` message, followed by incremental `change` events on tick inserts.
 
-{:.note }
+{: .note }
 A prefix of the composite partition key is not sufficient. `ticker in ["AAPL"]` alone — without `source eq "nasdaq"` — is refused on the data-plane with a partition-filter error. Both columns must be covered. See [browser-tier read limits — partition filter rule](browser-tier-read-limits.md#partition-filter-rule).
 
 ---
@@ -327,13 +327,13 @@ Declare a `latestPerKey` MQ over `quotes`. The MQ maintains one row per `(ticker
 
 ```json
 "latest_quote": {
- "type": "latestPerKey",
- "sourceTable": "quotes",
- "groupBy": ["ticker", "source"],
- "orderBy": "time",
- "descending": true,
- "select": ["ticker", "source", "bid", "ask", "time"],
- "updateMode": "sync",
+  "type":        "latestPerKey",
+  "sourceTable": "quotes",
+  "groupBy":     ["ticker", "source"],
+  "orderBy":     "time",
+  "descending":  true,
+  "select":      ["ticker", "source", "bid", "ask", "time"],
+  "updateMode":  "sync",
 }
 ```
 
@@ -345,15 +345,15 @@ When you cannot change to an MQ (legacy schema, or you specifically want raw tic
 
 ```json
 {
- "type": "subscribe", "id": "lp", "name": "quotes.lastPrice",
- "args": { "tickers": ["AAPL"], "source": "nasdaq" },
- "conflate": { "collapse_inserts": true }
+  "type": "subscribe", "id": "lp", "name": "quotes.lastPrice",
+  "args": { "tickers": ["AAPL"], "source": "nasdaq" },
+  "conflate": { "collapse_inserts": true }
 }
 ```
 
 With `collapse_inserts: true`, the server collapses multiple in-flight tick inserts into a single notification. Without it, default `conflate` on an insert-only table is a no-op. See [browser-tier read limits — conflate is a no-op on insert-only streams](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
-{:.warning }
+{: .warning }
 Do **not** rely on default `conflate` (no `collapse_inserts`) for last-price on an insert-only tick table. Each tick insert will deliver its own notification.
 
 ---
@@ -374,7 +374,7 @@ Content-Type: application/json
 
 Response columns: `["ticker", "time", "open", "high", "low", "close"]`. The `time` column contains the UTC **epoch-millisecond** start of each hour bucket — an Int64, not a formatted string. Candles are ordered ascending by time (as defined in the NQ).
 
-{:.important }
+{: .important }
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Day and minute intervals
@@ -383,20 +383,20 @@ Add separate MQs:
 
 ```json
 "candles_bid_1d": {
- "type": "aggregate",
- "sourceTable": "quotes",
- "groupBy": [
- { "column": "ticker" },
- { "column": "time", "function": "TruncateToDay", "outputName": "time" }
- ],
- "aggregates": [... ],
- "storage": { "storageTemperature": "ColdPreferred" }
+  "type": "aggregate",
+  "sourceTable": "quotes",
+  "groupBy": [
+    { "column": "ticker" },
+    { "column": "time", "function": "TruncateToDay", "outputName": "time" }
+  ],
+  "aggregates": [ ... ],
+  "storage": { "storageTemperature": "ColdPreferred" }
 }
 ```
 
 And separate named queries `candles.byTickerDay`, `candles.byTickerMinute`. Same select shape — only the MQ name and truncation function differ.
 
-{:.warning }
+{: .warning }
 **A minute-interval candle MQ is the one to think hardest about.** One row per `(ticker, minute)` is
 1 440 rows per ticker per day — over 5 000 tickers, **7.2 million rows a day**, growing without
 bound. Decide where that result table lives before deploying one: see the next section.
@@ -459,8 +459,8 @@ PUT /api/databases/finance/tables/candles_bid_1m/policy
 Content-Type: application/json
 
 {
- "storageTemperature": "Auto",
- "memoryRowCap": 50000
+  "storageTemperature": "Auto",
+  "memoryRowCap": 50000
 }
 ```
 
@@ -487,11 +487,11 @@ GET /api/server/memory
 ```
 
 - **`pinnedHotBytes`** (per database) — bytes held by declared residency pins, including any
- result table you declared `HotOnly`. This is what your pins are costing the elastic tier.
+  result table you declared `HotOnly`. This is what your pins are costing the elastic tier.
 - **`hotArrivalBytesPerSecond` vs `hotDrainBytesPerSecond`** — the gap, not either number, says
- whether the tier is filling faster than it empties.
+  whether the tier is filling faster than it empties.
 - **`processHotCeilingBytes` / `processHotResidentBytes`** — the process-wide bound. A refusal while
- your own database's share still had room is read here.
+  your own database's share still had room is read here.
 
 Per query, `GET /api/databases/finance/materialized-queries/{name}` carries an `amplification` object
 with `writeAmplification` (result rows written per source row ingested) and `readAmplification`. A
@@ -511,12 +511,12 @@ and [Sizing](sizing.md#mq-result-residency).
 
 ```json
 "where": {
- "and": [
- { "column": "currency", "op": "in", "param": "currency", "whenParamPresent": true },
- { "column": "sector", "op": "eq", "param": "sector", "whenParamPresent": true },
- { "column": "mcap", "op": "gte", "param": "minMcap", "whenParamPresent": true },
- { "column": "country", "op": "eq", "param": "country", "whenParamPresent": true }
- ]
+  "and": [
+    { "column": "currency", "op": "in",  "param": "currency",  "whenParamPresent": true },
+    { "column": "sector",   "op": "eq",  "param": "sector",    "whenParamPresent": true },
+    { "column": "mcap",     "op": "gte", "param": "minMcap",   "whenParamPresent": true },
+    { "column": "country",  "op": "eq",  "param": "country",   "whenParamPresent": true }
+  ]
 }
 ```
 
@@ -540,7 +540,7 @@ Response: `rowCount: 3`, `totalMatches: 3`.
 
 **Pagination:** `limitParam: "pageSize"` lets the caller override the limit (up to 25). `offsetParam: "pageOffset"` lets the caller skip rows (up to 1000). Omitting `pageOffset` (or sending null) binds skip **0** — first page. You do not have to send `0` to avoid an empty page; the cap is a maximum skip, not the default.
 
-{:.note }
+{: .note }
 `count: true` on a **partitioned** table requires required `eq`/`in` on every partition-key column. A `whenParamPresent` condition never satisfies that requirement. Use an unpartitioned reference table (like `listings`) for optional-facet screeners, or require the partition key in the NQ params.
 
 ---
@@ -551,17 +551,17 @@ Response: `rowCount: 3`, `totalMatches: 3`.
 
 ```json
 "computed": [
- {
- "outputName": "changePct",
- "type": "Double",
- "expr": {
- "type": "arithmetic", "op": "/",
- "left": { "type": "arithmetic", "op": "-",
- "left": { "type": "colRef", "col": "close" },
- "right": { "type": "colRef", "col": "open" } },
- "right": { "type": "colRef", "col": "open" }
- }
- }
+  {
+    "outputName": "changePct",
+    "type": "Double",
+    "expr": {
+      "type": "arithmetic", "op": "/",
+      "left":  { "type": "arithmetic", "op": "-",
+                 "left":  { "type": "colRef", "col": "close" },
+                 "right": { "type": "colRef", "col": "open" } },
+      "right": { "type": "colRef", "col": "open" }
+    }
+  }
 ]
 ```
 
@@ -581,7 +581,7 @@ The default sort is `changePct` descending. A caller can pick an alternative sor
 
 `orderByChoices` in the schema declares the allowed sort permutations (0-indexed). `orderByIndex` selects one. The engine rejects an index outside the declared list. Expression `orderBy` (arbitrary column not in `orderByChoices`) is not available on the data-plane (BL-183 — open backlog item).
 
-{:.note }
+{: .note }
 The `derived` expression (base-table computed column) is a fallback for ranking on raw tables. `bars_with_change.changePct` uses the physical `computed` path — it is orderable and selectable as a first-class column.
 
 ---
@@ -624,20 +624,20 @@ The following patterns require **admin / service-key** access on the admin liste
 
 ```csharp
 await engine.CreateAggregateQueryAsync(
- name: "candles_bid_1h",
- sourceTable: "quotes",
- groupByColumns: new GroupByExpression
- {
- "ticker",
- new GroupByExpression { Column = "time", Function = PartitionFunction.TruncateToHour }
- },
- aggregates: new
- {
- Aggregate.Max("bid", "high"),
- Aggregate.Min("bid", "low"),
- Aggregate.First("bid", "time", "open"),
- Aggregate.Last("bid", "time", "close")
- });
+    name: "candles_bid_1h",
+    sourceTable: "quotes",
+    groupByColumns: new GroupByExpression[]
+    {
+        "ticker",
+        new GroupByExpression { Column = "time", Function = PartitionFunction.TruncateToHour }
+    },
+    aggregates: new[]
+    {
+        Aggregate.Max("bid", "high"),
+        Aggregate.Min("bid", "low"),
+        Aggregate.First("bid", "time", "open"),
+        Aggregate.Last("bid", "time", "close")
+    });
 ```
 
 ### Imperative MQ creation (HTTP)
@@ -648,10 +648,10 @@ Content-Type: application/json
 Authorization: Bearer <admin-token>
 
 {
- "name": "candles_bid_1h",
- "sourceTable": "quotes",
- "type": 3,
- "configJson": "..."
+  "name": "candles_bid_1h",
+  "sourceTable": "quotes",
+  "type": 3,
+  "configJson": "..."
 }
 ```
 
@@ -659,19 +659,19 @@ Authorization: Bearer <admin-token>
 
 ```csharp
 await client.GetTable("quotes")
-.WithCrossPartitionAccess
-.Where("time", "gte", startOfDay)
-.Aggregate("ticker", "count")
-.ToListAsync;
+    .WithCrossPartitionAccess()
+    .Where("time", "gte", startOfDay)
+    .Aggregate("ticker", "count")
+    .ToListAsync();
 ```
 
 ### Cross-partition analytics (TypeScript — admin listener)
 
 ```typescript
 await client.table("quotes")
-.withCrossPartitionAccess
-.where("time", ">=", startOfDay)
-.execute;
+  .withCrossPartitionAccess()
+  .where("time", ">=", startOfDay)
+  .execute();
 ```
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -684,14 +684,14 @@ Content-Type: application/json
 Authorization: Bearer <admin-token>
 
 {
- "database": "finance",
- "table": "candles_bid_1h",
- "where": {
- "and": [
- { "column": "ticker", "op": "eq", "value": "AAPL" },
- { "column": "time", "op": "gte", "value": 1748959200000 }
- ]
- }
+  "database": "finance",
+  "table": "candles_bid_1h",
+  "where": {
+    "and": [
+      { "column": "ticker", "op": "eq", "value": "AAPL" },
+      { "column": "time",   "op": "gte", "value": 1748959200000 }
+    ]
+  }
 }
 ```
 
@@ -711,7 +711,7 @@ second full pass.
 ```csharp
 var handle = await client.BulkLoadAsync("quotes", rows, new BulkLoadOptions
 {
- PostLoadMqBehavior = ClientPostLoadMqBehavior.Auto // default
+    PostLoadMqBehavior = ClientPostLoadMqBehavior.Auto   // default
 });
 // Wait on the load's own mqRebuildStatus / MqRebuildCompleted. No :refresh call.
 ```
@@ -736,7 +736,7 @@ Content-Type: application/json
 than reattaching an incomplete result. That is a correctness guard, not a bug — but it means a `skip`
 you forgot to follow up costs a full rebuild at the next restart.
 
-{:.note }
+{: .note }
 **Loading years of history is the case where result residency bites hardest.** A historical load of
 `quotes` regenerates every candle bucket in the range at once. Under `Auto` that is a large burst of
 hot admissions all at once; under a declared `HotOnly` none of it can be demoted at all. Declare

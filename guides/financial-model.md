@@ -74,11 +74,11 @@ steps below use `curl` and [`jq`](https://jqlang.org/). The C# steps use the `Ao
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```csharp
-using Aouda.Abstractions; // AoudaRequestException
+using Aouda.Abstractions;                  // AoudaRequestException
 using Aouda.Client;
-using Aouda.Client.Formulas; // Formula
-using Aouda.Protocol; // ErrorCodes
-using Aouda.Protocol.Schema; // CreateTableRequest
+using Aouda.Client.Formulas;               // Formula
+using Aouda.Protocol;                      // ErrorCodes
+using Aouda.Protocol.Schema;               // CreateTableRequest
 using static Aouda.Client.Formulas.FormulaExpr;
 
 using var client = new AoudaClient(new AoudaClientOptions { ServerUrl = url, DatabaseName = "finance", ApiKey = serviceKey });
@@ -99,9 +99,9 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```bash
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- "name": "by_dept",
- "resolverType": "ColumnMatch",
- "rules": [ { "ruleOrder": 0, "columnName": "dept", "operator": "In",
+  "name": "by_dept",
+  "resolverType": "ColumnMatch",
+  "rules": [ { "ruleOrder": 0, "columnName": "dept", "operator": "In",
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
 }'
 ```
@@ -113,15 +113,15 @@ Then the two tables. They have the same shape: the key, an ordinary `Decimal(18,
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/tables" "${A[@]}" -d '{
- "database": "finance",
- "name": "pnl",
- "columns": [
- { "name": "dept", "type": "String", "primaryKeyOrder": 1 },
- { "name": "line", "type": "String", "primaryKeyOrder": 2 },
- { "name": "year", "type": "Int32", "primaryKeyOrder": 3 },
- { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2, "isNullable": true },
- { "name": "formula", "type": "Expression", "drives": "amount" }
- ],
+  "database": "finance",
+  "name": "pnl",
+  "columns": [
+    { "name": "dept",    "type": "String", "primaryKeyOrder": 1 },
+    { "name": "line",    "type": "String", "primaryKeyOrder": 2 },
+    { "name": "year",    "type": "Int32",  "primaryKeyOrder": 3 },
+    { "name": "amount",  "type": "Decimal", "precision": 18, "scale": 2, "isNullable": true },
+    { "name": "formula", "type": "Expression", "drives": "amount" }
+  ],
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
 }'
 ```
@@ -132,22 +132,22 @@ column is always nullable, because a row with no formula is an input.
 **C#**
 
 ```csharp
-foreach (var name in new { "pnl", "balance" })
+foreach (var name in new[] { "pnl", "balance" })
 {
- await client.Schema.CreateTableAsync(new CreateTableRequest
- {
- Database = "finance",
- Name = name,
- Columns =
- [
- new { Name = "dept", Type = "String", PrimaryKeyOrder = 1 },
- new { Name = "line", Type = "String", PrimaryKeyOrder = 2 },
- new { Name = "year", Type = "Int32", PrimaryKeyOrder = 3 },
- new { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2, IsNullable = true },
- new { Name = "formula", Type = "Expression", Drives = "amount" },
- ],
-// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
- });
+    await client.Schema.CreateTableAsync(new CreateTableRequest
+    {
+        Database = "finance",
+        Name = name,
+        Columns =
+        [
+            new() { Name = "dept", Type = "String", PrimaryKeyOrder = 1 },
+            new() { Name = "line", Type = "String", PrimaryKeyOrder = 2 },
+            new() { Name = "year", Type = "Int32", PrimaryKeyOrder = 3 },
+            new() { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2, IsNullable = true },
+            new() { Name = "formula", Type = "Expression", Drives = "amount" },
+        ],
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
+    });
 }
 ```
 
@@ -155,18 +155,18 @@ foreach (var name in new { "pnl", "balance" })
 
 ```typescript
 for (const name of ["pnl", "balance"]) {
- await client.tables.createTable({
- database,
- name,
- columns: [
- { name: "dept", type: "String", primaryKeyOrder: 1 },
- { name: "line", type: "String", primaryKeyOrder: 2 },
- { name: "year", type: "Int32", primaryKeyOrder: 3 },
- { name: "amount", type: "Decimal", precision: 18, scale: 2, isNullable: true },
- { name: "formula", type: "Expression", drives: "amount" },
- ],
-// client.whoami — apiKey is an aouda_ key, or session, never both.
- });
+  await client.tables.createTable({
+    database,
+    name,
+    columns: [
+      { name: "dept", type: "String", primaryKeyOrder: 1 },
+      { name: "line", type: "String", primaryKeyOrder: 2 },
+      { name: "year", type: "Int32", primaryKeyOrder: 3 },
+      { name: "amount", type: "Decimal", precision: 18, scale: 2, isNullable: true },
+      { name: "formula", type: "Expression", drives: "amount" },
+    ],
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
+  });
 }
 ```
 
@@ -190,18 +190,18 @@ declaration are in [Formulas: the column](formulas.md#the-column).
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d '{
- "database": "finance",
- "columns": ["dept", "line", "year", "amount"],
- "data": [
- ["Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail",
- "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online"],
- ["Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate",
- "Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate"],
- [2026, 2026, 2026, 2026, 2027, 2027, 2027, 2027, 2028, 2028, 2028, 2028,
- 2026, 2026, 2026, 2026, 2027, 2027, 2027, 2027, 2028, 2028, 2028, 2028],
- [1200.00, 720.00, 280.00, 0.22, 1380.00, 800.00, 320.00, 0.22, 1500.00, 840.00, 340.00, 0.24,
- 800.00, 400.00, 260.00, 0.22, 960.00, 470.00, 280.00, 0.22, 1100.00, 530.00, 300.00, 0.24]
- ]
+  "database": "finance",
+  "columns": ["dept", "line", "year", "amount"],
+  "data": [
+    ["Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail", "Retail",
+     "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online", "Online"],
+    ["Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate",
+     "Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate", "Revenue", "COGS", "Opex", "TaxRate"],
+    [2026, 2026, 2026, 2026, 2027, 2027, 2027, 2027, 2028, 2028, 2028, 2028,
+     2026, 2026, 2026, 2026, 2027, 2027, 2027, 2027, 2028, 2028, 2028, 2028],
+    [1200.00, 720.00, 280.00, 0.22, 1380.00, 800.00, 320.00, 0.22, 1500.00, 840.00, 340.00, 0.24,
+      800.00, 400.00, 260.00, 0.22,  960.00, 470.00, 280.00, 0.22, 1100.00, 530.00, 300.00, 0.24]
+  ]
 }'
 # {"rowsInserted":24,"executionMs":…,"token":"01…"}
 ```
@@ -210,35 +210,35 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d '{
 
 ```csharp
 var pnl = client.GetTable("pnl");
-var inputs = new (string Dept, int Year, decimal Revenue, decimal Cogs, decimal Opex, decimal TaxRate)
+var inputs = new (string Dept, int Year, decimal Revenue, decimal Cogs, decimal Opex, decimal TaxRate)[]
 {
- ("Retail", 2026, 1200m, 720m, 280m, 0.22m), ("Retail", 2027, 1380m, 800m, 320m, 0.22m), ("Retail", 2028, 1500m, 840m, 340m, 0.24m),
- ("Online", 2026, 800m, 400m, 260m, 0.22m), ("Online", 2027, 960m, 470m, 280m, 0.22m), ("Online", 2028, 1100m, 530m, 300m, 0.24m),
+    ("Retail", 2026, 1200m, 720m, 280m, 0.22m), ("Retail", 2027, 1380m, 800m, 320m, 0.22m), ("Retail", 2028, 1500m, 840m, 340m, 0.24m),
+    ("Online", 2026,  800m, 400m, 260m, 0.22m), ("Online", 2027,  960m, 470m, 280m, 0.22m), ("Online", 2028, 1100m, 530m, 300m, 0.24m),
 };
-await pnl.InsertAsync(inputs.SelectMany(i => new
+await pnl.InsertAsync(inputs.SelectMany(i => new[]
 {
- Input(i.Dept, "Revenue", i.Year, i.Revenue), Input(i.Dept, "COGS", i.Year, i.Cogs),
- Input(i.Dept, "Opex", i.Year, i.Opex), Input(i.Dept, "TaxRate", i.Year, i.TaxRate),
-}).ToList);
+    Input(i.Dept, "Revenue", i.Year, i.Revenue), Input(i.Dept, "COGS", i.Year, i.Cogs),
+    Input(i.Dept, "Opex", i.Year, i.Opex), Input(i.Dept, "TaxRate", i.Year, i.TaxRate),
+}).ToList());
 
 static Dictionary<string, object?> Input(string dept, string line, int year, decimal amount)
- => new { ["dept"] = dept, ["line"] = line, ["year"] = year, ["amount"] = amount };
+    => new() { ["dept"] = dept, ["line"] = line, ["year"] = year, ["amount"] = amount };
 ```
 
 **TypeScript**
 
 ```typescript
-const inputs: [string, number, number, number, number, number] = [
- ["Retail", 2026, 1200, 720, 280, 0.22], ["Retail", 2027, 1380, 800, 320, 0.22], ["Retail", 2028, 1500, 840, 340, 0.24],
- ["Online", 2026, 800, 400, 260, 0.22], ["Online", 2027, 960, 470, 280, 0.22], ["Online", 2028, 1100, 530, 300, 0.24],
+const inputs: [string, number, number, number, number, number][] = [
+  ["Retail", 2026, 1200, 720, 280, 0.22], ["Retail", 2027, 1380, 800, 320, 0.22], ["Retail", 2028, 1500, 840, 340, 0.24],
+  ["Online", 2026, 800, 400, 260, 0.22], ["Online", 2027, 960, 470, 280, 0.22], ["Online", 2028, 1100, 530, 300, 0.24],
 ];
 await client.table("pnl").insertMany(
- inputs.flatMap(([dept, year, revenue, cogs, opex, taxRate]) => [
- { dept, line: "Revenue", year, amount: revenue },
- { dept, line: "COGS", year, amount: cogs },
- { dept, line: "Opex", year, amount: opex },
- { dept, line: "TaxRate", year, amount: taxRate },
- ]),
+  inputs.flatMap(([dept, year, revenue, cogs, opex, taxRate]) => [
+    { dept, line: "Revenue", year, amount: revenue },
+    { dept, line: "COGS", year, amount: cogs },
+    { dept, line: "Opex", year, amount: opex },
+    { dept, line: "TaxRate", year, amount: taxRate },
+  ]),
 );
 ```
 
@@ -257,55 +257,55 @@ on the row `(Online, GrossProfit, 2027)` reads `(Online, Revenue, 2027)` and `(O
 mkdir -p fx
 cat > fx/GrossProfit.json <<'EOF'
 { "type": "arithmetic", "op": "-",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" },
- "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "COGS" } }, "column": "amount" } }
+  "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" },
+  "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "COGS" } },    "column": "amount" } }
 EOF
 cat > fx/EBIT.json <<'EOF'
 { "type": "arithmetic", "op": "-",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "GrossProfit" } }, "column": "amount" },
- "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Opex" } }, "column": "amount" } }
+  "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "GrossProfit" } }, "column": "amount" },
+  "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Opex" } },        "column": "amount" } }
 EOF
 cat > fx/Margin.json <<'EOF'
 { "type": "call", "fn": "round", "args": [
- { "type": "arithmetic", "op": "/",
- "left": { "type": "arithmetic", "op": "*",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "EBIT" } }, "column": "amount" },
- "right": { "type": "literal", "value": 100 } },
- "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" } },
- { "type": "literal", "value": 2 } ] }
+  { "type": "arithmetic", "op": "/",
+    "left": { "type": "arithmetic", "op": "*",
+              "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "EBIT" } }, "column": "amount" },
+              "right": { "type": "literal", "value": 100 } },
+    "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" } },
+  { "type": "literal", "value": 2 } ] }
 EOF
 cat > fx/Tax.json <<'EOF'
 { "type": "call", "fn": "if", "args": [
- { "type": "call", "fn": "gt", "args": [
- { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Margin" } }, "column": "amount" },
- { "type": "literal", "value": 0 } ] },
- { "type": "call", "fn": "round", "args": [
- { "type": "arithmetic", "op": "*",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "EBIT" } }, "column": "amount" },
- "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "TaxRate" } }, "column": "amount" } },
- { "type": "literal", "value": 2 } ] },
- { "type": "literal", "value": 0 } ] }
+  { "type": "call", "fn": "gt", "args": [
+    { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Margin" } }, "column": "amount" },
+    { "type": "literal", "value": 0 } ] },
+  { "type": "call", "fn": "round", "args": [
+    { "type": "arithmetic", "op": "*",
+      "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "EBIT" } },    "column": "amount" },
+      "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "TaxRate" } }, "column": "amount" } },
+    { "type": "literal", "value": 2 } ] },
+  { "type": "literal", "value": 0 } ] }
 EOF
 cat > fx/NetIncome.json <<'EOF'
 { "type": "arithmetic", "op": "-",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "EBIT" } }, "column": "amount" },
- "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Tax" } }, "column": "amount" } }
+  "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "EBIT" } }, "column": "amount" },
+  "right": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Tax" } },  "column": "amount" } }
 EOF
 cat > fx/MarginGap.json <<'EOF'
 { "type": "arithmetic", "op": "-",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Margin" } }, "column": "amount" },
- "right": { "type": "literal", "value": 15 } }
+  "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Margin" } }, "column": "amount" },
+  "right": { "type": "literal", "value": 15 } }
 EOF
 
 for line in GrossProfit EBIT Margin Tax NetIncome MarginGap; do
- jq -n --arg line "$line" --slurpfile fx "fx/$line.json" '{
- database: "finance",
- columns: ["dept", "line", "year", "formula"],
- data: [ ["Retail", "Retail", "Retail", "Online", "Online", "Online"],
- [range(6) | $line],
- [2026, 2027, 2028, 2026, 2027, 2028],
- [range(6) | $fx[0]] ] }' |
- curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d @-
+  jq -n --arg line "$line" --slurpfile fx "fx/$line.json" '{
+    database: "finance",
+    columns: ["dept", "line", "year", "formula"],
+    data: [ ["Retail", "Retail", "Retail", "Online", "Online", "Online"],
+            [range(6) | $line],
+            [2026, 2027, 2028, 2026, 2027, 2028],
+            [range(6) | $fx[0]] ] }' |
+  curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d @-
 done
 # each: {"rowsInserted":6,…,"token":"01…"} — keep the last token for step 4
 ```
@@ -320,19 +320,19 @@ static ScalarExprNode Line(string line) => CellHere("amount", ("line", line));
 
 var formulas = new Dictionary<string, ScalarExprNode>
 {
- ["GrossProfit"] = Sub(Line("Revenue"), Line("COGS")),
- ["EBIT"] = Sub(Line("GrossProfit"), Line("Opex")),
- ["Margin"] = Round(Div(Mul(Line("EBIT"), Lit(100)), Line("Revenue")), 2),
- ["Tax"] = If(Gt(Line("Margin"), Lit(0)), Round(Mul(Line("EBIT"), Line("TaxRate")), 2), Lit(0)),
- ["NetIncome"] = Sub(Line("EBIT"), Line("Tax")),
- ["MarginGap"] = Sub(Line("Margin"), Lit(15)),
+    ["GrossProfit"] = Sub(Line("Revenue"), Line("COGS")),
+    ["EBIT"] = Sub(Line("GrossProfit"), Line("Opex")),
+    ["Margin"] = Round(Div(Mul(Line("EBIT"), Lit(100)), Line("Revenue")), 2),
+    ["Tax"] = If(Gt(Line("Margin"), Lit(0)), Round(Mul(Line("EBIT"), Line("TaxRate")), 2), Lit(0)),
+    ["NetIncome"] = Sub(Line("EBIT"), Line("Tax")),
+    ["MarginGap"] = Sub(Line("Margin"), Lit(15)),
 };
 await pnl.InsertAsync((
- from dept in new { "Retail", "Online" }
- from year in new { 2026, 2027, 2028 }
- from f in formulas
- select new Dictionary<string, object?> { ["dept"] = dept, ["line"] = f.Key, ["year"] = year, ["formula"] = Formula.From(f.Value) }
-).ToList);
+    from dept in new[] { "Retail", "Online" }
+    from year in new[] { 2026, 2027, 2028 }
+    from f in formulas
+    select new Dictionary<string, object?> { ["dept"] = dept, ["line"] = f.Key, ["year"] = year, ["formula"] = Formula.From(f.Value) }
+).ToList());
 ```
 
 **TypeScript** — `fx` builds the same JSON, and `Formula.from` makes it the value of the Expression column:
@@ -341,19 +341,19 @@ await pnl.InsertAsync((
 // A key column a reference leaves out (dept, year) is the formula row's own: one formula serves every department and year.
 const line = (name: string) => fx.cellHere("amount", { line: name });
 const formulas = {
- GrossProfit: fx.sub(line("Revenue"), line("COGS")),
- EBIT: fx.sub(line("GrossProfit"), line("Opex")),
- Margin: fx.round(fx.div(fx.mul(line("EBIT"), fx.lit(100)), line("Revenue")), 2),
- Tax: fx.if(fx.gt(line("Margin"), fx.lit(0)), fx.round(fx.mul(line("EBIT"), line("TaxRate")), 2), fx.lit(0)),
- NetIncome: fx.sub(line("EBIT"), line("Tax")),
- MarginGap: fx.sub(line("Margin"), fx.lit(15)),
+  GrossProfit: fx.sub(line("Revenue"), line("COGS")),
+  EBIT: fx.sub(line("GrossProfit"), line("Opex")),
+  Margin: fx.round(fx.div(fx.mul(line("EBIT"), fx.lit(100)), line("Revenue")), 2),
+  Tax: fx.if(fx.gt(line("Margin"), fx.lit(0)), fx.round(fx.mul(line("EBIT"), line("TaxRate")), 2), fx.lit(0)),
+  NetIncome: fx.sub(line("EBIT"), line("Tax")),
+  MarginGap: fx.sub(line("Margin"), fx.lit(15)),
 };
 await client.table("pnl").insertMany(
- ["Retail", "Online"].flatMap((dept) =>
- [2026, 2027, 2028].flatMap((year) =>
- Object.entries(formulas).map(([name, node]) => ({ dept, line: name, year, formula: Formula.from(node) })),
-),
-),
+  ["Retail", "Online"].flatMap((dept) =>
+    [2026, 2027, 2028].flatMap((year) =>
+      Object.entries(formulas).map(([name, node]) => ({ dept, line: name, year, formula: Formula.from(node) })),
+    ),
+  ),
 );
 ```
 
@@ -374,11 +374,11 @@ token read of a table with a formula column waits until the formulas have caught
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/query?at_least=$TOKEN&waitMs=5000" "${A[@]}" -d '{
- "database": "finance",
- "table": "pnl",
- "select": ["line", "amount"],
- "where": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
- { "column": "year", "op": "eq", "value": 2026 } ] }
+  "database": "finance",
+  "table": "pnl",
+  "select": ["line", "amount"],
+  "where": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
+                      { "column": "year", "op": "eq", "value": 2026 } ] }
 }'
 ```
 
@@ -401,39 +401,39 @@ read carries each row's formula as an object (`"table": ""` where the formula le
 ```csharp
 static async Task<Dictionary<string, decimal?>> ReadAsync(AoudaClient client, string table, string dept, int year)
 {
- for (var attempt = 0; ; attempt++)
- {
- try
- {
- var rows = await client.GetTable(table).Where("dept", "eq", dept).Where("year", "eq", year).ToListAsync;
- return rows.ToDictionary(r => (string)r["line"]!, r => r["amount"] is null ? (decimal?)null : Convert.ToDecimal(r["amount"]));
- }
- catch (AoudaRequestException e) when (e.ErrorCode == ErrorCodes.TokenUnsatisfied && attempt < 40)
- {
- await Task.Delay(250);
- }
- }
+    for (var attempt = 0; ; attempt++)
+    {
+        try
+        {
+            var rows = await client.GetTable(table).Where("dept", "eq", dept).Where("year", "eq", year).ToListAsync();
+            return rows.ToDictionary(r => (string)r["line"]!, r => r["amount"] is null ? (decimal?)null : Convert.ToDecimal(r["amount"]));
+        }
+        catch (AoudaRequestException e) when (e.ErrorCode == ErrorCodes.TokenUnsatisfied && attempt < 40)
+        {
+            await Task.Delay(250);
+        }
+    }
 }
 
-var retail2026 = await ReadAsync(client, "pnl", "Retail", 2026); // GrossProfit 480.00, EBIT 200.00, Margin 16.67, …
+var retail2026 = await ReadAsync(client, "pnl", "Retail", 2026);   // GrossProfit 480.00, EBIT 200.00, Margin 16.67, …
 ```
 
 **TypeScript** — the same: the client sends its token, and a `409 TOKEN_UNSATISFIED` (`AoudaConflictError`) is read again:
 
 ```typescript
 async function read(table: string, dept: string, year: number): Promise<Record<string, unknown>> {
- for (let attempt = 0; ; attempt++) {
- try {
- const { rows } = await client.table(table).where("dept", "=", dept).where("year", "=", year).execute;
- return Object.fromEntries(rows.map((r) => [r.line as string, r.amount]));
- } catch (e) {
- if (!(e instanceof AoudaConflictError && e.code === "TOKEN_UNSATISFIED") || attempt >= 40) throw e;
- await new Promise((resolve) => setTimeout(resolve, 250));
- }
- }
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { rows } = await client.table(table).where("dept", "=", dept).where("year", "=", year).execute();
+      return Object.fromEntries(rows.map((r) => [r.line as string, r.amount]));
+    } catch (e) {
+      if (!(e instanceof AoudaConflictError && e.code === "TOKEN_UNSATISFIED") || attempt >= 40) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
 }
 
-const retail2026 = await read("pnl", "Retail", 2026); // { GrossProfit: 480, EBIT: 200, Margin: 16.67, … }
+const retail2026 = await read("pnl", "Retail", 2026);   // { GrossProfit: 480, EBIT: 200, Margin: 16.67, … }
 ```
 
 The SDK reads come back in column-batch frames: a C# row's `formula` is the formula's canonical text, a TypeScript row's a `Formula`
@@ -447,13 +447,13 @@ The SDK reads come back in column-batch frames: a C# row's `formula` is the form
 input's change and then **each formula row that changed, once**, at its final value — never an intermediate one:
 
 ```
-update Revenue: 1200.00 -> 1250.00
-update GrossProfit: 480.00 -> 530.00
-update EBIT: 200.00 -> 250.00
-update Margin: 16.67 -> 20.00
-update Tax: 44.00 -> 55.00
-update NetIncome: 156.00 -> 195.00
-update MarginGap: 1.67 -> 5.00
+update Revenue:     1200.00 -> 1250.00
+update GrossProfit:  480.00 ->  530.00
+update EBIT:         200.00 ->  250.00
+update Margin:        16.67 ->   20.00
+update Tax:           44.00 ->   55.00
+update NetIncome:    156.00 ->  195.00
+update MarginGap:      1.67 ->    5.00
 ```
 
 `Margin` is computed once even though `Revenue` reaches it two ways. A formula whose value did not change sends nothing.
@@ -463,17 +463,17 @@ update MarginGap: 1.67 -> 5.00
 
 ```json
 { "type": "subscribe", "id": "retail-2026", "target": "pnl",
- "filter": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
- { "column": "year", "op": "eq", "value": 2026 } ] } }
+  "filter": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
+                       { "column": "year", "op": "eq", "value": 2026 } ] } }
 ```
 
 ```bash
 curl -s -X PATCH "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d '{
- "database": "finance",
- "where": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
- { "column": "line", "op": "eq", "value": "Revenue" },
- { "column": "year", "op": "eq", "value": 2026 } ] },
- "set": { "amount": 1250.00 }
+  "database": "finance",
+  "where": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
+                      { "column": "line", "op": "eq", "value": "Revenue" },
+                      { "column": "year", "op": "eq", "value": 2026 } ] },
+  "set": { "amount": 1250.00 }
 }'
 ```
 
@@ -481,9 +481,9 @@ Each `change` message carries the row and, for an update, `prev`; its `formula` 
 
 ```json
 { "type": "change", "id": "retail-2026", "op": "update",
- "row": { "dept": "Retail", "line": "Margin", "year": 2026, "amount": 20, "formula": { "type": "call", "fn": "round", … } },
- "prev": { "dept": "Retail", "line": "Margin", "year": 2026, "amount": 16.67, "formula": { "type": "call", "fn": "round", … } },
- "version": 142, "token": "01…" }
+  "row":  { "dept": "Retail", "line": "Margin", "year": 2026, "amount": 20,    "formula": { "type": "call", "fn": "round", … } },
+  "prev": { "dept": "Retail", "line": "Margin", "year": 2026, "amount": 16.67, "formula": { "type": "call", "fn": "round", … } },
+  "version": 142, "token": "01…" }
 ```
 
 **C#**
@@ -491,25 +491,25 @@ Each `change` message carries the row and, for an update, `prev`; its `formula` 
 ```csharp
 await foreach (var e in client.GetTable("pnl").Where("dept", "eq", "Retail").Where("year", "eq", 2026).SubscribeAsync(ct))
 {
- if (e.IsSnapshot) continue; // the first event: the rows as they are now
- Console.WriteLine($"{e.Type} {e.Row!["line"]}: {e.PreviousRow?["amount"]} -> {e.Row["amount"]}");
+    if (e.IsSnapshot) continue;   // the first event: the rows as they are now
+    Console.WriteLine($"{e.Type} {e.Row!["line"]}: {e.PreviousRow?["amount"]} -> {e.Row["amount"]}");
 }
 
 // elsewhere, after the snapshot has arrived:
 await client.GetTable("pnl").Where("dept", "eq", "Retail").Where("line", "eq", "Revenue").Where("year", "eq", 2026)
-.UpdateAsync(new Dictionary<string, object?> { ["amount"] = 1250m });
+    .UpdateAsync(new Dictionary<string, object?> { ["amount"] = 1250m });
 ```
 
 **TypeScript**
 
 ```typescript
 const sub = client.table("pnl").where("dept", "=", "Retail").where("year", "=", 2026).subscribe({
- onSnapshot: (rows) => render(rows),
- onChange: (event) => console.log(`${event.op} ${event.row?.line}: ${event.prev?.amount} -> ${event.row?.amount}`),
+  onSnapshot: (rows) => render(rows),
+  onChange: (event) => console.log(`${event.op} ${event.row?.line}: ${event.prev?.amount} -> ${event.row?.amount}`),
 });
 
 await client.table("pnl").where("dept", "=", "Retail").where("line", "=", "Revenue").where("year", "=", 2026)
-.update({ amount: 1250 });
+  .update({ amount: 1250 });
 ```
 
 A change event's `token` is a valid cover for a later token read; tokens are not ordered across events, so keep the highest you have
@@ -538,39 +538,39 @@ cell it reads with that cell's current value, the value or the reason it has non
 
 ```bash
 curl -s -X PATCH "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d '{
- "database": "finance",
- "where": { "and": [ { "column": "dept", "op": "eq", "value": "Online" },
- { "column": "line", "op": "eq", "value": "Revenue" },
- { "column": "year", "op": "eq", "value": 2028 } ] },
- "set": { "amount": 0 }
+  "database": "finance",
+  "where": { "and": [ { "column": "dept", "op": "eq", "value": "Online" },
+                      { "column": "line", "op": "eq", "value": "Revenue" },
+                      { "column": "year", "op": "eq", "value": 2028 } ] },
+  "set": { "amount": 0 }
 }'
 curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/explain" "${A[@]}" -d '{
- "key": { "dept": "Online", "line": "Margin", "year": 2028 },
- "column": "amount"
+  "key": { "dept": "Online", "line": "Margin", "year": 2028 },
+  "column": "amount"
 }'
 ```
 
 ```json
 {
- "table": "pnl",
- "key": { "dept": "Online", "line": "Margin", "year": 2028 },
- "column": "amount",
- "expressionColumn": "formula",
- "kind": "formula",
- "formula": { "type": "call", "fn": "round", "args": [ … ] },
- "references": [
- { "table": "pnl", "key": { "dept": "Online", "line": "Revenue", "year": 2028 }, "column": "amount",
- "readable": true, "value": 0.00, "isFormulaCell": false, "error": null },
- { "table": "pnl", "key": { "dept": "Online", "line": "EBIT", "year": 2028 }, "column": "amount",
- "readable": true, "value": -830.00, "isFormulaCell": true, "error": null }
- ],
- "value": null,
- "reason": "division by zero.",
- "storedValue": null,
- "readBy": [
- { "table": "pnl", "key": { "dept": "Online", "line": "MarginGap", "year": 2028 }, "column": "amount" },
- { "table": "pnl", "key": { "dept": "Online", "line": "Tax", "year": 2028 }, "column": "amount" }
- ]
+  "table": "pnl",
+  "key": { "dept": "Online", "line": "Margin", "year": 2028 },
+  "column": "amount",
+  "expressionColumn": "formula",
+  "kind": "formula",
+  "formula": { "type": "call", "fn": "round", "args": [ … ] },
+  "references": [
+    { "table": "pnl", "key": { "dept": "Online", "line": "Revenue", "year": 2028 }, "column": "amount",
+      "readable": true, "value": 0.00, "isFormulaCell": false, "error": null },
+    { "table": "pnl", "key": { "dept": "Online", "line": "EBIT", "year": 2028 }, "column": "amount",
+      "readable": true, "value": -830.00, "isFormulaCell": true, "error": null }
+  ],
+  "value": null,
+  "reason": "division by zero.",
+  "storedValue": null,
+  "readBy": [
+    { "table": "pnl", "key": { "dept": "Online", "line": "MarginGap", "year": 2028 }, "column": "amount" },
+    { "table": "pnl", "key": { "dept": "Online", "line": "Tax", "year": 2028 }, "column": "amount" }
+  ]
 }
 ```
 
@@ -580,23 +580,23 @@ Note that each reference's `key` is the **resolved** key: the `dept` and `year` 
 
 ```csharp
 await client.GetTable("pnl").Where("dept", "eq", "Online").Where("line", "eq", "Revenue").Where("year", "eq", 2028)
-.UpdateAsync(new Dictionary<string, object?> { ["amount"] = 0m });
+    .UpdateAsync(new Dictionary<string, object?> { ["amount"] = 0m });
 
 var why = await pnl.ExplainAsync("amount", ("dept", "Online"), ("line", "Margin"), ("year", 2028));
-Console.WriteLine($"{why.Kind}: {why.Value ?? "null"} because {why.Reason}"); // formula: null because division by zero.
+Console.WriteLine($"{why.Kind}: {why.Value ?? "null"} because {why.Reason}");   // formula: null because division by zero.
 foreach (var r in why.References)
- Console.WriteLine($" reads {r.Table}[{string.Join(", ", r.Key.Values)}].{r.Column} = {r.Value}");
+    Console.WriteLine($"  reads {r.Table}[{string.Join(", ", r.Key.Values)}].{r.Column} = {r.Value}");
 ```
 
 **TypeScript**
 
 ```typescript
 await client.table("pnl").where("dept", "=", "Online").where("line", "=", "Revenue").where("year", "=", 2028)
-.update({ amount: 0 });
+  .update({ amount: 0 });
 
 const why = await client.table("pnl").explain({ dept: "Online", line: "Margin", year: 2028 }, "amount");
-console.log(`${why.kind}: ${why.value} because ${why.reason}`); // formula: null because division by zero.
-for (const r of why.references) console.log(` reads ${r.table}[${Object.values(r.key).join(", ")}].${r.column} = ${r.value}`);
+console.log(`${why.kind}: ${why.value} because ${why.reason}`);   // formula: null because division by zero.
+for (const r of why.references) console.log(`  reads ${r.table}[${Object.values(r.key).join(", ")}].${r.column} = ${r.value}`);
 ```
 
 A grid that wants to show `#DIV/0!` calls `explain` for a null formula cell. Set the revenue back and the cells compute again.
@@ -622,21 +622,21 @@ explicit `year`. The `dept` stays relative throughout.
 OPEN_2027='{ "type": "cellRef", "key": { "line": { "type": "literal", "value": "RetainedEarnings" }, "year": { "type": "literal", "value": 2026 } }, "column": "amount" }'
 OPEN_2028='{ "type": "cellRef", "key": { "line": { "type": "literal", "value": "RetainedEarnings" }, "year": { "type": "literal", "value": 2027 } }, "column": "amount" }'
 RETAINED='{ "type": "arithmetic", "op": "+",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Opening" } }, "column": "amount" },
- "right": { "type": "cellRef", "table": "pnl", "key": { "line": { "type": "literal", "value": "NetIncome" } }, "column": "amount" } }'
+  "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Opening" } }, "column": "amount" },
+  "right": { "type": "cellRef", "table": "pnl", "key": { "line": { "type": "literal", "value": "NetIncome" } }, "column": "amount" } }'
 curl -s -X POST "$AOUDA/api/databases/finance/tables/balance/rows" "${A[@]}" -d "{
- \"database\": \"finance\",
- \"columns\": [\"dept\", \"line\", \"year\", \"amount\", \"formula\"],
- \"data\": [
- [\"Retail\", \"Retail\", \"Retail\", \"Retail\", \"Retail\", \"Retail\",
- \"Online\", \"Online\", \"Online\", \"Online\", \"Online\", \"Online\"],
- [\"Opening\", \"Opening\", \"Opening\", \"RetainedEarnings\", \"RetainedEarnings\", \"RetainedEarnings\",
- \"Opening\", \"Opening\", \"Opening\", \"RetainedEarnings\", \"RetainedEarnings\", \"RetainedEarnings\"],
- [2026, 2027, 2028, 2026, 2027, 2028, 2026, 2027, 2028, 2026, 2027, 2028],
- [500.00, null, null, null, null, null, 300.00, null, null, null, null, null],
- [null, $OPEN_2027, $OPEN_2028, $RETAINED, $RETAINED, $RETAINED,
- null, $OPEN_2027, $OPEN_2028, $RETAINED, $RETAINED, $RETAINED]
- ]
+  \"database\": \"finance\",
+  \"columns\": [\"dept\", \"line\", \"year\", \"amount\", \"formula\"],
+  \"data\": [
+    [\"Retail\", \"Retail\", \"Retail\", \"Retail\", \"Retail\", \"Retail\",
+     \"Online\", \"Online\", \"Online\", \"Online\", \"Online\", \"Online\"],
+    [\"Opening\", \"Opening\", \"Opening\", \"RetainedEarnings\", \"RetainedEarnings\", \"RetainedEarnings\",
+     \"Opening\", \"Opening\", \"Opening\", \"RetainedEarnings\", \"RetainedEarnings\", \"RetainedEarnings\"],
+    [2026, 2027, 2028, 2026, 2027, 2028, 2026, 2027, 2028, 2026, 2027, 2028],
+    [500.00, null, null, null, null, null, 300.00, null, null, null, null, null],
+    [null, $OPEN_2027, $OPEN_2028, $RETAINED, $RETAINED, $RETAINED,
+     null, $OPEN_2027, $OPEN_2028, $RETAINED, $RETAINED, $RETAINED]
+  ]
 }"
 ```
 
@@ -646,22 +646,22 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables/balance/rows" "${A[@]}" -d 
 var balance = client.GetTable("balance");
 var retained = Add(CellHere("amount", ("line", "Opening")), Cell("pnl", "amount", ("line", "NetIncome")));
 await balance.InsertAsync((
- from dept in new { "Retail", "Online" }
- from row in new (string Line, int Year, object? Amount, ScalarExprNode? Formula)
- {
- ("Opening", 2026, dept == "Retail" ? 500m : 300m, null),
- ("Opening", 2027, null, CellHere("amount", ("line", "RetainedEarnings"), ("year", 2026))),
- ("Opening", 2028, null, CellHere("amount", ("line", "RetainedEarnings"), ("year", 2027))),
- ("RetainedEarnings", 2026, null, retained),
- ("RetainedEarnings", 2027, null, retained),
- ("RetainedEarnings", 2028, null, retained),
- }
- select new Dictionary<string, object?>
- {
- ["dept"] = dept, ["line"] = row.Line, ["year"] = row.Year,
- ["amount"] = row.Amount, ["formula"] = row.Formula is null ? null : Formula.From(row.Formula),
- }
-).ToList);
+    from dept in new[] { "Retail", "Online" }
+    from row in new (string Line, int Year, object? Amount, ScalarExprNode? Formula)[]
+    {
+        ("Opening", 2026, dept == "Retail" ? 500m : 300m, null),
+        ("Opening", 2027, null, CellHere("amount", ("line", "RetainedEarnings"), ("year", 2026))),
+        ("Opening", 2028, null, CellHere("amount", ("line", "RetainedEarnings"), ("year", 2027))),
+        ("RetainedEarnings", 2026, null, retained),
+        ("RetainedEarnings", 2027, null, retained),
+        ("RetainedEarnings", 2028, null, retained),
+    }
+    select new Dictionary<string, object?>
+    {
+        ["dept"] = dept, ["line"] = row.Line, ["year"] = row.Year,
+        ["amount"] = row.Amount, ["formula"] = row.Formula is null ? null : Formula.From(row.Formula),
+    }
+).ToList());
 ```
 
 **TypeScript**
@@ -669,12 +669,12 @@ await balance.InsertAsync((
 ```typescript
 const retained = fx.add(fx.cellHere("amount", { line: "Opening" }), fx.cell("pnl", "amount", { line: "NetIncome" }));
 await client.table("balance").insertMany(
- ["Retail", "Online"].flatMap((dept) => [
- { dept, line: "Opening", year: 2026, amount: dept === "Retail" ? 500 : 300 },
- { dept, line: "Opening", year: 2027, formula: Formula.from(fx.cellHere("amount", { line: "RetainedEarnings", year: 2026 })) },
- { dept, line: "Opening", year: 2028, formula: Formula.from(fx.cellHere("amount", { line: "RetainedEarnings", year: 2027 })) },
-...[2026, 2027, 2028].map((year) => ({ dept, line: "RetainedEarnings", year, formula: Formula.from(retained) })),
- ]),
+  ["Retail", "Online"].flatMap((dept) => [
+    { dept, line: "Opening", year: 2026, amount: dept === "Retail" ? 500 : 300 },
+    { dept, line: "Opening", year: 2027, formula: Formula.from(fx.cellHere("amount", { line: "RetainedEarnings", year: 2026 })) },
+    { dept, line: "Opening", year: 2028, formula: Formula.from(fx.cellHere("amount", { line: "RetainedEarnings", year: 2027 })) },
+    ...[2026, 2027, 2028].map((year) => ({ dept, line: "RetainedEarnings", year, formula: Formula.from(retained) })),
+  ]),
 );
 ```
 
@@ -705,11 +705,11 @@ row and the rule:
 
 ```bash
 curl -s -X PATCH "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d '{
- "database": "finance",
- "where": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
- { "column": "line", "op": "eq", "value": "Tax" },
- { "column": "year", "op": "eq", "value": 2026 } ] },
- "set": { "amount": 0 }
+  "database": "finance",
+  "where": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
+                      { "column": "line", "op": "eq", "value": "Tax" },
+                      { "column": "year", "op": "eq", "value": 2026 } ] },
+  "set": { "amount": 0 }
 }'
 # 409 {"error":"pnl[Retail, Tax, 2026]: the row has a formula in 'formula', …","code":"FORMULA_VALUE_WRITE_REFUSED",…}
 ```
@@ -719,12 +719,12 @@ curl -s -X PATCH "$AOUDA/api/databases/finance/tables/pnl/rows" "${A[@]}" -d '{
 ```csharp
 try
 {
- await client.GetTable("pnl").Where("dept", "eq", "Retail").Where("line", "eq", "Tax").Where("year", "eq", 2026)
-.UpdateAsync(new Dictionary<string, object?> { ["amount"] = 0m });
+    await client.GetTable("pnl").Where("dept", "eq", "Retail").Where("line", "eq", "Tax").Where("year", "eq", 2026)
+        .UpdateAsync(new Dictionary<string, object?> { ["amount"] = 0m });
 }
 catch (AoudaFormulaRefusedException e) when (e.Kind == FormulaErrorKind.ValueWriteRefused)
 {
- Console.WriteLine($"{e.StatusCode} {e.ErrorCode}: {e.Message}"); // 409 FORMULA_VALUE_WRITE_REFUSED: …
+    Console.WriteLine($"{e.StatusCode} {e.ErrorCode}: {e.Message}");   // 409 FORMULA_VALUE_WRITE_REFUSED: …
 }
 ```
 
@@ -732,11 +732,11 @@ catch (AoudaFormulaRefusedException e) when (e.Kind == FormulaErrorKind.ValueWri
 
 ```typescript
 try {
- await client.table("pnl").where("dept", "=", "Retail").where("line", "=", "Tax").where("year", "=", 2026)
-.update({ amount: 0 });
+  await client.table("pnl").where("dept", "=", "Retail").where("line", "=", "Tax").where("year", "=", 2026)
+    .update({ amount: 0 });
 } catch (e) {
- if (!(e instanceof FormulaConflictError && e.kind === "valueWriteRefused")) throw e;
- console.log(`${e.statusCode} ${e.code}: ${e.message}`); // 409 FORMULA_VALUE_WRITE_REFUSED: …
+  if (!(e instanceof FormulaConflictError && e.kind === "valueWriteRefused")) throw e;
+  console.log(`${e.statusCode} ${e.code}: ${e.message}`);   // 409 FORMULA_VALUE_WRITE_REFUSED: …
 }
 ```
 
@@ -756,25 +756,25 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/roles" "${A[@]}" -d '{ "name": "viewer", "permissions": [
- { "resourceType": "table", "resourceName": "pnl", "actions": "read" },
- { "resourceType": "table", "resourceName": "balance", "actions": "read" } ] }'
+  { "resourceType": "table", "resourceName": "pnl",     "actions": "read" },
+  { "resourceType": "table", "resourceName": "balance", "actions": "read" } ] }'
 curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/roles" "${A[@]}" -d '{ "name": "planner", "permissions": [
- { "resourceType": "table", "resourceName": "pnl", "actions": "read,write" },
- { "resourceType": "table", "resourceName": "balance", "actions": "read,write" } ] }'
+  { "resourceType": "table", "resourceName": "pnl",     "actions": "read,write" },
+  { "resourceType": "table", "resourceName": "balance", "actions": "read,write" } ] }'
 
 for who in viewer planner; do
- uid=$(curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/users" "${A[@]}" \
- -d "{ \"email\": \"$who@example.com\", \"password\": \"Correct-Horse-42!\" }" | jq -r.id)
- curl -s -X PUT "$AOUDA/api/databases/finance/auth/admin/users/$uid/roles" "${A[@]}" \
- -d "{ \"roles\": [ { \"roleName\": \"$who\", \"scope\": \"finance\" } ] }"
+  uid=$(curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/users" "${A[@]}" \
+          -d "{ \"email\": \"$who@example.com\", \"password\": \"Correct-Horse-42!\" }" | jq -r .id)
+  curl -s -X PUT "$AOUDA/api/databases/finance/auth/admin/users/$uid/roles" "${A[@]}" \
+       -d "{ \"roles\": [ { \"roleName\": \"$who\", \"scope\": \"finance\" } ] }"
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- -d '{ "dimension": "dept", "key": "Retail", "level": "read" }'
+       -d '{ "dimension": "dept", "key": "Retail", "level": "read" }'
 done
 
 VIEWER=$(curl -s -X POST "$AOUDA/api/databases/finance/auth/signin" "${H[@]}" \
- -d '{ "email": "viewer@example.com", "password": "Correct-Horse-42!" }' | jq -r.accessToken)
+           -d '{ "email": "viewer@example.com", "password": "Correct-Horse-42!" }' | jq -r .accessToken)
 PLANNER=$(curl -s -X POST "$AOUDA/api/databases/finance/auth/signin" "${H[@]}" \
- -d '{ "email": "planner@example.com", "password": "Correct-Horse-42!" }' | jq -r.accessToken)
+           -d '{ "email": "planner@example.com", "password": "Correct-Horse-42!" }' | jq -r .accessToken)
 ```
 
 What each of them gets:
@@ -794,16 +794,16 @@ formula reads; a value is then computed for everyone who may read the formula's 
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" -H "Authorization: Bearer $PLANNER" "${H[@]}" -d '{
- "database": "finance",
- "columns": ["dept", "line", "year", "formula"],
- "data": [ ["Retail"], ["RevenueVsOnline"], [2026],
- [ { "type": "arithmetic", "op": "-",
- "left": { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" },
- "right": { "type": "cellRef", "key": { "dept": { "type": "literal", "value": "Online" },
- "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" } } ] ]
+  "database": "finance",
+  "columns": ["dept", "line", "year", "formula"],
+  "data": [ ["Retail"], ["RevenueVsOnline"], [2026],
+            [ { "type": "arithmetic", "op": "-",
+                "left":  { "type": "cellRef", "key": { "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" },
+                "right": { "type": "cellRef", "key": { "dept": { "type": "literal", "value": "Online" },
+                                                       "line": { "type": "literal", "value": "Revenue" } }, "column": "amount" } } ] ]
 }'
 # 403 {"error":"pnl[Retail, RevenueVsOnline, 2026]: column 'amount': the formula reads pnl[Online, Revenue, 2026].amount,
-# a row its writer may not read; …","code":"FORMULA_REFERENCE_NOT_READABLE",…}
+#      a row its writer may not read; …","code":"FORMULA_REFERENCE_NOT_READABLE",…}
 ```
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -811,34 +811,34 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ```csharp
 using var asPlanner = new AoudaClient(new AoudaClientOptions
 {
-// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 });
 try
 {
- await asPlanner.GetTable("pnl").InsertAsync(new Dictionary<string, object?>
- {
- ["dept"] = "Retail", ["line"] = "RevenueVsOnline", ["year"] = 2026,
- ["formula"] = Formula.From(Sub(Line("Revenue"), CellHere("amount", ("dept", "Online"), ("line", "Revenue")))),
- });
+    await asPlanner.GetTable("pnl").InsertAsync(new Dictionary<string, object?>
+    {
+        ["dept"] = "Retail", ["line"] = "RevenueVsOnline", ["year"] = 2026,
+        ["formula"] = Formula.From(Sub(Line("Revenue"), CellHere("amount", ("dept", "Online"), ("line", "Revenue")))),
+    });
 }
 catch (AoudaFormulaRefusedException e) when (e.Kind == FormulaErrorKind.ReferenceNotReadable)
 {
- Console.WriteLine($"{e.StatusCode} {e.ErrorCode}: {e.Message}"); // 403 FORMULA_REFERENCE_NOT_READABLE: …
+    Console.WriteLine($"{e.StatusCode} {e.ErrorCode}: {e.Message}");   // 403 FORMULA_REFERENCE_NOT_READABLE: …
 }
 ```
 
 **TypeScript**
 
 ```typescript
-// client.whoami — apiKey is an aouda_ key, or session, never both.
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 try {
- await asPlanner.table("pnl").insert({
- dept: "Retail", line: "RevenueVsOnline", year: 2026,
- formula: Formula.from(fx.sub(line("Revenue"), fx.cellHere("amount", { dept: "Online", line: "Revenue" }))),
- });
+  await asPlanner.table("pnl").insert({
+    dept: "Retail", line: "RevenueVsOnline", year: 2026,
+    formula: Formula.from(fx.sub(line("Revenue"), fx.cellHere("amount", { dept: "Online", line: "Revenue" }))),
+  });
 } catch (e) {
- if (!(e instanceof FormulaReferenceNotReadableError)) throw e;
- console.log(`${e.statusCode} ${e.code}: ${e.message}`); // 403 FORMULA_REFERENCE_NOT_READABLE: …
+  if (!(e instanceof FormulaReferenceNotReadableError)) throw e;
+  console.log(`${e.statusCode} ${e.code}: ${e.message}`);   // 403 FORMULA_REFERENCE_NOT_READABLE: …
 }
 ```
 
@@ -846,8 +846,8 @@ Two things follow from security being the table's:
 
 - **A formula is visible to whoever may read its row.** There are no private formulas; hide a model by its rows or its table.
 - **A value is computed as the database**, once, and shared. A viewer who may read a formula's row sees its value even when the value
- reads rows the viewer cannot read — exactly as if the writer had copied the number by hand. A writer who later loses access to a row
- their formula reads does not invalidate the formula, as a copied number is not recalled.
+  reads rows the viewer cannot read — exactly as if the writer had copied the number by hand. A writer who later loses access to a row
+  their formula reads does not invalidate the formula, as a copied number is not recalled.
 
 ---
 
