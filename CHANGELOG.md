@@ -13,7 +13,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-_(nothing yet)_
+- **The code on these pages is whole again (BL-1865).** The 0.17.0 edit of 2026-11-23 removed, with the `next train` markers it was for, every empty `()` and `[]` and the indentation of the code in 80 pages (`await client.connect;`, `let rows: Trade = ;`, JSON such as `"missing":,`), and 18 passages whole: among them the single-node profile, the durability tables, two tables of the bulk-load page, the .NET client's absent-cell example and its list of refused combinations, and the hot/cold settings table. All of it is back as it was; the markers stay removed. **If you copied an example between 2026-11-23 and now, copy it again.**
 
 ## 0.17.1 — 2026-11-23
 

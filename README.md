@@ -55,6 +55,13 @@ python3 scripts/check-anchors.py /tmp/aouda-site # exit 1 and one line per broke
 python3 -m unittest discover -s scripts -p "test_*.py"
 ```
 
+After any edit made by a script (a sweep, a search-and-replace), check that it took nothing with it:
+
+```bash
+python3 scripts/check-code-fences.py                    # code that lost a `()`, a `[]` or its indentation
+python3 scripts/check-code-fences.py --base origin/main # and what any page lost since origin/main
+```
+
 A `(**BL-NNN, next train**)` marker must be **removed** once the work ships (do not stamp a version into the page).
 `python3 scripts/check-next-train.py` fails on every marker whose BL id is already in a released section of the `aouda`,
 `aouda-client-ts` or `aouda-studio` changelog (sibling checkouts, their `origin/main`; see
