@@ -1902,8 +1902,8 @@ new TableOptions
 Create lightweight branches for testing or migrations:
 
 ```typescript
-// Create a branch
-await client.branches.create({ name: "feature-x", parentBranch: "main" });
+// Create a branch (`from` is its parent; `main` when left out)
+await client.branches.create({ name: "feature-x", from: "main" });
 
 // List branches
 const branches = await client.branches.list;
