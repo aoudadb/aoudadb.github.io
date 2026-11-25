@@ -895,7 +895,7 @@ An aggregate materialized query may declare `computed` columns — physical, alw
         "right": { "type": "colRef", "col": "open" }
       }
     }
-  ],
+  ]
 }
 ```
 

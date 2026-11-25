@@ -498,7 +498,7 @@ This is a full, versioned example set you can keep in git and run end-to-end.
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     },
     "orders": {
       "columns": {
@@ -514,7 +514,7 @@ This is a full, versioned example set you can keep in git and run end-to-end.
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     }
   }
 }
@@ -545,7 +545,7 @@ Changes from v1:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     },
     "orders": {
       "columns": {
@@ -563,7 +563,7 @@ Changes from v1:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     },
     "payments": {
       "columns": {
@@ -580,7 +580,7 @@ Changes from v1:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     }
   }
 }
@@ -610,7 +610,7 @@ Changes from v2:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     },
     "orders": {
       "columns": {
@@ -627,7 +627,7 @@ Changes from v2:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     },
     "payments": {
       "columns": {
@@ -644,7 +644,7 @@ Changes from v2:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "ColdPreferred" },
-      "durability": { "level": "strict" },
+      "durability": { "level": "strict" }
     }
   }
 }
@@ -1080,7 +1080,7 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
     ],
     "clusterColumns": ["created_at"],
     "policy": { "storageTemperature": "Auto" },
-    "durability": { "level": "strict" },
+    "durability": { "level": "strict" }
   }
 }
 ```

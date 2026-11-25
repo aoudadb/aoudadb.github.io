@@ -617,7 +617,7 @@ Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's sec
   `DELETE /api/databases/{db}` — while `/api/databases` itself needed server credentials. Now every request to it, WebSocket and
   long-poll included, needs a server user's token, `mk_srv_` or a server key with a role on it, and is authorized by the server
   auth database's grants; an anonymous one is `401`, as for a database that does not exist. Before setup, and on the data-plane
-  listener, nothing changes ([databases without authentication](getting-started/index.md#9-databases-without-authentication),
+  listener, nothing changes ([databases without authentication](getting-started/index.md#9-databases-without-an-auth-database),
   [the auth states](getting-started/auth.md#three-authentication-states-for-a-database),
   [how data endpoint auth works](reference/http-api.md#how-data-endpoint-auth-works)). The scenario 4 example in
   [architecture](auth/architecture.md) now uses `/api/auth/admin/api-keys`' actual body (`roles: [{ role, scope }]`).

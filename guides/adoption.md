@@ -46,7 +46,8 @@ It is the **existing-application branch** of [How to build apps effortlessly wit
                   │  workflow,       │    │ named mutation · ws      │
                   │  vendor I/O)     │    │ everything else → 404    │
                   └────────┬─────────┘    └────────────┬─────────────┘
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+                           │  a key                    │  no credential, or the
+                           │                           │  user's session
                            ▼                           ▼
                   ┌────────────────────────────────────────────────┐
                   │            Aouda ADMIN :5433                    │
@@ -58,7 +59,7 @@ a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoam
 Four rules hold this together:
 
 1. **The trust boundary is the listener, not a route or a header.** The profile is tagged on the Kestrel connection. There is no request you can send to switch profiles.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+2. **The admin listener is never reachable from the internet.** Services inside your network hold a key and use it. Browsers never see it, hold no key, and a request with no credential there is `401 AUTH_CREDENTIAL_MISSING`.
 3. **The edge stays thin.** TLS, WAF, CDN, geo-allow — yes. Deserializing the JSON and re-serializing it — no. A hop that only relays bytes is waste; a hop that adds trust has earned its place. Direct internet exposure with **no** edge is not a supported configuration in this release.
 4. **Browsers read through named artifacts only.** They cannot compose a query, cannot name a table, and cannot see that `admin/*` exists.
 
@@ -66,6 +67,8 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 | Credential | Held by | Listener | Ships in a browser bundle? |
 |---|---|---|---|
+| A key of a backend's principal | Your backend services, CI, migration jobs | Admin (and data-plane, but ad-hoc query is admin-only) | **Never** |
+| No credential (`anonymous`) | Your frontend, before sign-in | Data-plane only (`AUTH_CREDENTIAL_MISSING` on admin) | Nothing to ship |
 | End-user JWT | The signed-in browser | Data-plane | Held in memory, refreshed |
 | Operator JWT | Studio / Hub users | Admin | n/a |
 
@@ -99,9 +102,9 @@ It is **not** deletable if it resolves an identifier against another system, qua
 
 ### 4. The auth proxy — **delete the user-facing half**
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+If your gateway forwards sign-in, refresh, sign-out, password reset, and MFA to Aouda's auth endpoints, delete it. Those endpoints are on the data-plane allowlist and are designed to be called from a browser with no key.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Keep server-side** anything that requires a key — self-service signup you want to gate, administration of principals (the access routes and `/auth/admin/*` are 404 on the data-plane by design), and provisioning flows.
 
 **Do not delete your JWT validation** in services that still exist. They validate the same Aouda-issued token via OIDC discovery / JWKS, which is published on both listeners.
 
@@ -124,12 +127,12 @@ The wire protocol and the client SDKs are not at the same level of coverage. Pla
 | **Subscribe by name (required on the data-plane)** | ✅ | ✅ `client.namedQueries.subscribe(name, args, { conflate })` | ✅ `client.NamedQueries.SubscribeAsync(name, args, options)` |
 | Declaring MQs in `aouda.schema.json` | ✅ `materializedQueries` map | ✅ via `schema apply` | ✅ via `schema apply` |
 | String / rounding functions in write-time expressions | ✅ `call` allowlist | ✅ `$upper` … `$cast` in `.update()` | ✅ `SetExpr` builder |
-| `aouda schema diff --access` | ✅ | ❌ not shipped | ✅ (the `aouda` C# CLI) |
+| `aouda plan` and `aouda policy explain` (offline, from `aouda.json`) | — | ❌ not in the npm CLI | ✅ (the `aouda` C# CLI) |
 | Materialized-query create / list **at runtime** | ✅ admin HTTP | ❌ | ❌ (`RefreshAsync` only) |
 
 Two caveats that still shape a plan:
 
-- **`schema diff --access` is C#-CLI only.** The CI gate that stops accidental access widening needs the `aouda` tool (`dotnet tool install --global Aouda.Cli`). If your pipeline already runs .NET anywhere, this costs one line. If it is a pure Node pipeline, adding .NET to CI is the price of the gate — and it is worth paying.
+- **`aouda plan` and `policy explain` are in the `aouda` C# tool only** (`dotnet tool install --global Aouda.Cli`). They are the checks of who may do what before a deploy. If your pipeline already runs .NET anywhere, this costs one line. If it is a pure Node pipeline, `npx @aouda/client schema diff` covers the schema, and the pull request's diff of `aouda.json` is the review of access.
 - **Runtime MQ management is still .NET-only.** Declaring MQs in the schema file covers provisioning, which is what most applications need. Creating one dynamically at runtime is not something the TypeScript client can do.
 
 ### Subscribing on the data-plane
@@ -204,10 +207,11 @@ Named-query cost is `1 + joinCount`, capped at 3 joins / cost 8. A view that nee
 
 Do these in order. Each step is independently shippable and independently revertible.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+1. **Upgrade and verify the build.** Use one release line of the server, `@aouda/client` and `Aouda.Client` ([compatibility](../clients/compatibility.md)). From 0.14 or earlier, read [Moving from 0.14](../auth/migrating-from-0-14.md) first: the access model is another one, and an old key, an old data directory and a table's security members are each refused by name. Check the deliberate breaks on the trusted surface too: attribute lists above the caps are refused when written, and bulk load into a compute-bearing table requires an explicit intent flag.
 2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Materialized queries can now be declared here too, but **export before you hand-edit**: a present `materializedQueries` map is desired state and drops anything not listed. Everything after this step depends on it.
 3. **Turn on the data-plane listener** behind your existing edge, on its own hostname. Prove the isolation before you use it: `POST …/query` and `GET /api/databases` must return **404** on the data-plane and work on admin.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+4. **Open named queries to the browser, one at a time.** `anonymous` and signed-up principals hold nothing until a statement says so. Every named query a browser-tier caller runs — one over an MQ result table too — needs an `execute` statement in `aouda.json`. **If the data is user-scoped, write the statement's `where` in the same change** (`principal.id`, or an attribute). An `execute` statement with no `where` makes every row of that query readable by every caller who holds it. That is right for reference and market data and wrong for anything owned by a user.
+5. **Review access changes now, not later.** Run `aouda plan` on every PR that touches `aouda.json`, and keep the diff of `aouda.json` and of `aouda.schema.json` (a changed named query is `UpdateNamedQuery`) a reviewed artifact. Starting after ten named queries exist means approving ten findings at once.
 6. **Author named queries and switch reads over behind a flag.** Old gateway route and new named query both work. Compare results.
 7. **Move ingest normalization** that passes the [decision test](division-of-responsibility.md#the-test-when-it-is-not-obvious) into `checks` / `derived` / `route`. Expect an error-handling change: a failed check **fails the whole batch**, it does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted **before** you apply it. `route` must also be exhaustive — an unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row left behind on the landing table — so declare a catch-all route to a quarantine table. See [failure semantics](insert-transforms.md#failure-semantics-the-batch-fails-the-row-does-not-skip).
 8. **Move streaming** with `namedQueries.subscribe`, subject to [capacity](#capacity-what-changes-when-the-relay-is-gone) — this is where losing the relay's fan-out shows up. Build the direct path behind a flag while the relay still runs.
@@ -220,11 +224,13 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 Hand this to whoever (or whatever) is writing the plan.
 
-- [ ] Server is `0.1.8`+ and the four trusted-surface breaks have been checked against current usage
+- [ ] Server and clients are on one release line and the trusted-surface breaks have been checked against current usage
 - [ ] `aouda.schema.json` is in git and `schema validate` is clean against every environment
 - [ ] Admin listener is unreachable from outside the private network — probed, not assumed
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-- [ ] `aouda schema diff --access` runs on every PR that touches the schema
+- [ ] No `aouda_` key appears in any browser-delivered artifact — grepped, not assumed
+- [ ] Every named query the browser runs is either not user-scoped, or its `execute` statement has a `where`
+- [ ] `aouda policy explain` has been run for at least one real principal per table class, and the output is in the migration record
+- [ ] `aouda plan` runs on every PR that touches `aouda.json`
 - [ ] Named queries have `select` (never `*`), a capped `limit`, and ≤3 joins
 - [ ] Subscriptions are collection-shaped; measured count per connection is well under 32
 - [ ] Measured permits/minute per identity is recorded and `PermitLimit` is set from it
@@ -246,16 +252,17 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | `429 IDENTITY_QUOTA_EXCEEDED` on page load | N independent executes | Use the batch envelope; then size `PermitLimit` from measurement |
 | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | One identity holds 16 sockets (tabs, devices, a reconnect loop) | Close what is not needed; do not retry in a loop; raise `MaxConnectionsPerIdentity` only from measurement |
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | A resubscribe loop, or a mass reconnect replay | Wait `retry_after_ms` (frame) or `Retry-After` (long-poll `/send`); pace the replay |
+| `404 NAMED_QUERY_NOT_FOUND` on a query that exists | Browser-tier caller with no `execute` statement for it | Write the statement; `whoami?database=` shows what the caller holds |
 | Studio shows a connect error after adding the listener | Studio is pointed at the data-plane | Studio and Hub use the **admin** URL |
 | Ingest throughput fell after adding transforms | Write amplification on small batches | Batch size is the tuning parameter; avoid stacking `tee`s on a hot path |
 | Rows silently vanished after adding `route` | Events follow storage, not the request | Query the target table, or use `tee` if you meant to keep both |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| The plan assumes an OAuth redirect to your IdP | A hosted authorization server is not shipped | Aouda email/password (+ MFA), or a backend holding a key |
 
 ---
 
 ## Not in this release
 
-- `schema diff --access` in the npm CLI — the CI gate needs the C# `aouda` tool.
+- `aouda plan` and `policy explain` in the npm CLI — they are in the C# `aouda` tool.
 - Runtime MQ create/list in either client; declaring them in `aouda.schema.json` covers provisioning.
 - Live subscribe to a named query that uses `joins`, `selectExpr`, `distinct`, or an offset.
 - Timestamp truncation as a derived `call`, and `cast` to `Timestamp` / `Date` / `Guid` / `Bool`.
@@ -272,5 +279,5 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - [Direct client access](direct-client-access.md) — listeners, keys, quotas, topology
 - [Named queries and mutations](named-queries.md) — authoring, execute, batch, subscribe
 - [Insert-time transforms](insert-transforms.md) — `derived`, `checks`, `route`/`tee`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [Declared access](declared-access.md) and [Plan](plan.md) — who may do what, and the check before a deploy
 - [Schema CI/CD](schema-cicd.md) · [Compatibility matrix](../clients/compatibility.md) · [HTTP API](../reference/http-api.md)
