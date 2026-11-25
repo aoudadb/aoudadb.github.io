@@ -169,7 +169,9 @@ It does not know a runtime principal (it names `aouda whoami` and `aouda plan --
 
 `aouda init` talks to a running server in setup mode and creates the first operator (`POST /api/auth/setup`). The password is read from stdin.
 
-## `backup` `aouda backup` takes, lists, shows, restores and prunes the server's backup sets and reads or sets the retention policy. It
+## `backup`
+
+`aouda backup` takes, lists, shows, restores and prunes the server's backup sets and reads or sets the retention policy. It
 calls the admin API ([HTTP API](http-api.md#backup-and-restore-admin-routes)) with an operator key; `restore --to` needs no server. Concepts:
 [Backup and restore](../guides/backup.md).
 
@@ -188,7 +190,7 @@ Every verb takes `-s, --server <url>` (default `AOUDA_SERVER` / `AOUDA_URL`), `-
 | Verb | What it does |
 |---|---|
 | `backup create [--full]` | Back up every database as one set (auth databases first); the set record written last commits it. Incremental against the newest set unless `--full`. |
-| `backup list` | The sets: `ID CREATED COMPLETE PITR BYTES DATABASES`. |
+| `backup list` | The sets: `ID  CREATED  COMPLETE  PITR  BYTES  DATABASES`. |
 | `backup show <id>` | One set: `complete`, the times, and per database its cut, WAL position, redo-start, manifest version, point-in-time eligibility, files, bytes and branches. |
 | `backup restore [<id>] [--target-time <instant>]` | Restore the set exactly, or to the last commit at or before the ISO 8601 instant (UTC when it has no offset). Without `<id>`, the newest complete set at or before `--target-time`. The server's engines stop for the restore. |
 | `backup restore <id> --to <dir> --from <destination>` | Restore into a new or empty data directory with **no server running**; start it with `aouda start --data-path <dir>`. `--from` is a path or `s3://bucket/prefix` (AWS credential chain). |
@@ -205,28 +207,30 @@ the directory and restore again.
 
 ```text
 $ aouda backup list
-ID CREATED COMPLETE PITR BYTES DATABASES
-backup-2026-11-21-150851-4bccdc05 2026-11-21T15:08:51.8031954+00:00 yes yes 87867 _serverauth, _settings, shop
+ID                                 CREATED                            COMPLETE  PITR  BYTES  DATABASES
+backup-2026-11-21-150851-4bccdc05  2026-11-21T15:08:51.8031954+00:00  yes       yes   87867  _serverauth, _settings, shop
 
 $ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z
 restored backup set backup-2026-11-21-150851-4bccdc05 to 2026-11-21T15:09:01+00:00
-files 53 (87867 bytes read)
-verified yes
-pitr _serverauth: 11 transactions, 13 rows replayed, last commit 2026-11-21T15:08:46.8577356+00:00
-pitr _settings: 0 transactions, 0 rows replayed
-pitr shop: 3 transactions, 3 rows replayed, last commit 2026-11-21T15:08:52.6389213+00:00
+files        53 (87867 bytes read)
+verified     yes
+pitr         _serverauth: 11 transactions, 13 rows replayed, last commit 2026-11-21T15:08:46.8577356+00:00
+pitr         _settings: 0 transactions, 0 rows replayed
+pitr         shop: 3 transactions, 3 rows replayed, last commit 2026-11-21T15:08:52.6389213+00:00
 
 $ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z --to /srv/aouda-data --from /backups/aouda
 restored backup set backup-2026-11-21-150851-4bccdc05 into /srv/aouda-data, staged to 2026-11-21T15:09:01.0000000+00:00 (replayed when the directory is first started)
-files 53 (87867 bytes read)
-verified yes
-database _serverauth (Strict, auth)
-database _settings (Strict)
-database shop (Strict)
+files        53 (87867 bytes read)
+verified     yes
+database     _serverauth (Strict, auth)
+database     _settings (Strict)
+database     shop (Strict)
 start it with: aouda start --data-path /srv/aouda-data
 ```
 
-## `dump` `aouda dump` writes a server's data databases to a directory in a format that no data-directory format version
+## `dump`
+
+`aouda dump` writes a server's data databases to a directory in a format that no data-directory format version
 touches; [`aouda load`](#load) reads it. A dump is **not a backup** and holds secret-class values: [Dump and load](../guides/dump-load.md).
 
 | Exit | Meaning |
@@ -247,7 +251,9 @@ touches; [`aouda load`](#load) reads it. A dump is **not a backup** and holds se
 | `--allow-writes` | Finish a dump whose database was written while it was dumped (recorded as not consistent). |
 | `--json` | Machine-readable output. |
 
-## `load` `aouda load` loads a directory `aouda dump` wrote into a server of this or another version: databases, schema, rows
+## `load`
+
+`aouda load` loads a directory `aouda dump` wrote into a server of this or another version: databases, schema, rows
 (each table verified by row count and digest), materialized queries, then the dump's declaration planned against the server. Run it again to resume:
 a table already loaded is skipped. Exit `0` done, `2` done with the declaration left to adopt, `1` refused or failed, `64` misuse, `69` unreachable, `77` the key
 refused (and a table with a stamp column needs the server operator's key, `LOAD_RESTORE_REQUIRES_OPERATOR`). When the data is loaded and only the

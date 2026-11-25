@@ -35,12 +35,12 @@ Related: [Build a live financial model](financial-model.md) (a walk-through of e
 
 ```json
 "pnl": {
- "columns": {
- "Field": { "type": "String", "primaryKey": 1 },
- "Period": { "type": "Int32", "primaryKey": 2 },
- "value": { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true },
- "formula": { "type": "Expression", "nullable": true, "drives": "value" }
- }
+  "columns": {
+    "Field":   { "type": "String",     "primaryKey": 1 },
+    "Period":  { "type": "Int32",      "primaryKey": 2 },
+    "value":   { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true },
+    "formula": { "type": "Expression", "nullable": true, "drives": "value" }
+  }
 }
 ```
 
@@ -54,7 +54,7 @@ Related: [Build a live financial model](financial-model.md) (a walk-through of e
 - **Revenue and Cost are input rows** (no formula). Typing 1000 into Revenue is an ordinary update of `value`.
 - **Profit and Tax are formula rows.** The database keeps their `value` current; a hand-written value there is refused.
 - **Everything else is the table's**: read it, query it, join it, subscribe to it, put a row condition on `Field` or `Period`, grant it,
- back it up, build a materialized query over it, reference it from another table's formula.
+  back it up, build a materialized query over it, reference it from another table's formula.
 
 (`Revenue − Cost` is notation for this page. On the wire a formula is [expression JSON](#what-a-formula-may-contain); the SDKs have
 builders that write it.)
@@ -101,15 +101,15 @@ its driven column keeps its last values, now as inputs.
 
 - **Formula null — an input row.** The driven column is written like any column, by any write.
 - **Formula set — a formula row.** The database computes the driven column. A write that would set the driven column of a row whose
- formula is set **after** the write is refused whole with **`409 FORMULA_VALUE_WRITE_REFUSED`**, naming the row: an update's `set` of the
- value (null included), and an insert, upsert, bulk load or seed row that gives both a formula and a non-null value.
+  formula is set **after** the write is refused whole with **`409 FORMULA_VALUE_WRITE_REFUSED`**, naming the row: an update's `set` of the
+  value (null included), and an insert, upsert, bulk load or seed row that gives both a formula and a non-null value.
 - **A new formula row's value is null until it is first computed**, a moment after the commit.
 - **A formula becomes an input** when you write its Expression column to null. The same write may set the value
- (`"set": { "formula": null, "value": 250.00 }`); without one, the row **keeps its last computed value** as its input.
+  (`"set": { "formula": null, "value": 250.00 }`); without one, the row **keeps its last computed value** as its input.
 - **An input becomes a formula** when you write a formula into it. Its value is computed again by the next pass.
 - **An upsert replaces the whole row**, so an upsert of a formula row leaves its value null until the database computes it again.
 - **Deleting a row is ordinary**, input or formula. A formula that read it now reads null. Nothing is "in use": a formula reads a key, not
- a row that must exist.
+  a row that must exist.
 
 ---
 
@@ -121,12 +121,12 @@ WebSocket write stream, a bulk load, a schema seed — as the value of the Expre
 
 ```json
 {
- "database": "finance",
- "columns": ["Field", "Period", "formula"],
- "data": [ ["Profit"], [2026],
- [ { "type": "arithmetic", "op": "-",
- "left": { "type": "cellRef", "key": { "Field": { "type": "literal", "value": "Revenue" } }, "column": "value" },
- "right": { "type": "cellRef", "key": { "Field": { "type": "literal", "value": "Cost" } }, "column": "value" } } ] ]
+  "database": "finance",
+  "columns": ["Field", "Period", "formula"],
+  "data": [ ["Profit"], [2026],
+            [ { "type": "arithmetic", "op": "-",
+                "left":  { "type": "cellRef", "key": { "Field": { "type": "literal", "value": "Revenue" } }, "column": "value" },
+                "right": { "type": "cellRef", "key": { "Field": { "type": "literal", "value": "Cost" } },    "column": "value" } } ] ]
 }
 ```
 
@@ -170,8 +170,8 @@ aborted, and until then a token read past the edit that woke it waits — of tha
 
 ```json
 { "type": "cellRef", "table": "pnl",
- "key": { "Field": { "type": "literal", "value": "Revenue" }, "Period": { "type": "literal", "value": 2026 } },
- "column": "value" }
+  "key": { "Field": { "type": "literal", "value": "Revenue" }, "Period": { "type": "literal", "value": 2026 } },
+  "column": "value" }
 ```
 
 **The key is the table's full strict primary key.** That makes every read a point lookup, never a scan. A table whose key is a surrogate
@@ -193,10 +193,10 @@ formula copied to the next period's row is the same JSON. The stored formula kee
 as `"table": ""`); it is resolved again when the row's key changes.
 
 - **A formula reads values, not formulas.** A reference to an Expression column is `400 FORMULA_REFERENCE_INVALID`. A reference to a driven
- column reads its current value — an input, or a value the database computed.
+  column reads its current value — an input, or a value the database computed.
 - **What a formula may read:** an ordinary table with a strict primary key, a formula table, or the result of a [materialized query](materialized.md)
- that is **not** built over a formula table (one whose source chain holds a formula table is refused: the dependency between them cannot be
- followed through the query). Not an edge table, not an engine-owned table.
+  that is **not** built over a formula table (one whose source chain holds a formula table is refused: the dependency between them cannot be
+  followed through the query). Not an edge table, not an engine-owned table.
 - **A `conditional`'s `when`** reads columns of the formula's own row, as `colRef` does.
 
 ---
@@ -245,12 +245,12 @@ The SDKs build these: C# `FormulaExpr` (`CellHere`, `Cell`, `Col`, `Add`, `Sub`,
 twice:
 
 1. **When the formula is written**, against the type the formula computes. It must fit without loss: no narrower scale, no fraction into an
- integer, no exact number into a floating column or back, no change of kind. The refusal (`400 FORMULA_INVALID`) says what to write: a
- division of two `Decimal(18,2)` values computes `Decimal(·,6)`, so into a `Decimal(18,2)` column write `round(x, 2)`; a product of two
- of them computes `Decimal(·,4)`; an exact number into a `Double` column, or back, needs `cast`.
+   integer, no exact number into a floating column or back, no change of kind. The refusal (`400 FORMULA_INVALID`) says what to write: a
+   division of two `Decimal(18,2)` values computes `Decimal(·,6)`, so into a `Decimal(18,2)` column write `round(x, 2)`; a product of two
+   of them computes `Decimal(·,4)`; an exact number into a `Double` column, or back, needs `cast`.
 2. **When the value is computed**, against the actual number. A value the column cannot hold **unchanged** — too many integer digits, or a
- number outside an integer type's range — makes the cell [null](#a-cell-that-cannot-be-computed-null-and-explain), never a rounded or clamped
- value.
+   number outside an integer type's range — makes the cell [null](#a-cell-that-cannot-be-computed-null-and-explain), never a rounded or clamped
+   value.
 
 ⚠️ **An `Int64` overflow wraps today (BL-1481).** `+`, `-` and `*` on two `Int64` values are not checked: a sum past the largest `Int64`
 comes out as a large negative number, not null. Until that is fixed, keep an `Int64` formula well inside the range, or use a `Decimal`
@@ -271,13 +271,13 @@ database's formula maintainer. Your commit never waits for it.
 What the maintainer does promise:
 
 - **Every formula woken by a commit is computed once**, in dependency order, from the other formulas' new values: a value read in a
- "diamond" (a cell reached two ways) is computed once, never from a stale operand. A value that did not change is not written, and
- publishes nothing.
+  "diamond" (a cell reached two ways) is computed once, never from a stale operand. A value that did not change is not written, and
+  publishes nothing.
 - A formula is woken by **any** change to a row it reads — an input, another formula's new value, a row created or deleted, in any table —
- and by a write to its own row.
+  and by a write to its own row.
 - A **derived column over a driven value** recomputes with it; the table's **checks** apply to the computed value (see [below](#a-cell-that-cannot-be-computed-null-and-explain)).
 - A **concurrent write** to another column of a formula row is never lost; a formula changed while its value was being computed gets no value
- from the old formula.
+  from the old formula.
 
 **To read your own write, read with its token.** Every write answers a consistency token (`X-Aouda-Token`, or `token` in the body). A read
 of a table that has an Expression column with `at_least=<token>` is answered once the maintainer has **recomputed every commit up to the
@@ -286,15 +286,15 @@ caught up. A commit that left a value unchanged satisfies it too.
 
 - The wait is `waitMs` (default 250 ms, at most 30 000). Past it the answer is `409 TOKEN_UNSATISFIED`, never an old value: read again.
 - The SDKs send their last write's token on a read by themselves and use the server's default wait; neither retries a `409
- TOKEN_UNSATISFIED`, so read again in a short bounded loop (the [guide](financial-model.md#step-4-read-the-statement) shows one).
+  TOKEN_UNSATISFIED`, so read again in a short bounded loop (the [guide](financial-model.md#step-4-read-the-statement) shows one).
 - A read with a token on a **replica** is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`: a replica computes no formulas, so it cannot judge
- the token. Send it to the primary, or read without a token.
+  the token. Send it to the primary, or read without a token.
 - A read joining a formula table and a [materialized query](materialized.md)'s result is covered only as far as both are. A materialized
- query **built over** a formula table, read with a token, is not yet judged by the formula maintainer (BL-1486).
+  query **built over** a formula table, read with a token, is not yet judged by the formula maintainer (BL-1486).
 - A token read of a formula table whose formulas read a materialized query's result waits until the query has applied the write the token
- names and those formulas are recomputed. A token read of a formula table waits only for the formulas its own values depend on — the
- queries and tables they read, directly or through other formula tables: while a query a formula reads cannot catch up (rebuilding,
- stale, in error), token reads of the formula tables that read it wait, and the others do not (**BL-1505, 0.15.0**).
+  names and those formulas are recomputed. A token read of a formula table waits only for the formulas its own values depend on — the
+  queries and tables they read, directly or through other formula tables: while a query a formula reads cannot catch up (rebuilding,
+  stale, in error), token reads of the formula tables that read it wait, and the others do not (**BL-1505, 0.15.0**).
 
 See [Freshness](freshness.md#formula-tables).
 
@@ -324,9 +324,9 @@ this one:
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/explain" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
- -d '{ "key": { "dept": "Online", "line": "Margin", "year": 2028 }, "column": "amount" }'
+  -d '{ "key": { "dept": "Online", "line": "Margin", "year": 2028 }, "column": "amount" }'
 # {"kind":"formula","formula":{…},"references":[{…"value":0.00…},{…"value":-830.00…}],"value":null,"reason":"division by zero.",
-# "storedValue":null,"readBy":[…]}
+#  "storedValue":null,"readBy":[…]}
 ```
 
 `column` names the driven column or its Expression column. `kind` is `formula`, `input` (the row has no formula) or `noRow`. It needs read
@@ -345,18 +345,18 @@ write you just made. The full contract is in the [HTTP reference](../reference/h
 
 ```json
 { "type": "subscribe", "id": "retail-2026", "target": "pnl",
- "filter": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
- { "column": "year", "op": "eq", "value": 2026 } ] } }
+  "filter": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
+                       { "column": "year", "op": "eq", "value": 2026 } ] } }
 ```
 
 - After an input edit the subscription receives the input's change, then **each formula row that changed, once**, at its final value. A
- recompute that left a value unchanged sends nothing. A value computed before you subscribed is in the snapshot.
+  recompute that left a value unchanged sends nothing. A value computed before you subscribed is in the snapshot.
 - A row's formula is its JSON object in a snapshot page's `data` and in a change's `row` and `prev` (a map in MessagePack).
- (**BL-1495, 0.15.0**) A snapshot's `column_types` names the column `"Expression"`.
+  (**BL-1495, 0.15.0**) A snapshot's `column_types` names the column `"Expression"`.
 - A change event's `token` is a valid cover for a later token read: it never claims an input the event's values do not reflect. Tokens are
- not ordered across events: **keep the highest you have seen.** A notice's token (`horizon`, `range_delete`) is not a cover.
+  not ordered across events: **keep the highest you have seen.** A notice's token (`horizon`, `range_delete`) is not a cover.
 - `at_least` on a subscribe of a formula table waits for the maintainer exactly as a read does, with the same `409 TOKEN_UNSATISFIED` and
- `421 FORMULA_TOKEN_REQUIRES_PRIMARY`.
+  `421 FORMULA_TOKEN_REQUIRES_PRIMARY`.
 
 See [Real-time streaming](real-time.md) for the protocol.
 
@@ -375,22 +375,22 @@ One rule is added:
 > hand.
 
 - The server checks it **when the formula is written**, as the writing caller, for every row the formula reads: the caller's read access to
- the table, its row and partition conditions, a materialized query result's source security — exactly what a `/query` of that table by the
- same caller with `where <primary key> = <key>` would return. A refusal is **`403 FORMULA_REFERENCE_NOT_READABLE`**, naming the formula
- row and the reference, never whether the referenced row exists.
+  the table, its row and partition conditions, a materialized query result's source security — exactly what a `/query` of that table by the
+  same caller with `where <primary key> = <key>` would return. A refusal is **`403 FORMULA_REFERENCE_NOT_READABLE`**, naming the formula
+  row and the reference, never whether the referenced row exists.
 - **A row that does not exist yet** is judged on its key when the conditions name only key columns, and refused otherwise.
 - **A row the same write gives whole** (an insert's other rows, a bulk load's formula rows) is the writer's own. An update never counts as
- giving a row whole, and a seed's rows count only to the formula each carries.
+  giving a row whole, and a seed's rows count only to the formula each carries.
 - What is checked is every formula the write sets or moves: a new or changed formula, one an upsert writes again, a formula row whose key
- change moves its references. An input edit or a removal checks nothing.
+  change moves its references. An input edit or a removal checks nothing.
 - **The embedded engine** has no caller and is trusted, as for every embedded call.
 
 What follows from security being the table's:
 
 - **A formula is visible to whoever may read its row.** There are no private formulas.
 - **A value is computed as the database**, once, and shared with everyone who may read its row — even when it reads rows a viewer cannot,
- exactly as a number the writer had copied by hand. **A writer who later loses access** to a row a formula reads does not invalidate the
- formula, as a copied number is not recalled.
+  exactly as a number the writer had copied by hand. **A writer who later loses access** to a row a formula reads does not invalidate the
+  formula, as a copied number is not recalled.
 
 ---
 
@@ -400,14 +400,14 @@ What follows from security being the table's:
 cells (through the table routes and `schema/apply`, where it is a failed entry):
 
 - dropping or renaming a table a formula reads — or a source table of a materialized query whose result a formula reads. A formula
- table that only its own formulas read, each leaving the `table` out, may be renamed: those formulas follow the rename;
+  table that only its own formulas read, each leaving the `table` out, may be renamed: those formulas follow the rename;
 - dropping, renaming or changing the type of a column a formula reads — the driven column included, when formulas read it;
 - any change to the primary key of a table a formula reads, or a looser uniqueness; a formula table's own key does not change while it has
- formula cells;
+  formula cells;
 - changing a driven column's type so a formula in it, or one reading it, would no longer [fit](#types-the-driven-column-decides);
 - adding an Expression column to a source table of a materialized query whose result a formula reads. The table would become a formula
- table under a query a formula reads, which a formula may [not read](#references); its formulas could then close a loop through the
- query that no check can see.
+  table under a query a formula reads, which a formula may [not read](#references); its formulas could then close a loop through the
+  query that no check can see.
 
 A *source table* of a query, in this list, is any table on its chain: the table it reads, and when it reads another query's
 result, that query's source too.
@@ -423,20 +423,20 @@ a query a formula reads.
 (**ADR 0072, 0.14.0**)
 
 - **Every open recomputes every formula**: a restart, a crash recovery, an exact restore. Until that has finished a token read waits (and
- answers `409 TOKEN_UNSATISFIED` if the wait runs out); a read without a token may still show a value from before. At 100 000 formula
- cells the open takes several seconds longer — 7 to 21 s measured on 8 vCPUs, plus about 5 s of recompute (see [Sizing](sizing.md#formula-tables-what-they-cost)).
+  answers `409 TOKEN_UNSATISFIED` if the wait runs out); a read without a token may still show a value from before. At 100 000 formula
+  cells the open takes several seconds longer — 7 to 21 s measured on 8 vCPUs, plus about 5 s of recompute (see [Sizing](sizing.md#formula-tables-what-they-cost)).
 - A **replica** applies the primary's computed values as ordinary rows and computes none. It serves reads without a token; a token read of a
- formula table is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`. A replica refuses
- [`explain`](../reference/http-api.md#explain-a-formula-cell) with `503 FORMULA_NOT_MAINTAINED`: it would read the replica's own tables,
- which do not hold the replicated rows, and an index replication never updates (**BL-1511, 0.15.0**). Explain on the primary.
+  formula table is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`. A replica refuses
+  [`explain`](../reference/http-api.md#explain-a-formula-cell) with `503 FORMULA_NOT_MAINTAINED`: it would read the replica's own tables,
+  which do not hold the replicated rows, and an index replication never updates (**BL-1511, 0.15.0**). Explain on the primary.
 - A node whose formula maintainer is not running refuses a wait for it with **`503 FORMULA_NOT_MAINTAINED`**: a branch, a server in the
- moment before its replication role is resolved, and a promoted node until BL-1441 is fixed. Read there; wait on the primary. The SDKs do
- not retry it: it is the node's state, not overload.
+  moment before its replication role is resolved, and a promoted node until BL-1441 is fixed. Read there; wait on the primary. The SDKs do
+  not retry it: it is the node's state, not overload.
 - A **branch** validates formulas written on it like the main database (its index of formulas is built when it opens) but computes none: it
- shows the values it inherited, and a formula written on the branch has a null value (BL-1436). `explain` still works on a branch: it
- shows what the formula computes now from the branch's rows, beside the null the branch stores.
+  shows the values it inherited, and a formula written on the branch has a null value (BL-1436). `explain` still works on a branch: it
+  shows what the formula computes now from the branch's rows, beside the null the branch stores.
 - **Point-in-time restore**: see BL-1485 under [Known issues](#known-issues) before restoring a database that has formula tables to a point in
- time.
+  time.
 
 ---
 
@@ -465,23 +465,23 @@ grid or UI component; values computed per viewer.
 (**ADR 0072, 0.14.0**)
 
 - **BL-1481** — `Int64` arithmetic in a formula wraps on overflow instead of making the cell null ([Types](#types-the-driven-column-decides)).
- The same is true of `setExpr` and transforms today.
+  The same is true of `setExpr` and transforms today.
 - **BL-1485** — a point-in-time restore whose target is after a table was created (the table did not exist at the backup) can keep both
- versions of a row updated before the target. On a formula table the database then meets two formulas for one cell and **refuses to open**
- rather than pick one. Restore such a database exactly, or to a point before its formula tables were created, until this is fixed.
+  versions of a row updated before the target. On a formula table the database then meets two formulas for one cell and **refuses to open**
+  rather than pick one. Restore such a database exactly, or to a point before its formula tables were created, until this is fixed.
 - **BL-1441** — after a promotion the promoted node keeps reading through the replica overlay, so it keeps its formula maintainer stopped
- (`503 FORMULA_NOT_MAINTAINED`). Do not rely on a failover for live values.
+  (`503 FORMULA_NOT_MAINTAINED`). Do not rely on a failover for live values.
 - **BL-1436** — a branch computes no formulas.
 - **BL-1486** — a token read of a materialized query built over a formula table is not judged by the formula maintainer and may answer
- before the formulas have caught up.
+  before the formulas have caught up.
 - **BL-1482** — a derived-column or server-time DDL on a formula table is not checked for a cycle through the driven value, and does not
- wake the formulas over it.
+  wake the formulas over it.
 - **BL-1488** — a bulk load in the default `coerce` validation that names an existing formula row's key can leave a second formula row for
- the cell.
+  the cell.
 - **BL-1492** — in the C# SDK a typed (POCO) read gives a non-nullable property its type's default for a null: map a driven column as
- `decimal?`, or a null formula cell reads as `0`.
+  `decimal?`, or a null formula cell reads as `0`.
 - **BL-1449**, **BL-1450** — in the TypeScript client: two first `subscribe` calls on a fresh client can race the WebSocket opening (wait for
- the first one's snapshot); every HTTP request leaves an `abort` listener on a long-lived client.
+  the first one's snapshot); every HTTP request leaves an `abort` listener on a long-lived client.
 
 ---
 

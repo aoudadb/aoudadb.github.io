@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Aouda Cloud, Hub, and Deployment
 
-{:.warning }
+{: .warning }
 **Replication is not supported in any release of Aouda yet.** A replica cannot catch up after a disconnect, keeps streamed rows only in memory, and a primary's election and failover are not proven; run one node per database and protect data with [backups](backup.md). This page describes the code as it stands.
 
 _Domain: Server CLI, Docker, Kubernetes, Aouda Hub, Managed Cloud_
@@ -64,7 +64,7 @@ The Aouda server binary is a single executable supporting subcommand dispatch.
 ### Production Mode (`aouda start`)
 
 ```bash
-aouda start --data-dir./data --bind 0.0.0.0:5000
+aouda start --data-dir ./data --bind 0.0.0.0:5000
 ```
 
 - Persistent storage to `--data-dir` (default: current directory)
@@ -96,13 +96,13 @@ This gives fast startup with persistent-across-restarts behavior. For a fully ep
 
 ```bash
 # Start primary
-aouda start --data-dir./node1 --bind 0.0.0.0:5000
+aouda start --data-dir ./node1 --bind 0.0.0.0:5000
 
 # Join as secondary
-aouda start --data-dir./node2 --bind 0.0.0.0:5001 --join 192.168.1.10:5000
+aouda start --data-dir ./node2 --bind 0.0.0.0:5001 --join 192.168.1.10:5000
 
 # Join as witness (arbiter)
-aouda start --data-dir./node3 --bind 0.0.0.0:5002 --join 192.168.1.10:5000 --role witness
+aouda start --data-dir ./node3 --bind 0.0.0.0:5002 --join 192.168.1.10:5000 --role witness
 ```
 
 ### 3.1 Aouda.Setup Installer
@@ -117,7 +117,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 **How it works:**
 
 1. Place `Aouda.Setup.exe` (Windows) or `Aouda.Setup` (Linux) alongside `Aouda.Server.exe` / `Aouda.Server` in the release archive.
-2. Double-click or run `sudo./Aouda.Setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
+2. Double-click or run `sudo ./Aouda.Setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 See the [Studio guide §12](studio.md#12-aoudasetup-installer) and [Server configuration](server-configuration.md) for the full interactive prompt sequence, service registration details, and configuration precedence.
@@ -233,7 +233,7 @@ With `replicaCount > 1` the chart renders these replication settings:
 ```yaml
 # values.yaml
 witness:
- enabled: true
+  enabled: true
 ```
 
 Creates a separate Deployment (not StatefulSet — no persistent data) with dedicated ClusterIP Service. Configured with `AOUDA_REPLICASET__THISNODE__ARBITER=true`.
@@ -243,7 +243,7 @@ Creates a separate Deployment (not StatefulSet — no persistent data) with dedi
 ```yaml
 # values.yaml
 studio:
- enabled: true
+  enabled: true
 ```
 
 Creates Studio Deployment + Service. Auto-configured `AOUDA_STUDIO_DEFAULT_SERVER` pointing to Aouda headless service.
@@ -359,15 +359,15 @@ Kubernetes Custom Resource Definition (`aouda.dev/v1/AoudaCluster`):
 apiVersion: aouda.dev/v1
 kind: AoudaCluster
 metadata:
- name: my-cluster
+  name: my-cluster
 spec:
- nodes: 3
- storageSizeGb: 50
- memoryBudgetGb: 4
- witness:
- enabled: true
- image:
- tag: "latest"
+  nodes: 3
+  storageSizeGb: 50
+  memoryBudgetGb: 4
+  witness:
+    enabled: true
+  image:
+    tag: "latest"
 ```
 
 Status subresource reports phase, ready replicas, endpoint, and observed generation.
@@ -418,21 +418,21 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ```bash
 # Join a node to a cluster
 curl -s -X POST http://localhost:5000/admin/cluster/join \
- -H "Content-Type: application/json" \
+     -H "Content-Type: application/json" \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- -d '{"primaryAddress":"192.168.1.10:5000","replicaSetName":"prod-rs"}'
+     -d '{"primaryAddress":"192.168.1.10:5000","replicaSetName":"prod-rs"}'
 # → 200 + { "message": "Joined cluster successfully", "replicaSetName": "prod-rs" }
 
 # Get cluster config
 curl -s http://localhost:5000/admin/cluster/config \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-# → 200 + { "mode": "cluster", "replicaSetName": "prod-rs",... }
+# → 200 + { "mode": "cluster", "replicaSetName": "prod-rs", ... }
 
 # Patch mutable cluster config (heartbeatIntervalMs, electionTimeoutMs)
 curl -s -X PATCH http://localhost:5000/admin/cluster/config \
- -H "Content-Type: application/json" \
+     -H "Content-Type: application/json" \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- -d '{"heartbeatIntervalMs":3000}'
+     -d '{"heartbeatIntervalMs":3000}'
 # → 200 + updated config
 
 # Trigger failover (primary steps down)
@@ -451,20 +451,20 @@ curl -s -X DELETE http://localhost:5000/admin/cluster/leave \
 ```bash
 # Trigger an immediate backup
 curl -s -X POST http://localhost:5000/admin/backup/trigger \
- -H "Content-Type: application/json" \
+     -H "Content-Type: application/json" \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- -d '{"incremental":true}'
-# → 202 + { "backupId": "...", "totalBytes": 1048576, "newBytes": 65536,... }
+     -d '{"incremental":true}'
+# → 202 + { "backupId": "...", "totalBytes": 1048576, "newBytes": 65536, ... }
 
 # List available backups
 curl -s http://localhost:5000/admin/backup/list \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-# → 200 + { "backups": [ { "backupId": "...", "createdUtc": "...",... } ] }
+# → 200 + { "backups": [ { "backupId": "...", "createdUtc": "...", ... } ] }
 
 # Restore from a backup
 curl -s -X POST http://localhost:5000/admin/backup/restore/<backupId> \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
-# → 200 + { "backupId": "...", "filesRestored": 42, "integrityVerified": true,... }
+# → 200 + { "backupId": "...", "filesRestored": 42, "integrityVerified": true, ... }
 
 # Get backup schedule
 curl -s http://localhost:5000/admin/backup/schedule \
@@ -473,9 +473,9 @@ curl -s http://localhost:5000/admin/backup/schedule \
 
 # Set backup schedule (daily at 02:00)
 curl -s -X PUT http://localhost:5000/admin/backup/schedule \
- -H "Content-Type: application/json" \
+     -H "Content-Type: application/json" \
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- -d '{"cronExpression":"0 2 * * *","incremental":true}'
+     -d '{"cronExpression":"0 2 * * *","incremental":true}'
 ```
 
 TypeScript client examples:
@@ -484,23 +484,23 @@ TypeScript client examples:
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
- serverUrl: "http://localhost:5000",
- database: "appdb",
-// client.whoami — apiKey is an aouda_ key, or session, never both.
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
 
 // Cluster management
 await client.admin.cluster.join({ primaryAddress: "192.168.1.10:5000", replicaSetName: "prod-rs" });
-const config = await client.admin.cluster.getConfig;
+const config = await client.admin.cluster.getConfig();
 await client.admin.cluster.patchConfig({ heartbeatIntervalMs: 3000 });
-await client.admin.cluster.failover;
-await client.admin.cluster.leave;
+await client.admin.cluster.failover();
+await client.admin.cluster.leave();
 
 // Backup management
 const result = await client.admin.backup.trigger({ incremental: true });
-const list = await client.admin.backup.list;
+const list = await client.admin.backup.list();
 const restored = await client.admin.backup.restore(list.backups[0].backupId);
-const schedule = await client.admin.backup.getSchedule;
+const schedule = await client.admin.backup.getSchedule();
 await client.admin.backup.setSchedule({ cronExpression: "0 2 * * *", incremental: true });
 ```
 
@@ -512,23 +512,23 @@ using Aouda.Client.Admin;
 
 await using var client = new AoudaClient(new AoudaClientOptions
 {
- ServerUrl = "http://localhost:5000",
- DatabaseName = "appdb",
-// WhoAmIAsync — an aouda_ key (AoudaCredential.Key) or a session.
+    ServerUrl = "http://localhost:5000",
+    DatabaseName = "appdb",
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 });
 
 // Backup management
 var result = await client.Backup.TriggerAsync(new TriggerBackupRequest(Incremental: true));
 Console.WriteLine($"Backup {result.BackupId}: {result.NewBytes} new bytes");
 
-var list = await client.Backup.ListAsync;
+var list = await client.Backup.ListAsync();
 foreach (var b in list.Backups)
- Console.WriteLine($" {b.BackupId} {b.CreatedUtc:u} {b.TotalBytes / 1024} KB");
+    Console.WriteLine($"  {b.BackupId}  {b.CreatedUtc:u}  {b.TotalBytes / 1024} KB");
 
 var restored = await client.Backup.RestoreAsync(list.Backups[0].BackupId);
 Console.WriteLine($"Restored {restored.FilesRestored} files in {restored.DurationSeconds:F1}s");
 
-var schedule = await client.Backup.GetScheduleAsync;
+var schedule = await client.Backup.GetScheduleAsync();
 await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *" });
 ```
 
@@ -560,9 +560,9 @@ See [Server configuration](server-configuration.md) for precedence vs `AOUDA_COR
 
 ```json
 {
- "Aouda": {
- "CorsOrigins": "https://studio.aouda.com,https://hub.aouda.dev,http://localhost:3000,http://127.0.0.1:3000"
- }
+  "Aouda": {
+    "CorsOrigins": "https://studio.aouda.com,https://hub.aouda.dev,http://localhost:3000,http://127.0.0.1:3000"
+  }
 }
 ```
 

@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Aouda Functionality: Replication and Cluster Behavior
 
-{:.warning }
+{: .warning }
 **Replication is not supported in any release of Aouda yet.** A replica cannot catch up after a disconnect, keeps streamed rows only in memory, and a primary's election and failover are not proven; run one node per database and protect data with [backups](backup.md). This page describes the code as it stands.
 
 A replica receives only the WAL frames the primary broadcasts while it is connected: frames written while it is
@@ -45,15 +45,15 @@ If your question is "What is implemented vs missing?", jump to:
 The replication and clustering code is the groundwork for read scaling and stronger durability options without changing the core write path model. None of it is supported yet (see the note at the top of this page).
 
 - Problem the code is aimed at:
- - Scale reads to secondaries and hidden replicas.
- - Choose durability guarantees (`w:1`, `w:majority`, `w:all`) per workload.
+  - Scale reads to secondaries and hidden replicas.
+  - Choose durability guarantees (`w:1`, `w:majority`, `w:all`) per workload.
 - Mechanisms in the code:
- - Heartbeat/election and role transition behavior (not proven).
- - Explicit node roles (`Primary`, `Secondary`, `Hidden`, `Backup`, `Arbiter`, `Standalone`) with safety guards.
- - Observable replication health, lag, topology, and subscription coverage through admin APIs.
+  - Heartbeat/election and role transition behavior (not proven).
+  - Explicit node roles (`Primary`, `Secondary`, `Hidden`, `Backup`, `Arbiter`, `Standalone`) with safety guards.
+  - Observable replication health, lag, topology, and subscription coverage through admin APIs.
 - Scope boundaries:
- - This doc covers replica set behavior, WAL streaming, leader election, read preferences, per-database/per-table replication routing, and write concern.
- - This doc does not claim cloud control plane orchestration, dynamic membership reconfiguration, mTLS transport auth, or full client-side smart replica routing as shipped.
+  - This doc covers replica set behavior, WAL streaming, leader election, read preferences, per-database/per-table replication routing, and write concern.
+  - This doc does not claim cloud control plane orchestration, dynamic membership reconfiguration, mTLS transport auth, or full client-side smart replica routing as shipped.
 
 ## 2.2 Discovery and navigation map
 
@@ -68,7 +68,7 @@ The replication and clustering code is the groundwork for read scaling and stron
 | How runtime flow works internally | `2.8 How Aouda implements it` |
 | Full replication config and defaults | `2.10 Configuration and settings reference` |
 | How to stand up a working replica set | `2.10.1 Minimal cluster setup quickstart` |
-|.NET / TypeScript / HTTP surface and gaps | `2.11 API and CLI coverage reference` |
+| .NET / TypeScript / HTTP surface and gaps | `2.11 API and CLI coverage reference` |
 | How to roll out safely in production | `2.12 Scenario playbooks` |
 | What to monitor and tune | `2.13 Operations and observability` |
 | How to debug failures quickly | `2.14 Troubleshooting by symptom` |
@@ -85,42 +85,42 @@ The replication and clustering code is the groundwork for read scaling and stron
 ### Source map
 
 - Task/report evidence:
- - `docs/tasks/P4/P4-EpicE-Task0-ClusterFoundation-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task1-WalStreamingProtocol-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task2-CheckpointSync-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task3-ReplicaStateMachine-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task4-HeartbeatLeaderElection-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task5-WorkloadSpecializedReplicas-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task6-HiddenReplicasReadPreferences-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task4-ReplicationIntegration-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task2-ClusterTopologyDatabaseAwareness-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task3-WriteConcernSynchronousReplication-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task4-PerTableReplicationRouting-Report.md`
- - `docs/tasks/P7/P7-Task7-ReplicationScenarios-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task0-ClusterFoundation-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task1-WalStreamingProtocol-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task2-CheckpointSync-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task3-ReplicaStateMachine-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task4-HeartbeatLeaderElection-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task5-WorkloadSpecializedReplicas-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task6-HiddenReplicasReadPreferences-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task4-ReplicationIntegration-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task2-ClusterTopologyDatabaseAwareness-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task3-WriteConcernSynchronousReplication-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task4-PerTableReplicationRouting-Report.md`
+  - `docs/tasks/P7/P7-Task7-ReplicationScenarios-Report.md`
 - Core code:
- - `src/Aouda.Engine.Replication/`
- - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
- - `src/Aouda.Server/Controllers/ReplicationController.cs`
- - `src/Aouda.Server/Controllers/QueryController.cs`
- - `src/Aouda.Server/Controllers/TablesController.cs`
- - `src/Aouda.Server/Services/WriteConcernService.cs`
- - `src/Aouda.Server/Middleware/WriteGuardFilter.cs`
- - `src/Aouda.Engine.Wal/Slots/`
+  - `src/Aouda.Engine.Replication/`
+  - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
+  - `src/Aouda.Server/Controllers/ReplicationController.cs`
+  - `src/Aouda.Server/Controllers/QueryController.cs`
+  - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Server/Services/WriteConcernService.cs`
+  - `src/Aouda.Server/Middleware/WriteGuardFilter.cs`
+  - `src/Aouda.Engine.Wal/Slots/`
 - Client and protocol surfaces:
- - `src/Aouda.Client/AoudaClient.cs`
- - `src/Aouda.Client/RemoteTableQuery.cs`
- - `src/Aouda.Protocol/Messages.cs`
- - `src/Aouda.Protocol/ProtocolConstants.cs`
- - `../aouda-client-ts/src/admin/replication.ts`
- - `../aouda-client-ts/src/admin/replication-types.ts`
+  - `src/Aouda.Client/AoudaClient.cs`
+  - `src/Aouda.Client/RemoteTableQuery.cs`
+  - `src/Aouda.Protocol/Messages.cs`
+  - `src/Aouda.Protocol/ProtocolConstants.cs`
+  - `../aouda-client-ts/src/admin/replication.ts`
+  - `../aouda-client-ts/src/admin/replication-types.ts`
 - Test evidence:
- - `tests/Aouda.Engine.Replication.Tests/`
- - `tests/Aouda.Server.Tests/ReplicationIntegrationTests.cs`
- - `tests/Aouda.Server.Tests/QueryReadPreferenceTests.cs`
- - `tests/Aouda.Server.Tests/HiddenReplicaQueryTests.cs`
- - `tests/Aouda.Server.Tests/ReplicationControllerTests.cs`
- - `../aouda-client-ts/tests/admin.test.ts`
+  - `tests/Aouda.Engine.Replication.Tests/`
+  - `tests/Aouda.Server.Tests/ReplicationIntegrationTests.cs`
+  - `tests/Aouda.Server.Tests/QueryReadPreferenceTests.cs`
+  - `tests/Aouda.Server.Tests/HiddenReplicaQueryTests.cs`
+  - `tests/Aouda.Server.Tests/ReplicationControllerTests.cs`
+  - `../aouda-client-ts/tests/admin.test.ts`
 
 ## 2.3 Defaults and zero-config behavior
 
@@ -157,41 +157,41 @@ If you do nothing:
 ### Available now
 
 - Replica set foundation and role model:
- - `Standalone`, `Primary`, `Secondary`, `Hidden`, `Backup`, `Arbiter`.
- - Role-aware write blocking and fencing-token validation for write endpoints.
+  - `Standalone`, `Primary`, `Secondary`, `Hidden`, `Backup`, `Arbiter`.
+  - Role-aware write blocking and fencing-token validation for write endpoints.
 - WAL streaming and catch-up:
- - Streaming protocol **v4** with HMAC and CRC. (**BL-980, 0.4.0**) v4 is the only protocol: a primary closes a v1, v2 or
- v3 handshake without a response (up to 0.3.x it answered them). Replication has not shipped, so there is no rolling upgrade
- to support — run every node on the same build.
- - (**BL-980, 0.4.0**) A replica **refuses** what it cannot apply instead of skipping it: a catalog-DDL frame with an
- unknown opcode or payload version, a DDL record that does not decode, or a frame of the retired page-append family (no
- current build writes one) fails the apply with an error naming it. A skipped DDL is a catalog that silently differs from the
- log. Tables a replica registers from the log carry their real `createdAt` / `lastModifiedAt`.
- - Checkpoint transfer bootstrap for too-far-behind replicas.
- - Replica state machine applying WAL frames with transaction ordering safeguards.
+  - Streaming protocol **v4** with HMAC and CRC. (**BL-980, 0.4.0**) v4 is the only protocol: a primary closes a v1, v2 or
+    v3 handshake without a response (up to 0.3.x it answered them). Replication has not shipped, so there is no rolling upgrade
+    to support — run every node on the same build.
+  - (**BL-980, 0.4.0**) A replica **refuses** what it cannot apply instead of skipping it: a catalog-DDL frame with an
+    unknown opcode or payload version, a DDL record that does not decode, or a frame of the retired page-append family (no
+    current build writes one) fails the apply with an error naming it. A skipped DDL is a catalog that silently differs from the
+    log. Tables a replica registers from the log carry their real `createdAt` / `lastModifiedAt`.
+  - Checkpoint transfer bootstrap for too-far-behind replicas.
+  - Replica state machine applying WAL frames with transaction ordering safeguards.
 - Election and failover mechanics:
- - Heartbeat protocol and failure detection. (**BL-980, 0.4.0**) An election heartbeat must carry its profile, hints,
- hidden flag and per-database fields; one missing any of them is not accepted.
- - Priority-based election with quorum and fencing token step-down.
- - Role transition wiring in server startup service.
+  - Heartbeat protocol and failure detection. (**BL-980, 0.4.0**) An election heartbeat must carry its profile, hints,
+    hidden flag and per-database fields; one missing any of them is not accepted.
+  - Priority-based election with quorum and fencing token step-down.
+  - Role transition wiring in server startup service.
 - Routing controls:
- - Query endpoint supports `readPreference` query parameter and `X-Read-Preference` header.
- - Hidden replica behavior enforced (`421 Misdirected Request` when preference cannot be served).
- - Topology endpoint exposes `ReadCandidates` and hidden flags.
+  - Query endpoint supports `readPreference` query parameter and `X-Read-Preference` header.
+  - Hidden replica behavior enforced (`421 Misdirected Request` when preference cannot be served).
+  - Topology endpoint exposes `ReadCandidates` and hidden flags.
 - Per-database and per-table replication:
- - Per-database broadcasters, subscriptions, and per-database ACKs.
- - Per-table subscription filtering (`All`, `Include`, `Exclude`) with coverage endpoint.
- - Per-database lag tracking in status/topology and health checks.
- - (**Lead S26, 0.6.0**) Only tables at durability `strict` or `os` replicate: a table at `unlogged` or `memory` writes no
- WAL frames, so a replica receives none of its inserts, and asking for per-table replication on one is refused. The level is
- the primary's promise to the writer; see [durability levels](write-durability.md#durability-levels-lead-s26-060).
+  - Per-database broadcasters, subscriptions, and per-database ACKs.
+  - Per-table subscription filtering (`All`, `Include`, `Exclude`) with coverage endpoint.
+  - Per-database lag tracking in status/topology and health checks.
+  - (**Lead S26, 0.6.0**) Only tables at durability `strict` or `os` replicate: a table at `unlogged` or `memory` writes no
+    WAL frames, so a replica receives none of its inserts, and asking for per-table replication on one is refused. The level is
+    the primary's promise to the writer; see [durability levels](write-durability.md#durability-levels-lead-s26-060).
 - Write concern:
- - Database-level defaults + table-level durability overrides + per-request override.
- - `w:1`, `w:majority`, `w:all` with timeout behavior (`Fail`, `Degrade`, `DegradeAndLog`).
- - `writeConcernStatus` surfaced in write responses when concern > `w:1`.
+  - Database-level defaults + table-level durability overrides + per-request override.
+  - `w:1`, `w:majority`, `w:all` with timeout behavior (`Fail`, `Degrade`, `DegradeAndLog`).
+  - `writeConcernStatus` surfaced in write responses when concern > `w:1`.
 - WAL retention integration:
- - Replication slot creation/update on stream connections and ACKs.
- - Slot reconnect behavior preserves slots across disconnect/reconnect.
+  - Replication slot creation/update on stream connections and ACKs.
+  - Slot reconnect behavior preserves slots across disconnect/reconnect.
 
 ### Planned / proposed
 
@@ -205,18 +205,18 @@ If you do nothing:
 ### Reserved / not yet wired
 
 - Catch-up from the primary's WAL files: a replica receives frames broadcast while it is connected, so frames written while it is
- disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). This is why replication is not
- supported (see the note at the top of this page). Streamed rows are held in memory on the
- replica and are not re-applied after a replica restart (**BL-839**).
+  disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). This is why replication is not
+  supported (see the note at the top of this page). Streamed rows are held in memory on the
+  replica and are not re-applied after a replica restart (**BL-839**).
 - ⚠️ (**Lead S20, 0.6.0**) **Bulk loads are not yet replicated** (**BL-1116**): no server wires a replica's side of a bulk load
- (the coordinator, the segment fetch, the registration), so a replica does not receive a load's segments when it commits. Its
- tokens stop below the load (a read presenting one waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`), and the rows
- reach it only with a checkpoint re-bootstrap. Load into the primary and read loaded rows there. See
- [Bulk load](bulk-load.md).
+  (the coordinator, the segment fetch, the registration), so a replica does not receive a load's segments when it commits. Its
+  tokens stop below the load (a read presenting one waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`), and the rows
+  reach it only with a checkpoint re-bootstrap. Load into the primary and read loaded rows there. See
+  [Bulk load](bulk-load.md).
 - Public admin API for WAL slot inspection/listing (proposed in task follow-up notes).
 - Per-replica slot-lag metrics endpoint (proposed in task follow-up notes).
 - TS/.NET first-class write concern request API (protocol field exists; SDK convenience surface incomplete).
-- TS read preference query API (no equivalent to `.WithReadPreference`).
+- TS read preference query API (no equivalent to `.WithReadPreference()`).
 - Lag-threshold input path for `SecondaryWithMaxLag` at query endpoint (enum exists, but endpoint currently only parses preference string).
 
 ## 2.5 Phase coverage matrix
@@ -250,21 +250,21 @@ If you do nothing:
 ## 2.7 Core concepts and mental model
 
 - Replica set:
- - A statically configured member list plus local `ThisNode` behavior.
+  - A statically configured member list plus local `ThisNode` behavior.
 - Server role:
- - Runtime state (`Primary`/`Secondary`/etc.) that determines write acceptance and read eligibility.
+  - Runtime state (`Primary`/`Secondary`/etc.) that determines write acceptance and read eligibility.
 - WAL replication:
- - Aouda replicates WAL frames, not reconstructed table state snapshots.
+  - Aouda replicates WAL frames, not reconstructed table state snapshots.
 - Fencing token:
- - Monotonic token used to prevent stale-primary writes in split-brain-like conditions.
+  - Monotonic token used to prevent stale-primary writes in split-brain-like conditions.
 - Read preference:
- - Query-time routing intent (`Primary`, `Secondary`, `Hidden`, etc.) validated by serving node role.
+  - Query-time routing intent (`Primary`, `Secondary`, `Hidden`, etc.) validated by serving node role.
 - Write concern:
- - Write durability target based on secondary ACK counts (`One`, `Majority`, `All`).
+  - Write durability target based on secondary ACK counts (`One`, `Majority`, `All`).
 - Database subscriptions:
- - Secondary can choose which databases and tables it receives.
+  - Secondary can choose which databases and tables it receives.
 - Replication slots:
- - Retention cursors that keep WAL segments until consumers have acknowledged positions.
+  - Retention cursors that keep WAL segments until consumers have acknowledged positions.
 
 Invariants:
 
@@ -273,9 +273,9 @@ Invariants:
 - `w:1` does not register pending tracker waits.
 - ACK position updates advance slot positions; disconnect does not auto-delete replication slots.
 - **A primary and its replicas run the same build** (**architecture review, 0.3.0**). A replica checkpoint now
- carries each segment's footer and its deletion masks — a new checkpoint file type, `DeletionMask`, which an older
- build does not know — and the two builds cannot read each other's segments. Upgrade every
- member together; a 0.2.x replica set moves by export and reload ([Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model)).
+  carries each segment's footer and its deletion masks — a new checkpoint file type, `DeletionMask`, which an older
+  build does not know — and the two builds cannot read each other's segments. Upgrade every
+  member together; a 0.2.x replica set moves by export and reload ([Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model)).
 - In standalone mode, read preference checks are bypassed by design.
 
 ## 2.8 How Aouda implements it
@@ -292,98 +292,98 @@ High-level architecture path:
 Key implementation anchors:
 
 - Replication core:
- - `src/Aouda.Engine.Replication/ReplicationState.cs`
- - `src/Aouda.Engine.Replication/Streaming/WalStreamServer.cs`
- - `src/Aouda.Engine.Replication/Streaming/WalStreamClient.cs`
- - `src/Aouda.Engine.Replication/Replay/ReplicaStateMachine.cs`
- - `src/Aouda.Engine.Replication/Election/`
+  - `src/Aouda.Engine.Replication/ReplicationState.cs`
+  - `src/Aouda.Engine.Replication/Streaming/WalStreamServer.cs`
+  - `src/Aouda.Engine.Replication/Streaming/WalStreamClient.cs`
+  - `src/Aouda.Engine.Replication/Replay/ReplicaStateMachine.cs`
+  - `src/Aouda.Engine.Replication/Election/`
 - Server orchestration:
- - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
- - `src/Aouda.Server/Controllers/ReplicationController.cs`
- - `src/Aouda.Server/Controllers/QueryController.cs`
- - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
+  - `src/Aouda.Server/Controllers/ReplicationController.cs`
+  - `src/Aouda.Server/Controllers/QueryController.cs`
+  - `src/Aouda.Server/Controllers/TablesController.cs`
 - Durability and retention:
- - `src/Aouda.Server/Services/WriteConcernService.cs`
- - `src/Aouda.Engine.Replication/Streaming/PendingWriteTracker.cs`
- - `src/Aouda.Engine.Wal/Slots/WalSlotManager.cs`
+  - `src/Aouda.Server/Services/WriteConcernService.cs`
+  - `src/Aouda.Engine.Replication/Streaming/PendingWriteTracker.cs`
+  - `src/Aouda.Engine.Wal/Slots/WalSlotManager.cs`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
 ### Walk-through A: Secondary bootstrap when too far behind
 
 1. Entry point:
- - Secondary `WalStreamClient` handshake to primary `WalStreamServer`.
+   - Secondary `WalStreamClient` handshake to primary `WalStreamServer`.
 2. Key decisions:
- - Server compares requested position with minimum streamable WAL position.
- - If too far behind, server responds with `TooFarBehind`.
+   - Server compares requested position with minimum streamable WAL position.
+   - If too far behind, server responds with `TooFarBehind`.
 3. State mutations and persistence:
- - Secondary requests checkpoint transfer. The primary writes an **image** of every open database — its catalog (tables with
- their keys, partitioning and policy, and every catalogued segment) and exactly the files of those segments, after flushing
- every buffered row — and serves it; the image is deleted when the transfer ends (**BL-763, 0.3.0**).
- - `CheckpointApplier` verifies every CRC, then, database by database, closes the database's engine, replaces its directory
- with the image's and opens it again (registering a database the secondary did not have).
- - Secondary reconnects; each database continues streaming from **its own** position in the checkpoint. Every write
- acknowledged before the checkpoint began is on the secondary; frames written during the transfer are not (**BL-839**).
- - ⚠️ Primary and secondaries must run the same version: the checkpoint manifest carries each database's position, and
- (**BL-980, 0.4.0**) the stream speaks protocol v4 only.
+   - Secondary requests checkpoint transfer. The primary writes an **image** of every open database — its catalog (tables with
+     their keys, partitioning and policy, and every catalogued segment) and exactly the files of those segments, after flushing
+     every buffered row — and serves it; the image is deleted when the transfer ends (**BL-763, 0.3.0**).
+   - `CheckpointApplier` verifies every CRC, then, database by database, closes the database's engine, replaces its directory
+     with the image's and opens it again (registering a database the secondary did not have).
+   - Secondary reconnects; each database continues streaming from **its own** position in the checkpoint. Every write
+     acknowledged before the checkpoint began is on the secondary; frames written during the transfer are not (**BL-839**).
+   - ⚠️ Primary and secondaries must run the same version: the checkpoint manifest carries each database's position, and
+     (**BL-980, 0.4.0**) the stream speaks protocol v4 only.
 4. Observability:
- - Checkpoint transfer logs and replication lag position transitions.
+   - Checkpoint transfer logs and replication lag position transitions.
 5. Proving tests:
- - `CheckpointTransferTests`
- - `CheckpointProtocolTests`
+   - `CheckpointTransferTests`
+   - `CheckpointProtocolTests`
 
 ### Walk-through B: Primary write with `w:majority`
 
 1. Entry point:
- - HTTP write endpoint in `TablesController` (`insert/update/delete`) with optional `writeConcern`.
+   - HTTP write endpoint in `TablesController` (`insert/update/delete`) with optional `writeConcern`.
 2. Key decisions:
- - Resolve effective concern in `WriteConcernService` using precedence:
- - per-request override -> table durability -> database options -> `One`.
- - If concern is `One` or WAL position invalid, skip wait.
+   - Resolve effective concern in `WriteConcernService` using precedence:
+     - per-request override -> table durability -> database options -> `One`.
+   - If concern is `One` or WAL position invalid, skip wait.
 3. State mutations and persistence:
- - Engine commit writes WAL and returns WAL position.
- - Pending write is registered in `PendingWriteTracker`.
- - ACKs from secondaries flow through `WalStreamServer.ReadAcks*` and notify tracker.
- - Tracker resolves success, degradation, or throws timeout exception.
+   - Engine commit writes WAL and returns WAL position.
+   - Pending write is registered in `PendingWriteTracker`.
+   - ACKs from secondaries flow through `WalStreamServer.ReadAcks*` and notify tracker.
+   - Tracker resolves success, degradation, or throws timeout exception.
 4. Observability:
- - `WriteConcernWaitsTotal`, `WriteConcernSuccessful`, `WriteConcernTimeouts`, `WriteConcernDegradations`.
+   - `WriteConcernWaitsTotal`, `WriteConcernSuccessful`, `WriteConcernTimeouts`, `WriteConcernDegradations`.
 5. Proving tests:
- - `PendingWriteTrackerTests`
- - `WriteConcernServiceTests`
- - `WriteConcernConfigTests`
+   - `PendingWriteTrackerTests`
+   - `WriteConcernServiceTests`
+   - `WriteConcernConfigTests`
 
 ### Walk-through C: Query with read preference on hidden node
 
 1. Entry point:
- - `POST /api/databases/{db}/query` with `readPreference` query param or `X-Read-Preference` header.
+   - `POST /api/databases/{db}/query` with `readPreference` query param or `X-Read-Preference` header.
 2. Key decisions:
- - Query parameter wins over header.
- - Server computes `isHidden` from `ReplicaSet.ThisNode.Hidden`.
- - `ReadPreferenceExtensions.CanServe` validates `(preference, role, hidden)`.
+   - Query parameter wins over header.
+   - Server computes `isHidden` from `ReplicaSet.ThisNode.Hidden`.
+   - `ReadPreferenceExtensions.CanServe` validates `(preference, role, hidden)`.
 3. State mutations and persistence:
- - No replication state mutation on this path; request is either rejected (`421`) or executed.
+   - No replication state mutation on this path; request is either rejected (`421`) or executed.
 4. Observability:
- - Error payload includes role and hidden state for misdirected requests.
- - Response headers include serving metadata (`X-Served-By`, `X-Server-Role`).
+   - Error payload includes role and hidden state for misdirected requests.
+   - Response headers include serving metadata (`X-Served-By`, `X-Server-Role`).
 5. Proving tests:
- - `QueryReadPreferenceTests`
- - `HiddenReplicaQueryTests`
+   - `QueryReadPreferenceTests`
+   - `HiddenReplicaQueryTests`
 
 ### Walk-through D: Admin topology and coverage inspection
 
 1. Entry point:
- - `GET /admin/replication/topology` and `GET /admin/replication/coverage`.
+   - `GET /admin/replication/topology` and `GET /admin/replication/coverage`.
 2. Key decisions:
- - Standalone mode returns single-member topology with no primary.
- - Cluster mode combines static config with heartbeat/stream runtime state.
- - Coverage computes per-table subscribers and warns on replicated tables with zero subscribers.
+   - Standalone mode returns single-member topology with no primary.
+   - Cluster mode combines static config with heartbeat/stream runtime state.
+   - Coverage computes per-table subscribers and warns on replicated tables with zero subscribers.
 3. State mutations and persistence:
- - Read-only path; snapshots derived from `ReplicationState`, `ClusterHeartbeatAccessor`, and `ReplicationStreamAccessor`.
+   - Read-only path; snapshots derived from `ReplicationState`, `ClusterHeartbeatAccessor`, and `ReplicationStreamAccessor`.
 4. Observability:
- - Topology includes read candidates, hidden flags, per-database positions, and subscriptions.
+   - Topology includes read candidates, hidden flags, per-database positions, and subscriptions.
 5. Proving tests:
- - `ReplicationControllerTests`
- - `ReplicationIntegrationTests`
+   - `ReplicationControllerTests`
+   - `ReplicationIntegrationTests`
 
 ## 2.9 Why Aouda is different (differentiators)
 
@@ -397,24 +397,24 @@ Key implementation anchors:
 
 ## 2.10 Configuration and settings reference (complete surface)
 
-{:.note }
+{: .note }
 **Precedence and restart:** [Server configuration](server-configuration.md). Keys below bind at **startup** from code defaults, optional `appsettings.json`, `AOUDA_*` env vars, or CLI flags (CLI wins). After API cluster join, `{DataPath}/cluster-state.json` overrides static `Aouda:ReplicaSet` on restart.
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
 | `Aouda:ReplicaSet:Name` | string | `""` | non-empty for cluster mode | appsettings/env | Empty/null means standalone |
-| `Aouda:ReplicaSet:Members` | string | `` | `host:port` entries | appsettings/env | Static membership list |
+| `Aouda:ReplicaSet:Members` | string[] | `[]` | `host:port` entries | appsettings/env | Static membership list |
 | `Aouda:ReplicaSet:ThisNode:ServerId` | Guid? | `null` | valid GUID | appsettings/env | Auto-generated if unset |
 | `Aouda:ReplicaSet:ThisNode:Address` | string? | `null` | `host:port` | appsettings/env | Should match member list entry |
 | `Aouda:ReplicaSet:ThisNode:Priority` | int | `5` | `0..100` | appsettings/env | Higher number is more preferred for primary election; `0` means never candidate |
 | `Aouda:ReplicaSet:ThisNode:Hidden` | bool | `false` | true/false | appsettings/env | Hidden cannot serve default reads |
 | `Aouda:ReplicaSet:ThisNode:Backup` | bool | `false` | true/false | appsettings/env | Backup role startup behavior |
 | `Aouda:ReplicaSet:ThisNode:TemperatureProfile` | enum/string | `Balanced` | `Balanced`, `OLTP`, `OLAP`, `Custom` | appsettings/env | Unknown values parse to `Balanced` |
-| `Aouda:ReplicaSet:ThisNode:HotTableHints` | string | `` | table names | appsettings/env | Hinting signal only |
+| `Aouda:ReplicaSet:ThisNode:HotTableHints` | string[] | `[]` | table names | appsettings/env | Hinting signal only |
 | `Aouda:ReplicaSet:ThisNode:Subscriptions` | list | empty | per-db filter list | appsettings/env | Empty means all DBs/tables |
 | `...Subscriptions[*].DatabaseName` | string | n/a | existing DB names | appsettings/env | Secondary subscription scope |
 | `...Subscriptions[*].Tables.Mode` | enum | `All` | `All`, `Include`, `Exclude` | appsettings/env | Include/Exclude require names |
-| `...Subscriptions[*].Tables.TableNames` | string | `` | non-empty for Include/Exclude | appsettings/env | Resolved to `TableId` at connect |
+| `...Subscriptions[*].Tables.TableNames` | string[] | `[]` | non-empty for Include/Exclude | appsettings/env | Resolved to `TableId` at connect |
 | `Aouda:ReplicaSet:ThisNode:Archive:*` | object | n/a | see archive fields | appsettings/env | Effective archive config on a backup node; starts `WalArchiveWorker` when enabled + destinationed |
 | `Aouda:ReplicaSet:KeyFile` | string? | `null` | file path | appsettings/env | HMAC keyfile auth when set. Read as the other secret files are (**BL-1425, 0.12.0**): `$NAME` expanded, relative to the working directory, strict UTF-8, one trailing newline removed and no other trimming ([secret files](keys-that-survive-a-wipe.md#secret-files)). ⚠️ Without it nothing on the replication port is authenticated — see the warning in §2.10.1 |
 | `Aouda:ReplicaSet:HeartbeatIntervalMs` | int | `2000` | positive | appsettings/env | Heartbeat period |
@@ -436,17 +436,17 @@ Key implementation anchors:
 Configuration precedence and operational notes:
 
 - Read preference precedence:
- - query parameter `readPreference` -> header `X-Read-Preference` -> implicit `Primary`.
+  - query parameter `readPreference` -> header `X-Read-Preference` -> implicit `Primary`.
 - Write concern precedence:
- - request body `writeConcern` -> table durability override -> database config -> `One`.
+  - request body `writeConcern` -> table durability override -> database config -> `One`.
 - Dynamic vs restart-required:
- - `ReplicaSet` and node-role settings are startup-bound (restart required).
- - Per-request read preference/write concern are dynamic.
- - Database write concern defaults are currently startup config behavior.
+  - `ReplicaSet` and node-role settings are startup-bound (restart required).
+  - Per-request read preference/write concern are dynamic.
+  - Database write concern defaults are currently startup config behavior.
 - Safety-gated validation:
- - `AoudaServerOptionsValidator` enforces enum validity and range constraints.
+  - `AoudaServerOptionsValidator` enforces enum validity and range constraints.
 - Deprecated/reserved:
- - No deprecated replication config keys are currently marked; several planned capabilities remain unexposed.
+  - No deprecated replication config keys are currently marked; several planned capabilities remain unexposed.
 
 Election priority rule:
 
@@ -462,7 +462,7 @@ This is a concrete 3-node local setup to get replication communication working.
 
 Use the same keyfile on all nodes.
 
-{:.warning }
+{: .warning }
 **Always set `KeyFile`.** It is optional and has no default, and without it the replication port authenticates nothing. The port
 listens on every interface, so any host that can reach it can subscribe to every replicated database and receive its WAL stream, and
 can make the primary build and send a full checkpoint image of those databases; a replica also accepts whatever a host posing as its
@@ -486,28 +486,28 @@ Node 1 (`appsettings.node1.json`, preferred primary):
 
 ```json
 {
- "Aouda": {
- "Port": 5001,
- "DataPath": "./data-node1",
- "ReplicaSet": {
- "Name": "local-rs",
- "Members": [
- "127.0.0.1:5001",
- "127.0.0.1:5002",
- "127.0.0.1:5003"
- ],
- "KeyFile": "./cluster.key",
- "ReplicationPort": 5433,
- "HeartbeatIntervalMs": 2000,
- "ElectionTimeoutMs": 10000,
- "ThisNode": {
- "Address": "127.0.0.1:5001",
- "Priority": 10,
- "Hidden": false,
- "Backup": false
- }
- }
- }
+  "Aouda": {
+    "Port": 5001,
+    "DataPath": "./data-node1",
+    "ReplicaSet": {
+      "Name": "local-rs",
+      "Members": [
+        "127.0.0.1:5001",
+        "127.0.0.1:5002",
+        "127.0.0.1:5003"
+      ],
+      "KeyFile": "./cluster.key",
+      "ReplicationPort": 5433,
+      "HeartbeatIntervalMs": 2000,
+      "ElectionTimeoutMs": 10000,
+      "ThisNode": {
+        "Address": "127.0.0.1:5001",
+        "Priority": 10,
+        "Hidden": false,
+        "Backup": false
+      }
+    }
+  }
 }
 ```
 
@@ -515,28 +515,28 @@ Node 2 (`appsettings.node2.json`, secondary):
 
 ```json
 {
- "Aouda": {
- "Port": 5002,
- "DataPath": "./data-node2",
- "ReplicaSet": {
- "Name": "local-rs",
- "Members": [
- "127.0.0.1:5001",
- "127.0.0.1:5002",
- "127.0.0.1:5003"
- ],
- "KeyFile": "./cluster.key",
- "ReplicationPort": 5434,
- "HeartbeatIntervalMs": 2000,
- "ElectionTimeoutMs": 10000,
- "ThisNode": {
- "Address": "127.0.0.1:5002",
- "Priority": 5,
- "Hidden": false,
- "Backup": false
- }
- }
- }
+  "Aouda": {
+    "Port": 5002,
+    "DataPath": "./data-node2",
+    "ReplicaSet": {
+      "Name": "local-rs",
+      "Members": [
+        "127.0.0.1:5001",
+        "127.0.0.1:5002",
+        "127.0.0.1:5003"
+      ],
+      "KeyFile": "./cluster.key",
+      "ReplicationPort": 5434,
+      "HeartbeatIntervalMs": 2000,
+      "ElectionTimeoutMs": 10000,
+      "ThisNode": {
+        "Address": "127.0.0.1:5002",
+        "Priority": 5,
+        "Hidden": false,
+        "Backup": false
+      }
+    }
+  }
 }
 ```
 
@@ -544,28 +544,28 @@ Node 3 (`appsettings.node3.json`, secondary):
 
 ```json
 {
- "Aouda": {
- "Port": 5003,
- "DataPath": "./data-node3",
- "ReplicaSet": {
- "Name": "local-rs",
- "Members": [
- "127.0.0.1:5001",
- "127.0.0.1:5002",
- "127.0.0.1:5003"
- ],
- "KeyFile": "./cluster.key",
- "ReplicationPort": 5435,
- "HeartbeatIntervalMs": 2000,
- "ElectionTimeoutMs": 10000,
- "ThisNode": {
- "Address": "127.0.0.1:5003",
- "Priority": 5,
- "Hidden": false,
- "Backup": false
- }
- }
- }
+  "Aouda": {
+    "Port": 5003,
+    "DataPath": "./data-node3",
+    "ReplicaSet": {
+      "Name": "local-rs",
+      "Members": [
+        "127.0.0.1:5001",
+        "127.0.0.1:5002",
+        "127.0.0.1:5003"
+      ],
+      "KeyFile": "./cluster.key",
+      "ReplicationPort": 5435,
+      "HeartbeatIntervalMs": 2000,
+      "ElectionTimeoutMs": 10000,
+      "ThisNode": {
+        "Address": "127.0.0.1:5003",
+        "Priority": 5,
+        "Hidden": false,
+        "Backup": false
+      }
+    }
+  }
 }
 ```
 
@@ -600,10 +600,10 @@ POST http://127.0.0.1:5001/api/databases/appdb/tables/orders/rows
 Content-Type: application/json
 
 {
- "database": "appdb",
- "table": "orders",
- "columns": ["id", "total"],
- "data": [[1], [100.0]]
+  "database": "appdb",
+  "table": "orders",
+  "columns": ["id", "total"],
+  "data": [[1], [100.0]]
 }
 ```
 
@@ -614,10 +614,10 @@ POST http://127.0.0.1:5002/api/databases/appdb/query?readPreference=Secondary
 Content-Type: application/json
 
 {
- "database": "appdb",
- "table": "orders",
- "select": ["id", "total"],
- "limit": 10
+  "database": "appdb",
+  "table": "orders",
+  "select": ["id", "total"],
+  "limit": 10
 }
 ```
 
@@ -634,7 +634,7 @@ Common setup mistakes:
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
-###.NET example
+### .NET example
 
 ```csharp
 using Aouda.Client;
@@ -642,16 +642,16 @@ using Aouda.Protocol;
 
 await using var client = new AoudaClient("http://localhost:5000", "appdb");
 
-var topology = await client.GetTopologyAsync;
+var topology = await client.GetTopologyAsync();
 Console.WriteLine($"Primary: {topology?.Primary}");
 
-var status = await client.GetReplicationStatusAsync;
+var status = await client.GetReplicationStatusAsync();
 Console.WriteLine($"Role={status?.Role}, LagBytes={status?.LagBytes}");
 
 var rows = await client.GetTable("orders")
-.WithReadPreference(ReadPreference.Secondary)
-.Limit(10)
-.ToListAsync;
+    .WithReadPreference(ReadPreference.Secondary)
+    .Limit(10)
+    .ToListAsync();
 ```
 
 Expected result: topology/status calls return admin replication information; query includes read preference header and is accepted only if serving node can satisfy the requested preference.
@@ -664,13 +664,13 @@ Lag budgets (`maxLagBytes` / `maxLagSeconds` / `maxStalenessMs`) and consistency
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
- serverUrl: "http://localhost:5000",
- database: "appdb",
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
 });
 
-const status = await client.admin.replication.status;
-const topology = await client.admin.replication.topology;
-const coverage = await client.admin.replication.coverage;
+const status = await client.admin.replication.status();
+const topology = await client.admin.replication.topology();
+const coverage = await client.admin.replication.coverage();
 
 console.log(status.role, topology.primary, Object.keys(coverage.databases));
 ```
@@ -686,10 +686,10 @@ POST /api/databases/appdb/query?readPreference=Secondary
 Content-Type: application/json
 
 {
- "database": "appdb",
- "table": "orders",
- "select": ["id", "total"],
- "limit": 20
+  "database": "appdb",
+  "table": "orders",
+  "select": ["id", "total"],
+  "limit": 20
 }
 ```
 
@@ -698,11 +698,11 @@ POST /api/databases/appdb/tables/orders/rows
 Content-Type: application/json
 
 {
- "database": "appdb",
- "table": "orders",
- "columns": ["id", "total"],
- "data": [[101], [42.5]],
- "writeConcern": "majority"
+  "database": "appdb",
+  "table": "orders",
+  "columns": ["id", "total"],
+  "data": [[101], [42.5]],
+  "writeConcern": "majority"
 }
 ```
 
@@ -712,11 +712,11 @@ Common mistake: passing invalid writeConcern strings (for example `w:majority`) 
 
 ### A) API coverage matrix
 
-| Capability |.NET API | TypeScript API | HTTP/Protocol | Status | Notes |
+| Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Replication status | `AoudaClient.GetReplicationStatusAsync` | `client.admin.replication.status` | `GET /admin/replication/status` | Implemented | Surface parity |
-| Topology discovery | `AoudaClient.GetTopologyAsync` | `client.admin.replication.topology` | `GET /admin/replication/topology` | Implemented | Surface parity |
-| Coverage discovery | No first-class method | `client.admin.replication.coverage` | `GET /admin/replication/coverage` | Partial |.NET gap |
+| Replication status | `AoudaClient.GetReplicationStatusAsync()` | `client.admin.replication.status()` | `GET /admin/replication/status` | Implemented | Surface parity |
+| Topology discovery | `AoudaClient.GetTopologyAsync()` | `client.admin.replication.topology()` | `GET /admin/replication/topology` | Implemented | Surface parity |
+| Coverage discovery | No first-class method | `client.admin.replication.coverage()` | `GET /admin/replication/coverage` | Partial | .NET gap |
 | Query read preference | `RemoteTableQuery.WithReadPreference(...)` | No first-class support | `readPreference` param / `X-Read-Preference` header | Partial | TS gap; server supports HTTP path |
 | Hidden replica targeting | `ReadPreference.Hidden` | No first-class support | `readPreference=Hidden` | Partial | TS gap |
 | Per-request write concern | No first-class support | No first-class support | `Insert/Update/Delete` `writeConcern` field | Partial | Protocol supports, SDKs lag |
@@ -729,7 +729,7 @@ Common mistake: passing invalid writeConcern strings (for example `w:majority`) 
 |---|---|---|---|---|
 | TS query read preferences | TS table/query API option for read preference | Use direct HTTP/transport with query/header | Follow-up after P4 E6 | High |
 | SDK write concern options | `.NET`/TS mutation API option for write concern | Use raw HTTP payload with `writeConcern` | Follow-up after P6 E3 | High |
-| `.NET` coverage endpoint wrapper | `AoudaClient.GetReplicationCoverageAsync` | Call raw transport to `/admin/replication/coverage` | Client enhancement task (not yet created) | Medium |
+| `.NET` coverage endpoint wrapper | `AoudaClient.GetReplicationCoverageAsync()` | Call raw transport to `/admin/replication/coverage` | Client enhancement task (not yet created) | Medium |
 | Lag-threshold + token on replica reads | *(shipped P38)* `maxLagBytes` / `maxLagSeconds` / `maxStalenessMs` / `at_least` | Use [Freshness](freshness.md). `MaxLagSeconds` is measured staleness | P38 | — |
 | Slot diagnostics endpoint | `/admin/replication/slots` and per-slot lag metrics | Infer indirectly from logs/counters | P4 I4 follow-up notes | Medium |
 | Specific named-replica targeting | `Specific` read preference + target member input | Route request directly to chosen node URL | ADR 0010 future scope | Medium |
@@ -746,8 +746,8 @@ Steps:
 2. Set each node `ThisNode.Address`; keep one node with highest `Priority`.
 3. Configure `KeyFile` on all nodes.
 4. Start servers and call:
- - `GET /admin/replication/topology`
- - `GET /admin/replication/status` on each node.
+   - `GET /admin/replication/topology`
+   - `GET /admin/replication/status` on each node.
 
 Expected result checks:
 - Exactly one primary appears in topology.
@@ -761,14 +761,14 @@ When to use:
 
 Steps:
 1. Set analytics node config:
- - `ThisNode.Hidden=true`
- - `ThisNode.Priority=0`
+   - `ThisNode.Hidden=true`
+   - `ThisNode.Priority=0`
 2. Restart that node.
 3. Validate:
- - `GET /admin/replication/topology` shows `isHidden=true`.
+   - `GET /admin/replication/topology` shows `isHidden=true`.
 4. Query that node:
- - once with default read preference,
- - once with `readPreference=Hidden`.
+   - once with default read preference,
+   - once with `readPreference=Hidden`.
 
 Expected result checks:
 - Default read returns `421 Misdirected Request`.
@@ -811,27 +811,27 @@ Expected result checks:
 Monitor first:
 
 - Topology and role health:
- - `GET /admin/replication/topology`
- - `GET /admin/replication/status`
- - Health endpoint replication component status
+  - `GET /admin/replication/topology`
+  - `GET /admin/replication/status`
+  - Health endpoint replication component status
 - Lag and stream behavior:
- - `SubscriptionLagMs`
- - `ReplicationPerDbLagMaxBytes`
- - `ReplicationHeartbeatsWithDbPositions`
+  - `SubscriptionLagMs`
+  - `ReplicationPerDbLagMaxBytes`
+  - `ReplicationHeartbeatsWithDbPositions`
 - Subscription and filtering:
- - `ReplicationDatabaseSubscriptions`
- - `ReplicationFramesFilteredTableSubscription`
+  - `ReplicationDatabaseSubscriptions`
+  - `ReplicationFramesFilteredTableSubscription`
 - Write concern outcomes:
- - `WriteConcernWaitsTotal`
- - `WriteConcernSuccessful`
- - `WriteConcernTimeouts`
- - `WriteConcernDegradations`
- - `WriteConcernFailures`
+  - `WriteConcernWaitsTotal`
+  - `WriteConcernSuccessful`
+  - `WriteConcernTimeouts`
+  - `WriteConcernDegradations`
+  - `WriteConcernFailures`
 - WAL lifecycle and retention interaction:
- - `ReplicationSlotsCreatedTotal`
- - `ReplicationSlotUpdatesTotal`
- - `ReplicationSlotReconnectsTotal`
- - `wal.slotCount` and `wal.slotMaxLagBytes` (process aggregates in the metrics `wal` object; per-database figures are in `wal.databases`)
+  - `ReplicationSlotsCreatedTotal`
+  - `ReplicationSlotUpdatesTotal`
+  - `ReplicationSlotReconnectsTotal`
+  - `wal.slotCount` and `wal.slotMaxLagBytes` (process aggregates in the metrics `wal` object; per-database figures are in `wal.databases[]`)
 
 Recovery/restart expectations:
 
@@ -917,62 +917,62 @@ _Updated 2026-04-08 after P16 completion._
 - BL-024 is stale relative to current server capabilities: treat as harness/process-testing debt.
 - No catch-up from the primary's WAL files, and replica rows held in memory only (**BL-839**); the checkpoint covers every database since **BL-763 (0.3.0)**.
 - API parity gaps:
- - TS query read preference support missing.
- - `.NET`/TS write concern request ergonomics missing.
+  - TS query read preference support missing.
+  - `.NET`/TS write concern request ergonomics missing.
 - Slot observability gaps: no first-class endpoint to inspect slot positions and lag.
 - Planned architecture items from ADR 0010 that remain unshipped:
- - mTLS, named replica targeting, temperature-aware read routing.
+  - mTLS, named replica targeting, temperature-aware read routing.
 
 ## 2.19 References
 
 - ADRs:
- - `docs/decisions/0010-cluster-membership-replication.md`
- - `docs/decisions/0016-wal-lifecycle-management.md`
+  - `docs/decisions/0010-cluster-membership-replication.md`
+  - `docs/decisions/0016-wal-lifecycle-management.md`
 - Tasks/reports:
- - `docs/tasks/P4/P4-EpicE-Task0-ClusterFoundation-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task1-WalStreamingProtocol-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task2-CheckpointSync-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task3-ReplicaStateMachine-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task4-HeartbeatLeaderElection-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task5-WorkloadSpecializedReplicas-Report.md`
- - `docs/tasks/P4/P4-EpicE-Task6-HiddenReplicasReadPreferences-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task1-WalSlotInfrastructure-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task3-RetentionWorker-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task4-ReplicationIntegration-Report.md`
- - `docs/tasks/P4/P4-EpicI-Task5-BackupIntegration-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task2-ClusterTopologyDatabaseAwareness-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task3-WriteConcernSynchronousReplication-Report.md`
- - `docs/tasks/P6/P6-EpicE-Task4-PerTableReplicationRouting-Report.md`
- - `docs/tasks/P7/P7-Task7-ReplicationScenarios-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task0-ClusterFoundation-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task1-WalStreamingProtocol-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task2-CheckpointSync-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task3-ReplicaStateMachine-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task4-HeartbeatLeaderElection-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task5-WorkloadSpecializedReplicas-Report.md`
+  - `docs/tasks/P4/P4-EpicE-Task6-HiddenReplicasReadPreferences-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task1-WalSlotInfrastructure-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task3-RetentionWorker-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task4-ReplicationIntegration-Report.md`
+  - `docs/tasks/P4/P4-EpicI-Task5-BackupIntegration-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task2-ClusterTopologyDatabaseAwareness-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task3-WriteConcernSynchronousReplication-Report.md`
+  - `docs/tasks/P6/P6-EpicE-Task4-PerTableReplicationRouting-Report.md`
+  - `docs/tasks/P7/P7-Task7-ReplicationScenarios-Report.md`
 - Backlog:
- - `docs/BACKLOG.md` (BL-024)
+  - `docs/BACKLOG.md` (BL-024)
 - Code paths:
- - `src/Aouda.Engine.Replication/ReplicaSetConfig.cs`
- - `src/Aouda.Engine.Replication/NodeConfig.cs`
- - `src/Aouda.Engine.Replication/ReadPreference.cs`
- - `src/Aouda.Engine.Replication/Streaming/WalStreamServer.cs`
- - `src/Aouda.Engine.Replication/Streaming/WalStreamClient.cs`
- - `src/Aouda.Engine.Replication/Replay/ReplicaStateMachine.cs`
- - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
- - `src/Aouda.Server/Controllers/ReplicationController.cs`
- - `src/Aouda.Server/Controllers/QueryController.cs`
- - `src/Aouda.Server/Controllers/TablesController.cs`
- - `src/Aouda.Server/Services/WriteConcernService.cs`
- - `src/Aouda.Server/Middleware/WriteGuardFilter.cs`
- - `src/Aouda.Protocol/Messages.cs`
- - `src/Aouda.Protocol/ProtocolConstants.cs`
- - `src/Aouda.Client/AoudaClient.cs`
- - `src/Aouda.Client/RemoteTableQuery.cs`
- - `../aouda-client-ts/src/admin/replication.ts`
- - `../aouda-client-ts/src/admin/replication-types.ts`
+  - `src/Aouda.Engine.Replication/ReplicaSetConfig.cs`
+  - `src/Aouda.Engine.Replication/NodeConfig.cs`
+  - `src/Aouda.Engine.Replication/ReadPreference.cs`
+  - `src/Aouda.Engine.Replication/Streaming/WalStreamServer.cs`
+  - `src/Aouda.Engine.Replication/Streaming/WalStreamClient.cs`
+  - `src/Aouda.Engine.Replication/Replay/ReplicaStateMachine.cs`
+  - `src/Aouda.Server/Startup/ReplicationHostedService.cs`
+  - `src/Aouda.Server/Controllers/ReplicationController.cs`
+  - `src/Aouda.Server/Controllers/QueryController.cs`
+  - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Server/Services/WriteConcernService.cs`
+  - `src/Aouda.Server/Middleware/WriteGuardFilter.cs`
+  - `src/Aouda.Protocol/Messages.cs`
+  - `src/Aouda.Protocol/ProtocolConstants.cs`
+  - `src/Aouda.Client/AoudaClient.cs`
+  - `src/Aouda.Client/RemoteTableQuery.cs`
+  - `../aouda-client-ts/src/admin/replication.ts`
+  - `../aouda-client-ts/src/admin/replication-types.ts`
 - Tests:
- - `tests/Aouda.Engine.Replication.Tests/`
- - `tests/Aouda.Server.Tests/ReplicationIntegrationTests.cs`
- - `tests/Aouda.Server.Tests/QueryReadPreferenceTests.cs`
- - `tests/Aouda.Server.Tests/HiddenReplicaQueryTests.cs`
- - `tests/Aouda.Server.Tests/ReplicationControllerTests.cs`
- - `../aouda-client-ts/tests/admin.test.ts`
+  - `tests/Aouda.Engine.Replication.Tests/`
+  - `tests/Aouda.Server.Tests/ReplicationIntegrationTests.cs`
+  - `tests/Aouda.Server.Tests/QueryReadPreferenceTests.cs`
+  - `tests/Aouda.Server.Tests/HiddenReplicaQueryTests.cs`
+  - `tests/Aouda.Server.Tests/ReplicationControllerTests.cs`
+  - `../aouda-client-ts/tests/admin.test.ts`
 
 ## 2.20 What is missing from this document? (meta completeness)
 

@@ -23,8 +23,8 @@ The fastest ways to get Aouda running:
 dotnet tool install -g Aouda.Cli
 
 # Start server (no databases auto-created)
-# --data-dir: root directory for catalog, WAL, and database files (default if omitted:./data relative to cwd)
-aouda start --port 5433 --data-dir./aouda-data
+# --data-dir: root directory for catalog, WAL, and database files (default if omitted: ./data relative to cwd)
+aouda start --port 5433 --data-dir ./aouda-data
 ```
 
 Do **not** pass `-h` / `--help` to `aouda start` — current CLI builds ignore help on that subcommand and start a server on port **5000** with data under `./data`. AI agents that need a disposable probe: [Local CLI testing (agents)](../ai/local-cli-testing.md).
@@ -40,20 +40,20 @@ For a secured server, initialize the server admin after the server is running:
 
 ```bash
 printf '%s' "ChangeMeNow!" | aouda init \
- --admin-email admin@derive.local \
- --admin-password-stdin \
- --server http://localhost:5433 \
- --json
+  --admin-email admin@derive.local \
+  --admin-password-stdin \
+  --server http://localhost:5433 \
+  --json
 ```
 
 On Windows, `printf` is not a command in PowerShell or `cmd`. Pipe the password from an environment variable instead:
 
 ```powershell
 $env:ADMIN_PASSWORD | aouda init `
- --admin-email admin@derive.local `
- --admin-password-stdin `
- --server http://localhost:5433 `
- --json
+  --admin-email admin@derive.local `
+  --admin-password-stdin `
+  --server http://localhost:5433 `
+  --json
 ```
 
 `aouda init` never prompts for a password, on any platform: a prompt that reads the terminal is what stalls a script or an agent. Without
@@ -87,7 +87,7 @@ database already holds that name's system keys) returns none. The CLI says which
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
- [Named service keys and overlapping rotation](../reference/http-api.md) (authentication section).
+  [Named service keys and overlapping rotation](../reference/http-api.md) (authentication section).
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 This explicit server-then-database flow is intentional: it maps cleanly to production behavior and avoids hidden provisioning during startup.
@@ -96,7 +96,7 @@ This explicit server-then-database flow is intentional: it maps cleanly to produ
 
 ```bash
 docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 -v aouda-data:/data \
- ghcr.io/aoudadb/aouda-server:<version>
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
 
 The image is private (`docker login ghcr.io` with a token that has `read:packages` first), `-m` is what makes the server size its memory from the container's limit, and `127.0.0.1:` keeps the admin API off the host's other interfaces. See [Docker](../deployment/docker.md) for why each matters.
@@ -117,7 +117,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 No PowerShell or bash knowledge required. Extract the release archive and run:
 
 - **Windows:** double-click `Aouda.Setup.exe`
-- **Linux:** `sudo./Aouda.Setup`
+- **Linux:** `sudo ./Aouda.Setup`
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
@@ -145,7 +145,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```bash
 curl -s http://localhost:5000/api/auth/whoami \
- -H "Authorization: Bearer $AOUDA_KEY"
+  -H "Authorization: Bearer $AOUDA_KEY"
 ```
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -180,12 +180,12 @@ For the embedded / in-process path (no server): [Section 3](#3-embedded-mode--in
 
 ## 1. What is Aouda?
 
-Aouda is a **columnar database engine** for.NET with fine-grained control over what lives in memory. It stores data in column-oriented structures optimized for analytical queries, caching, and time-series workloads. You decide what stays in memory — from keeping everything in-memory for sub-millisecond latency, to storing terabytes on disk with only active partitions loaded, to any mix in between. Persistence uses a write-ahead log (WAL) to disk.
+Aouda is a **columnar database engine** for .NET with fine-grained control over what lives in memory. It stores data in column-oriented structures optimized for analytical queries, caching, and time-series workloads. You decide what stays in memory — from keeping everything in-memory for sub-millisecond latency, to storing terabytes on disk with only active partitions loaded, to any mix in between. Persistence uses a write-ahead log (WAL) to disk.
 
 Key characteristics:
 
 - **Columnar storage** — Data is stored column-by-column, not row-by-row. This makes analytical queries (filtering, aggregation, projection) significantly faster because the engine only reads the columns needed.
-- **Configurable memory residency** — You control what stays in memory. Hot data can live in uncompressed arrays (`int`, `double`, `string`) for sub-millisecond access. Cold data is encoded per 2,048-row vector — frame-of-reference and delta bit-packing, run-length, ALP for doubles, sorted dictionaries for strings (**ColumnarRead, 0.3.0**) and can remain on disk, loaded on demand. For large datasets like time-series or logs, only a small working set needs to be in memory.
+- **Configurable memory residency** — You control what stays in memory. Hot data can live in uncompressed arrays (`int[]`, `double[]`, `string[]`) for sub-millisecond access. Cold data is encoded per 2,048-row vector — frame-of-reference and delta bit-packing, run-length, ALP for doubles, sorted dictionaries for strings (**ColumnarRead, 0.3.0**) and can remain on disk, loaded on demand. For large datasets like time-series or logs, only a small working set needs to be in memory.
 - **Schema-on-write** — Tables and columns are created automatically when you first insert data. No upfront schema design required, though explicit schemas are supported.
 - **Zero index management** — The engine automatically maintains zone maps, bloom filters, and sparse primary indexes. You never create, tune, or rebuild an index.
 - **Dual deployment** — Run it embedded in your process (like SQLite) or as a standalone server (like PostgreSQL).
@@ -200,20 +200,20 @@ Aouda operates in two fundamentally different modes. The database engine is the 
 
 ### Embedded Mode
 
-The database engine runs **inside your application process**. There is no server, no network, no HTTP. You call the database API directly through.NET method calls. Data lives in your process's memory.
+The database engine runs **inside your application process**. There is no server, no network, no HTTP. You call the database API directly through .NET method calls. Data lives in your process's memory.
 
 ```
 ┌──────────────────────────────────┐
-│ Your Application │
-│ │
-│ var db = AoudaEmbedded │
-│.OpenDatabaseAsync; │
-│ │
-│ ┌──────────────────────────┐ │
-│ │ Aouda Engine │ │
-│ │ (in-process, no network) │ │
-│ │ Storage: memory + disk │ │
-│ └──────────────────────────┘ │
+│         Your Application          │
+│                                  │
+│   var db = AoudaEmbedded         │
+│       .OpenDatabaseAsync();      │
+│                                  │
+│   ┌──────────────────────────┐   │
+│   │     Aouda Engine          │   │
+│   │  (in-process, no network) │   │
+│   │  Storage: memory + disk   │   │
+│   └──────────────────────────┘   │
 └──────────────────────────────────┘
 ```
 
@@ -229,31 +229,31 @@ The database engine runs **inside your application process**. There is no server
 
 ### Server Mode
 
-Aouda runs as a **standalone HTTP server** built on ASP.NET Core. Clients connect over the network using.NET or TypeScript SDKs (or raw HTTP). The server can host **multiple databases**, each with independent storage, schema, and access control.
+Aouda runs as a **standalone HTTP server** built on ASP.NET Core. Clients connect over the network using .NET or TypeScript SDKs (or raw HTTP). The server can host **multiple databases**, each with independent storage, schema, and access control.
 
 ```
-┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│.NET Client │ │ TypeScript │ │ curl / HTTP │
-│ (Aouda.Client) │ │ (@aouda/client) │ │ │
-└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
- │ │ │
- └─────────────────────┼──────────────────────┘
- │ HTTP / REST
- ┌──────────▼──────────┐
- │ Aouda Server │
- │ (ASP.NET Core) │
- │ │
- │ ┌───────────────┐ │
- │ │ Database A │ │
- │ │ Database B │ │
- │ │ Database C │ │
- │ └───────────────┘ │
- └─────────────────────┘
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│  .NET Client      │  │  TypeScript       │  │  curl / HTTP      │
+│  (Aouda.Client)   │  │  (@aouda/client)  │  │                  │
+└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+         │                     │                      │
+         └─────────────────────┼──────────────────────┘
+                               │ HTTP / REST
+                    ┌──────────▼──────────┐
+                    │   Aouda Server       │
+                    │   (ASP.NET Core)     │
+                    │                     │
+                    │  ┌───────────────┐  │
+                    │  │  Database A    │  │
+                    │  │  Database B    │  │
+                    │  │  Database C    │  │
+                    │  └───────────────┘  │
+                    └─────────────────────┘
 ```
 
 **When to use server mode:**
 - Multiple applications or services need to share the same data
-- You need clients in different languages (TypeScript,.NET, or raw HTTP)
+- You need clients in different languages (TypeScript, .NET, or raw HTTP)
 - You want centralized database management with monitoring (Aouda Studio)
 - Production deployments with access control
 
@@ -265,7 +265,7 @@ Aouda runs as a **standalone HTTP server** built on ASP.NET Core. Clients connec
 |--------|----------|--------|
 | Network required | No | Yes |
 | Multiple clients | No (single process) | Yes |
-| Languages |.NET only |.NET, TypeScript, HTTP |
+| Languages | .NET only | .NET, TypeScript, HTTP |
 | Authentication | Not needed | Available |
 | Replication | No | Not supported yet |
 | Aouda Studio | No | Yes |
@@ -292,23 +292,23 @@ using Aouda.Abstractions;
 using Aouda.Embedded;
 
 // Open an ephemeral database — data goes to a temp directory and is cleaned up on dispose
-await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync;
+await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync();
 
 // Insert data — table "orders" is created automatically (schema-on-write)
 await db.GetTable("orders").InsertAsync(new Dictionary<string, object?>
 {
- ["id"] = 1,
- ["customer"] = "Acme Corp",
- ["total"] = 249.99,
- ["created_at"] = DateTime.UtcNow
+    ["id"] = 1,
+    ["customer"] = "Acme Corp",
+    ["total"] = 249.99,
+    ["created_at"] = DateTime.UtcNow
 });
 
 // Query data
 var rows = await db.GetTable("orders")
-.Where("total", "gte", 100)
-.Select("id", "customer", "total")
-.Limit(10)
-.ToListAsync;
+    .Where("total", "gte", 100)
+    .Select("id", "customer", "total")
+    .Limit(10)
+    .ToListAsync();
 
 // When db is disposed, the temp directory is deleted
 ```
@@ -319,17 +319,17 @@ A persistent database writes to a specific directory. Data survives process rest
 
 ```csharp
 await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync(
- new AoudaEmbeddedOptions
- {
- DataPath = "./my-database", // Data stored here, survives restarts
- Durability = "strict", // WAL written through before a write is visible (default: "strict")
- });
+    new AoudaEmbeddedOptions
+    {
+        DataPath = "./my-database",  // Data stored here, survives restarts
+        Durability = "strict",       // WAL written through before a write is visible (default: "strict")
+    });
 
 await db.GetTable("users").InsertAsync(new Dictionary<string, object?>
 {
- ["id"] = 1,
- ["name"] = "Alice",
- ["email"] = "alice@example.com"
+    ["id"] = 1,
+    ["name"] = "Alice",
+    ["email"] = "alice@example.com"
 });
 
 // Dispose and re-open — data is still there
@@ -344,28 +344,28 @@ using Aouda.Abstractions.Attributes;
 
 public class Order
 {
- public long Id { get; set; }
- public string Customer { get; set; } = "";
- [AoudaDecimal(18, 2)] // a decimal declares its precision and scale
- public decimal Total { get; set; }
- public DateTime CreatedAt { get; set; }
+    public long Id { get; set; }
+    public string Customer { get; set; } = "";
+    [AoudaDecimal(18, 2)]              // a decimal declares its precision and scale
+    public decimal Total { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
-await using var db = await AoudaEmbedded.OpenDatabaseAsync;
+await using var db = await AoudaEmbedded.OpenDatabaseAsync();
 
 // Insert a typed object — table and columns are inferred from Order
-await db.GetTable<Order>.InsertAsync(new Order
+await db.GetTable<Order>().InsertAsync(new Order
 {
- Id = 1,
- Customer = "Acme Corp",
- Total = 249.99m,
- CreatedAt = DateTime.UtcNow
+    Id = 1,
+    Customer = "Acme Corp",
+    Total = 249.99m,
+    CreatedAt = DateTime.UtcNow
 });
 
 // Query returns typed objects
-List<Order> bigOrders = await db.GetTable<Order>
-.Where("Total", "gte", 100)
-.ToListAsync;
+List<Order> bigOrders = await db.GetTable<Order>()
+    .Where("Total", "gte", 100)
+    .ToListAsync();
 ```
 
 **Positional records and other constructor-built types** (**BL-1390, 0.11.0**). A row type with no public parameterless
@@ -376,45 +376,45 @@ settable properties (`init`, `required`, `set`) are written:
 ```csharp
 public sealed record Trade(long Id, string Name, double Price, int? Lots = null)
 {
- public string? Desk { get; init; }
+    public string? Desk { get; init; }
 }
 
-List<Trade> trades = await db.GetTable<Trade>.ToListAsync;
+List<Trade> trades = await db.GetTable<Trade>().ToListAsync();
 ```
 
 - A column the type does not use is ignored.
 - A column missing from the result is an error naming the type, the parameter and the column, unless the parameter has a default
- value, is `Nullable<T>`, or is a nullable reference (`string?`); then it gets that default or `null`.
+  value, is `Nullable<T>`, or is a nullable reference (`string?`); then it gets that default or `null`.
 - A null cell given to a non-nullable value-type parameter gives `default(T)`, exactly as it does for a property.
 - A class that has a parameterless constructor keeps using it. A class with several public constructors and no parameterless one is
- refused when `GetTable<T>` is called, and the error lists them; give it a parameterless constructor (or a single constructor).
- There is no attribute to choose one.
+  refused when `GetTable<T>()` is called, and the error lists them; give it a parameterless constructor (or a single constructor).
+  There is no attribute to choose one.
 - A parameter whose property is `[AoudaIgnore]`d is not a column: it is never read or required and gets `default(T)` (`null` for a reference type). `AoudaIgnore` applies to properties, so on a record write `[property: AoudaIgnore] object State`. The embedded engine's schema inference honours `[AoudaIgnore]` too.
 - A `record struct` works the same way, and so does a struct that declares exactly one public constructor (before, it was built as
- `default` and its properties written).
+  `default` and its properties written).
 - Writing reads the type's public properties, so a record's properties are the columns. A get-only property that only a
- constructor sets is not a column.
+  constructor sets is not a column.
 
-The same holds in the embedded engine and for `ClientColumnarResult.ToObjects<T>`.
+The same holds in the embedded engine and for `ClientColumnarResult.ToObjects<T>()`.
 
 ### Synchronous API (Scripts and AI Agents)
 
 For simple scripts or AI agent scenarios where async isn't needed:
 
 ```csharp
-using IAoudaDatabase db = AoudaEmbedded.OpenDatabase;
+using IAoudaDatabase db = AoudaEmbedded.OpenDatabase();
 
 // Synchronous — blocks the calling thread
 db.GetTable("cache").InsertAsync(new Dictionary<string, object?>
 {
- ["key"] = "session:abc",
- ["value"] = "data"
-}).GetAwaiter.GetResult;
+    ["key"] = "session:abc",
+    ["value"] = "data"
+}).GetAwaiter().GetResult();
 ```
 
 ### Environment Variable Configuration
 
-`AoudaEmbedded.OpenDatabaseAsync` (no arguments) reads from environment variables:
+`AoudaEmbedded.OpenDatabaseAsync()` (no arguments) reads from environment variables:
 
 | Variable | Purpose |
 |----------|---------|
@@ -432,19 +432,19 @@ For advanced scenarios, you can access the underlying `AoudaEngine` directly:
 await using var db = await AoudaEmbedded.CreateAsync("./data");
 
 // Use the engine directly for explicit schema, custom options
-await db.Engine.CreateTableAsync("sensors", new
+await db.Engine.CreateTableAsync("sensors", new[]
 {
- new ColumnDef("sensor_id", DataType.String, isPrimaryKey: true),
- new ColumnDef("timestamp", DataType.Timestamp),
- new ColumnDef("value", DataType.Double)
+    new ColumnDef("sensor_id", DataType.String, isPrimaryKey: true),
+    new ColumnDef("timestamp", DataType.Timestamp),
+    new ColumnDef("value", DataType.Double)
 });
 
 // Fluent query API on the engine
 var recent = await db.Engine.Table("sensors")
-.Where(r => r.Col("timestamp").Gte(DateTime.UtcNow.AddHours(-1)))
-.OrderBy("timestamp", descending: true)
-.Limit(100)
-.ToListAsync;
+    .Where(r => r.Col("timestamp").Gte(DateTime.UtcNow.AddHours(-1)))
+    .OrderBy("timestamp", descending: true)
+    .Limit(100)
+    .ToListAsync();
 ```
 
 ### Embedded Options Reference
@@ -468,7 +468,7 @@ var recent = await db.Engine.Table("sensors")
 
 ```bash
 dotnet tool install -g Aouda.Cli
-aouda start --port 5433 --data-dir./data
+aouda start --port 5433 --data-dir ./data
 ```
 
 This starts the server at `http://localhost:5433`. Databases are created explicitly after startup.
@@ -494,7 +494,7 @@ No authentication is configured. All endpoints are open. Best for rapid prototyp
 **2. With Application Auth — building user-facing apps**
 
 ```bash
-aouda start --port 5433 --data-dir./data
+aouda start --port 5433 --data-dir ./data
 ```
 
 Then create an auth database and link your app database explicitly (see [Authentication Setup](auth.md)). For password reset and invite emails, configure an email provider on the server — `console` for local testing or SendGrid for production ([Email, SMS & Notifications](../auth/notifications.md)).
@@ -513,15 +513,15 @@ For local development, you may place an optional `appsettings.json` in the direc
 
 ```json
 {
- "Aouda": {
- "DataPath": "./data",
- "Port": 5433,
- "Databases": {
- "myapp": {
- "Durability": "strict"
- }
- }
- }
+  "Aouda": {
+    "DataPath": "./data",
+    "Port": 5433,
+    "Databases": {
+      "myapp": {
+        "Durability": "strict"
+      }
+    }
+  }
 }
 ```
 
@@ -543,15 +543,15 @@ var builder = WebApplication.CreateBuilder(args);
 // Register Aouda server services
 builder.Services.AddAoudaServer(builder.Configuration);
 
-builder.Services.AddControllers
-.AddApplicationPart(typeof(Aouda.Server.Controllers.TablesController).Assembly);
+builder.Services.AddControllers()
+    .AddApplicationPart(typeof(Aouda.Server.Controllers.TablesController).Assembly);
 
-var app = builder.Build;
+var app = builder.Build();
 
-app.UseAoudaAuthentication;
-app.MapControllers;
+app.UseAoudaAuthentication();
+app.MapControllers();
 
-app.Run;
+app.Run();
 ```
 
 This gives you a full Aouda server running inside your own host, alongside your own controllers and middleware.
@@ -562,7 +562,7 @@ Run the official Docker image:
 
 ```bash
 docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 -v aouda-data:/data \
- ghcr.io/aoudadb/aouda-server:<version>
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
 
 The image is private: log in first with `docker login ghcr.io` (a token with `read:packages`). `-m` makes the server size its memory from the container's limit and `127.0.0.1:` keeps the admin API off the host's other interfaces ([Docker](../deployment/docker.md) says why).
@@ -581,9 +581,9 @@ For production with custom configuration, pass environment variables:
 
 ```bash
 docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 \
- -v aouda-data:/data \
- -e AOUDA_DATA_PATH=/data \
- ghcr.io/aoudadb/aouda-server:<version>
+  -v aouda-data:/data \
+  -e AOUDA_DATA_PATH=/data \
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
 
 #### Option E: Docker Compose — server + Studio
@@ -614,19 +614,19 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ```bash
 # Create a database
 curl -X POST http://localhost:5433/api/databases \
- -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
- -H "Content-Type: application/json" \
- -d '{ "name": "myapp" }'
+  -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "myapp" }'
 
 # Create a database with a durability level and memory limits
 curl -X POST http://localhost:5433/api/databases \
- -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
- -H "Content-Type: application/json" \
- -d '{
- "name": "analytics",
- "durability": "strict",
- "maxMemoryShareBytes": 1073741824
- }'
+  -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "analytics",
+    "durability": "strict",
+    "maxMemoryShareBytes": 1073741824
+  }'
 
 # List databases
 curl -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases
@@ -638,7 +638,7 @@ curl -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/data
 curl -X DELETE -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases/myapp
 ```
 
-### Connecting with the.NET Client
+### Connecting with the .NET Client
 
 ```bash
 dotnet add package Aouda.Client
@@ -653,28 +653,28 @@ var client = new AoudaClient("http://localhost:5433", "myapp");
 // Insert data — table is auto-created if schema-on-write is enabled
 await client.GetTable("products").InsertAsync(new Dictionary<string, object?>
 {
- ["id"] = 1,
- ["name"] = "Widget",
- ["price"] = 19.99,
- ["category"] = "Tools"
+    ["id"] = 1,
+    ["name"] = "Widget",
+    ["price"] = 19.99,
+    ["category"] = "Tools"
 });
 
 // Insert a typed object
-await client.GetTable<Product>.InsertAsync(new Product
+await client.GetTable<Product>().InsertAsync(new Product
 {
- Id = 2,
- Name = "Gadget",
- Price = 29.99m,
- Category = "Electronics"
+    Id = 2,
+    Name = "Gadget",
+    Price = 29.99m,
+    Category = "Electronics"
 });
 
 // Query
 var cheap = await client.GetTable("products")
-.Where("price", "lt", 25)
-.Select("id", "name", "price")
-.OrderBy("price")
-.Limit(50)
-.ToListAsync;
+    .Where("price", "lt", 25)
+    .Select("id", "name", "price")
+    .OrderBy("price")
+    .Limit(50)
+    .ToListAsync();
 ```
 
 **Data you already hold as columns** (**Lead S13, 0.6.0**) — read from Parquet or Arrow, a data frame, another database —
@@ -684,15 +684,15 @@ goes in as a `ColumnBatch`, without a dictionary per row. It is the fast path fo
 using Aouda.Protocol.BulkLoad;
 
 var batch = ColumnBatch.Of(
- ColumnBatchColumn.FromInt64s("id", new long { 3, 4 }),
- ColumnBatchColumn.FromStrings("name", new { "Sprocket", "Gizmo" }),
- ColumnBatchColumn.FromDecimals("price", new { 4.50m, 12.00m }, scale: 2));
+    ColumnBatchColumn.FromInt64s("id", new long[] { 3, 4 }),
+    ColumnBatchColumn.FromStrings("name", new[] { "Sprocket", "Gizmo" }),
+    ColumnBatchColumn.FromDecimals("price", new[] { 4.50m, 12.00m }, scale: 2));
 
-var inserted = await client.GetTable("products").InsertAsync(batch); // InsertResult: RowsInserted, GeneratedValues
-await client.BulkLoadAsync("products", batches); // IAsyncEnumerable<ColumnBatch>, a list, or one batch
+var inserted = await client.GetTable("products").InsertAsync(batch);   // InsertResult: RowsInserted, GeneratedValues
+await client.BulkLoadAsync("products", batches);                       // IAsyncEnumerable<ColumnBatch>, a list, or one batch
 ```
 
-The full.NET client reference — options, inserts, column batches, bulk load, what is retried, errors — is
+The full .NET client reference — options, inserts, column batches, bulk load, what is retried, errors — is
 [.NET Client](../clients/dotnet.md).
 
 #### Client Options
@@ -700,13 +700,13 @@ The full.NET client reference — options, inserts, column batches, bulk load, w
 ```csharp
 var client = new AoudaClient(new AoudaClientOptions
 {
- ServerUrl = "http://localhost:5433",
- DatabaseName = "myapp",
- Timeout = TimeSpan.FromSeconds(30),
- AutoCreateSchema = true, // Tables created on first insert
- TreatMissingAsEmpty = true, // Missing tables = empty, not error
- RetryPolicy = RetryPolicy.Default,
- CircuitBreakerPolicy = CircuitBreakerPolicy.Disabled,
+    ServerUrl = "http://localhost:5433",
+    DatabaseName = "myapp",
+    Timeout = TimeSpan.FromSeconds(30),
+    AutoCreateSchema = true,       // Tables created on first insert
+    TreatMissingAsEmpty = true,    // Missing tables = empty, not error
+    RetryPolicy = RetryPolicy.Default,
+    CircuitBreakerPolicy = CircuitBreakerPolicy.Disabled,
 });
 ```
 
@@ -717,10 +717,10 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ```csharp
 AuthFailurePolicy = new AuthFailurePolicy
 {
- FailFast = true, // throw AoudaAuthenticationFatalException: stop, the credential is bad
- SustainedAfter = 3, // consecutive failures with no success between them (default 3)
- OnSustained = info => // once per streak; carries no key
- alerts.Raise($"Aouda rejected our key: {info.ErrorCode} x{info.ConsecutiveFailures} since {info.FirstSeenAt:u}"),
+    FailFast = true,       // throw AoudaAuthenticationFatalException: stop, the credential is bad
+    SustainedAfter = 3,    // consecutive failures with no success between them (default 3)
+    OnSustained = info =>  // once per streak; carries no key
+        alerts.Raise($"Aouda rejected our key: {info.ErrorCode} x{info.ConsecutiveFailures} since {info.FirstSeenAt:u}"),
 }
 ```
 
@@ -736,33 +736,33 @@ npm install @aouda/client
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
- serverUrl: "http://localhost:5433",
- database: "myapp",
+  serverUrl: "http://localhost:5433",
+  database: "myapp",
 });
 
-await client.connect;
+await client.connect();
 
 // Insert
 await client.table("products").insert({
- id: 1,
- name: "Widget",
- price: 19.99,
- category: "Tools",
+  id: 1,
+  name: "Widget",
+  price: 19.99,
+  category: "Tools",
 });
 
 // Insert many
 await client.table("products").insertMany([
- { id: 2, name: "Gadget", price: 29.99, category: "Electronics" },
- { id: 3, name: "Doohickey", price: 9.99, category: "Tools" },
+  { id: 2, name: "Gadget", price: 29.99, category: "Electronics" },
+  { id: 3, name: "Doohickey", price: 9.99, category: "Tools" },
 ]);
 
 // Query
 const results = await client.table("products")
-.where("price", "<", 25)
-.orderBy("price", "asc")
-.limit(50)
-.select("id", "name", "price")
-.execute;
+  .where("price", "<", 25)
+  .orderBy("price", "asc")
+  .limit(50)
+  .select("id", "name", "price")
+  .execute();
 
 console.log(results.rows);
 ```
@@ -772,64 +772,64 @@ console.log(results.rows);
 Generate TypeScript types from your database schema for type-safe queries:
 
 ```bash
-npx @aouda/client generate --server http://localhost:5433 --output./types/schema.ts
+npx @aouda/client generate --server http://localhost:5433 --output ./types/schema.ts
 ```
 
 ```typescript
 import { createAoudaClient, SchemaLike } from "@aouda/client";
 
 interface Product {
- id: number;
- name: string;
- price: number;
- category: string;
+  id: number;
+  name: string;
+  price: number;
+  category: string;
 }
 
 interface AppSchema extends SchemaLike {
- tables: {
- products: Product;
- };
+  tables: {
+    products: Product;
+  };
 }
 
 const client = createAoudaClient<AppSchema>({
- serverUrl: "http://localhost:5433",
- database: "myapp",
+  serverUrl: "http://localhost:5433",
+  database: "myapp",
 });
 
 // client.table("products") returns TableQuery<Product> — fully typed
-const results = await client.table("products").execute;
-// results.rows is Product
+const results = await client.table("products").execute();
+// results.rows is Product[]
 ```
 
 ### Tables API (TypeScript)
 
 ```typescript
 // List tables
-const tables = await client.tables.list;
+const tables = await client.tables.list();
 
 // Get table schema
 const schema = await client.tables.get("products");
 
 // Create table explicitly
 await client.tables.createTable({
- name: "orders",
- columns: [
- { name: "id", type: "Int64", isPrimaryKey: true },
- { name: "product_id", type: "Int64" },
- { name: "quantity", type: "Int32" },
- { name: "total", type: "Decimal", precision: 18, scale: 2 },
- ],
+  name: "orders",
+  columns: [
+    { name: "id", type: "Int64", isPrimaryKey: true },
+    { name: "product_id", type: "Int64" },
+    { name: "quantity", type: "Int32" },
+    { name: "total", type: "Decimal", precision: 18, scale: 2 },
+  ],
 });
 
 // Schema relationships (for ER diagrams)
-const rels = await client.tables.relationships;
+const rels = await client.tables.relationships();
 ```
 
 ### Databases API (TypeScript)
 
 ```typescript
 // List databases
-const dbs = await client.databases.list;
+const dbs = await client.databases.list();
 
 // Create database
 await client.databases.create("analytics");
@@ -850,16 +850,16 @@ These patterns work in both embedded and server modes. The API is the same — `
 // Dictionary insert
 await db.GetTable("orders").InsertAsync(new Dictionary<string, object?>
 {
- ["id"] = 1,
- ["customer"] = "Acme",
- ["total"] = 249.99,
- ["status"] = "pending"
+    ["id"] = 1,
+    ["customer"] = "Acme",
+    ["total"] = 249.99,
+    ["status"] = "pending"
 });
 
 // Typed insert
-await db.GetTable<Order>.InsertAsync(new Order
+await db.GetTable<Order>().InsertAsync(new Order
 {
- Id = 2, Customer = "Globex", Total = 500.00m, Status = "shipped"
+    Id = 2, Customer = "Globex", Total = 500.00m, Status = "shipped"
 });
 ```
 
@@ -868,13 +868,13 @@ await db.GetTable<Order>.InsertAsync(new Order
 ```csharp
 // Filter + select + order + limit
 var results = await db.GetTable("orders")
-.Where("total", "gte", 100)
-.Where("status", "eq", "pending")
-.Select("id", "customer", "total")
-.OrderBy("total", descending: true)
-.Limit(20)
-.Offset(0)
-.ToListAsync;
+    .Where("total", "gte", 100)
+    .Where("status", "eq", "pending")
+    .Select("id", "customer", "total")
+    .OrderBy("total", descending: true)
+    .Limit(20)
+    .Offset(0)
+    .ToListAsync();
 ```
 
 Supported predicates: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`. Note: `ne` (not `neq`) is the not-equal operator. Using `ne` with `null` as value translates to `IS NOT NULL`. Empty `in` / `nin` arrays are rejected (`IN/NIN requires at least one value` — HTTP 400 on the server; the C# client throws before sending). `like` is ordinal and case-sensitive.
@@ -882,13 +882,13 @@ Supported predicates: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`.
 ```csharp
 // String-op form (Embedded and Aouda.Client)
 var byIds = await db.GetTable("orders")
-.Where("Id", "in", new { 1, 2, 3 })
-.ToListAsync;
+    .Where("Id", "in", new[] { 1, 2, 3 })
+    .ToListAsync();
 
 // Fluent In / Nin (Aouda.Client RemoteColumnRef and Embedded ColumnRef)
 var clientRows = await client.GetTable("orders")
-.Where(r => r.Col("Id").In(1, 2, 3))
-.ToListAsync;
+    .Where(r => r.Col("Id").In(1, 2, 3))
+    .ToListAsync();
 ```
 
 ### Common Data Operation Errors
@@ -902,9 +902,9 @@ var clientRows = await client.GetTable("orders")
 // For the server client, enable it explicitly:
 var client = new AoudaClient(new AoudaClientOptions
 {
- ServerUrl = "http://localhost:5433",
- DatabaseName = "myapp",
- TreatMissingAsEmpty = true // returns empty list for non-existent tables
+    ServerUrl = "http://localhost:5433",
+    DatabaseName = "myapp",
+    TreatMissingAsEmpty = true  // returns empty list for non-existent tables
 });
 ```
 
@@ -912,9 +912,9 @@ var client = new AoudaClient(new AoudaClientOptions
 
 ```json
 {
- "error": "TYPE_MISMATCH",
- "message": "Column 'id' expects Int64 but received String 'abc'",
- "suggestion": "Cast the value to Int64 or check the schema with GET /api/databases/myapp/tables/orders"
+  "error": "TYPE_MISMATCH",
+  "message": "Column 'id' expects Int64 but received String 'abc'",
+  "suggestion": "Cast the value to Int64 or check the schema with GET /api/databases/myapp/tables/orders"
 }
 ```
 
@@ -928,18 +928,18 @@ When using the embedded engine directly, you get a richer predicate API:
 
 ```csharp
 var results = await engine.Table("orders")
-.Where(r => r.Col("total").Gte(100) & r.Col("status").Eq("pending"))
-.Select("id", "customer", "total")
-.OrderBy("total", descending: true)
-.Limit(20)
-.ToListAsync;
+    .Where(r => r.Col("total").Gte(100) & r.Col("status").Eq("pending"))
+    .Select("id", "customer", "total")
+    .OrderBy("total", descending: true)
+    .Limit(20)
+    .ToListAsync();
 
 // Between, In, IsNull
 var filtered = await engine.Table("orders")
-.Where(r => r.Col("total").Between(50, 200)
- & r.Col("category").In("electronics", "tools")
- & r.Col("notes").IsNull)
-.ToListAsync;
+    .Where(r => r.Col("total").Between(50, 200)
+              & r.Col("category").In("electronics", "tools")
+              & r.Col("notes").IsNull())
+    .ToListAsync();
 ```
 
 Empty `In(...)` / `in` arrays throw `ArgumentException` (`IN/NIN requires at least one value`) rather than matching nothing.
@@ -948,82 +948,82 @@ Empty `In(...)` / `in` arrays throw `ArgumentException` (`IN/NIN requires at lea
 
 ```typescript
 const results = await client.table("orders")
-.where("total", ">=", 100)
-.where("status", "=", "pending")
-.select("id", "customer", "total")
-.orderBy("total", "desc")
-.limit(20)
-.offset(0)
-.execute;
+  .where("total", ">=", 100)
+  .where("status", "=", "pending")
+  .select("id", "customer", "total")
+  .orderBy("total", "desc")
+  .limit(20)
+  .offset(0)
+  .execute();
 
 // Access results
 for (const row of results.rows) {
- console.log(row.id, row.customer, row.total);
+  console.log(row.id, row.customer, row.total);
 }
 ```
 
 ### Update and Delete
 
-Both `.update` and `.delete` require at least one `.where` condition — the server
+Both `.update()` and `.delete()` require at least one `.where()` condition — the server
 rejects requests with no predicate as a safety guard.
 
 ```typescript
 // Update — requires at least one where clause
 await client.table("orders")
-.where("id", "=", 1)
-.update({ status: "shipped" });
+  .where("id", "=", 1)
+  .update({ status: "shipped" });
 
 // Delete — requires at least one where clause
 await client.table("orders")
-.where("id", "=", 1)
-.delete;
+  .where("id", "=", 1)
+  .delete();
 ```
 
 ```csharp
-//.NET — same safety guard
+// .NET — same safety guard
 await client.Table("orders")
-.Where("id", "eq", 1)
-.UpdateAsync(new Dictionary<string, object?> { ["status"] = "shipped" });
+    .Where("id", "eq", 1)
+    .UpdateAsync(new Dictionary<string, object?> { ["status"] = "shipped" });
 
 await client.Table("orders")
-.Where("id", "eq", 1)
-.DeleteAsync;
+    .Where("id", "eq", 1)
+    .DeleteAsync();
 ```
 
 **Bulk mutation features (P27):** The update and delete surfaces have been extended with:
 
 - **Expression SET** — evaluate server-side expressions without a read round-trip:
- ```ts
- await client.table('products')
-.where('status', '=', 'active')
-.update({ price: { $mul: 0.9 }, attempts: { $inc: 1 } });
- ```
+  ```ts
+  await client.table('products')
+    .where('status', '=', 'active')
+    .update({ price: { $mul: 0.9 }, attempts: { $inc: 1 } });
+  ```
 - **TRUNCATE** — clear all rows atomically (requires `Truncate` auth scope):
- ```ts
- await client.table('logs').truncate;
- ```
+  ```ts
+  await client.table('logs').truncate();
+  ```
 - **DELETE with LIMIT** — safe rolling deletes with a `hasMore` loop:
- ```ts
- const result = await client.table('auditLog')
-.where('createdAt', '<', cutoff)
-.orderBy('createdAt', 'asc')
-.limit(1000)
-.delete;
- // result.hasMore → true if more rows remain
- ```
+  ```ts
+  const result = await client.table('auditLog')
+    .where('createdAt', '<', cutoff)
+    .orderBy('createdAt', 'asc')
+    .limit(1000)
+    .delete();
+  // result.hasMore → true if more rows remain
+  ```
 - **RETURNING** — capture which rows were changed in the same response:
- ```ts
- const result = await client.table('sessions')
-.where('expiresAt', '<', new Date)
-.delete({ returning: ['id', 'userId'] });
- // result.rows contains the deleted session data
- ```
+  ```ts
+  const result = await client.table('sessions')
+    .where('expiresAt', '<', new Date())
+    .delete({ returning: ['id', 'userId'] });
+  // result.rows contains the deleted session data
+  ```
 - **Computed columns in SELECT** — server-side column math without storing:
- ```ts
- const result = await client.table('products')
-.selectExpr({ discounted: { $mul: { $col: 'price' }, 0.9 } })
-.execute;
- ```
+  ```ts
+  const result = await client.table('products')
+    .selectExpr({ discounted: { $mul: { $col: 'price' }, 0.9 } })
+    .execute();
+  ```
 
 For the full reference, examples, and common patterns, see the
 [Bulk Mutations guide](../guides/bulk-mutations.md).
@@ -1033,21 +1033,21 @@ For the full reference, examples, and common patterns, see the
 ```csharp
 // One row per category: category, SUM_total, COUNT — keys ascending, nulls last
 var byCategory = await engine.Table("orders")
-.Where(r => r.Col("status").Eq("completed"))
-.GroupBy("category")
-.Sum("total")
-.Count
-.GroupAggregateAsync;
+    .Where(r => r.Col("status").Eq("completed"))
+    .GroupBy("category")
+    .Sum("total")
+    .Count()
+    .GroupAggregateAsync();
 
 // No GroupBy: one AggregateResult over every matching row
 var totals = await engine.Table("orders")
-.Where(r => r.Col("status").Eq("completed"))
-.Sum("total")
-.Count
-.AggregateAsync;
+    .Where(r => r.Col("status").Eq("completed"))
+    .Sum("total")
+    .Count()
+    .AggregateAsync();
 ```
 
-A grouped query runs through `GroupAggregateAsync`; `AggregateAsync` refuses one, and `GroupBy` does not combine
+A grouped query runs through `GroupAggregateAsync()`; `AggregateAsync()` refuses one, and `GroupBy` does not combine
 with `Select` — the result is the keys and the aggregates (**ColumnarRead, 0.3.0**). A `SUM` over no value is
 `null`, not `0` (**BL-757, 0.3.0**). Over HTTP, the same question is the query message's `aggregates` / `groupBy`
 ([HTTP API](../reference/http-api.md#aggregates-and-group-by)).
@@ -1064,11 +1064,11 @@ When `AutoCreateSchema` is enabled (default in embedded mode), inserting into a 
 // First insert creates the table with inferred schema
 await db.GetTable("events").InsertAsync(new Dictionary<string, object?>
 {
- ["id"] = 1L, // → Int64
- ["name"] = "page_view", // → String
- ["timestamp"] = DateTime.UtcNow, // → Timestamp
- ["duration_ms"] = 123.45, // → Double
- ["is_bot"] = false // → Boolean
+    ["id"] = 1L,                           // → Int64
+    ["name"] = "page_view",                // → String
+    ["timestamp"] = DateTime.UtcNow,       // → Timestamp
+    ["duration_ms"] = 123.45,              // → Double
+    ["is_bot"] = false                     // → Boolean
 });
 ```
 
@@ -1079,15 +1079,15 @@ using Aouda.Abstractions.Attributes;
 
 public class Event
 {
- [PrimaryKey, AutoIncrement] // server assigns an incrementing Int64 on insert
- public long Id { get; set; }
- public string Name { get; set; } = "";
- public DateTime Timestamp { get; set; }
- public double DurationMs { get; set; }
- public bool IsBot { get; set; }
+    [PrimaryKey, AutoIncrement]       // server assigns an incrementing Int64 on insert
+    public long Id { get; set; }
+    public string Name { get; set; } = "";
+    public DateTime Timestamp { get; set; }
+    public double DurationMs { get; set; }
+    public bool IsBot { get; set; }
 }
 
-await db.GetTable<Event>.InsertAsync(new Event {... });
+await db.GetTable<Event>().InsertAsync(new Event { ... });
 // Table "Event" created; Id is populated by the server after insert
 ```
 
@@ -1163,10 +1163,10 @@ read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on th
 > insert. Fix it at the declaration, one of two ways:
 >
 > - **Change the schema to match the model** — `"Type": { "type": "Int32" }`. Correct for a new
-> or empty table, and the default choice.
+>   or empty table, and the default choice.
 > - **Change the enum to match the schema** — `public enum RoomType : byte { … }`. Correct when
-> the `Byte` column already holds data you would rather not rewrite, and when the value range
-> genuinely is 0–255.
+>   the `Byte` column already holds data you would rather not rewrite, and when the value range
+>   genuinely is 0–255.
 >
 > If the column is already populated and you need it widened, do it explicitly through
 > `ISchemaOperations.ApplyAsync` (a Tier-1 widening; see
@@ -1191,9 +1191,9 @@ read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on th
 > ```csharp
 > var client = new AoudaClient(new AoudaClientOptions
 > {
-> ServerUrl = "http://localhost:5433",
-> DatabaseName = "myapp",
-> AutoReconcileSchema = false, // the schema file owns these tables
+>     ServerUrl = "http://localhost:5433",
+>     DatabaseName = "myapp",
+>     AutoReconcileSchema = false, // the schema file owns these tables
 > });
 > ```
 >
@@ -1219,8 +1219,8 @@ Sometimes you need to insert **client-chosen** values into an `autoIncrement` co
 ```csharp
 // C# / Embedded — Bond equivalent: isAutoIncrementDisabled: true
 await table.InsertAsync(
- new Dictionary<string, object?> { ["Id"] = 1000L, ["Name"] = "Seeded" },
- identityInsert: true);
+    new Dictionary<string, object?> { ["Id"] = 1000L, ["Name"] = "Seeded" },
+    identityInsert: true);
 
 // Next normal insert gets 1001
 await table.InsertAsync(new Dictionary<string, object?> { ["Id"] = 0L, ["Name"] = "Auto" });
@@ -1228,16 +1228,16 @@ await table.InsertAsync(new Dictionary<string, object?> { ["Id"] = 0L, ["Name"] 
 
 ```typescript
 await client.table("orders").insert(
- { id: 1000, status: "seeded" },
- { identityInsert: true }
+  { id: 1000, status: "seeded" },
+  { identityInsert: true }
 );
 
 await client.table("orders").insertMany(
- [
- { id: 0, status: "literal-zero" },
- { id: 500, status: "reserved" },
- ],
- { identityInsert: true }
+  [
+    { id: 0, status: "literal-zero" },
+    { id: 500, status: "reserved" },
+  ],
+  { identityInsert: true }
 );
 // Next auto-generated id is max(0, 500) + 1 = 501
 ```
@@ -1247,11 +1247,11 @@ POST /api/databases/mydb/tables/orders/rows
 Content-Type: application/json
 
 {
- "database": "mydb",
- "table": "orders",
- "identityInsert": true,
- "columns": ["id", "status"],
- "data": [[1000], ["seeded"]]
+  "database": "mydb",
+  "table": "orders",
+  "identityInsert": true,
+  "columns": ["id", "status"],
+  "data": [[1000], ["seeded"]]
 }
 ```
 
@@ -1269,30 +1269,30 @@ Rules of thumb:
 For production use, you often want explicit control over data types, primary keys, partition keys, and auto-increment:
 
 ```csharp
-// The same request in the.NET client (client.Schema) and the embedded engine (db.Schema)
+// The same request in the .NET client (client.Schema) and the embedded engine (db.Schema)
 await client.Schema.CreateTableAsync(new CreateTableRequest
 {
- Name = "orders",
- Columns =
- [
- new { Name = "order_id", Type = "Int64", PrimaryKeyOrder = 1, IsAutoIncrement = true },
- new { Name = "tenant_id", Type = "String", PartitionKeyOrder = 1 },
- new { Name = "customer", Type = "String" },
- new { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2 }, // Decimal(18,2)
- new { Name = "status", Type = "String" },
- new { Name = "created_at", Type = "Timestamp" },
- ],
+    Name = "orders",
+    Columns =
+    [
+        new() { Name = "order_id", Type = "Int64", PrimaryKeyOrder = 1, IsAutoIncrement = true },
+        new() { Name = "tenant_id", Type = "String", PartitionKeyOrder = 1 },
+        new() { Name = "customer", Type = "String" },
+        new() { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2 },   // Decimal(18,2)
+        new() { Name = "status", Type = "String" },
+        new() { Name = "created_at", Type = "Timestamp" },
+    ],
 });
 ```
 
-(**BL-035, 0.9.0**) A column can also hold a whole array per row — `Double`, `Float32`, `Int32`, `Int64`, `Byte` or
-`String` — see [Array columns](../guides/array-columns.md). The embedded engine does not take them yet.
+(**BL-035, 0.9.0**) A column can also hold a whole array per row — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` or
+`String[]` — see [Array columns](../guides/array-columns.md). The embedded engine does not take them yet.
 
 ### Schema Operations via TypeScript Client
 
 ```typescript
 // Export schema as JSON
-const schema = await client.schema.export;
+const schema = await client.schema.export();
 
 // Apply schema changes
 await client.schema.apply(schemaDefinition);
@@ -1301,7 +1301,7 @@ await client.schema.apply(schemaDefinition);
 const diff = await client.schema.diff(newSchema);
 
 // View schema history
-const history = await client.schema.history;
+const history = await client.schema.history();
 ```
 
 ### Declarative Schema (`aouda.schema.json`)
@@ -1310,16 +1310,16 @@ Aouda supports a declarative schema file that serves as the source of truth. Def
 
 ```json
 {
- "tables": {
- "orders": {
- "columns": [
- { "name": "order_id", "type": "Int64", "isPrimaryKey": true, "autoIncrement": true },
- { "name": "tenant_id", "type": "String", "isPartitionKey": true },
- { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 },
- { "name": "created_at", "type": "Timestamp" }
- ]
- }
- }
+  "tables": {
+    "orders": {
+      "columns": [
+        { "name": "order_id", "type": "Int64", "isPrimaryKey": true, "autoIncrement": true },
+        { "name": "tenant_id", "type": "String", "isPartitionKey": true },
+        { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 },
+        { "name": "created_at", "type": "Timestamp" }
+      ]
+    }
+  }
 }
 ```
 
@@ -1329,8 +1329,8 @@ Adding a column to an existing table does not backfill existing rows. Existing r
 
 ```typescript
 await client.tables.addColumn("orders", {
- name: "shipped_at",
- type: "Timestamp",
+  name: "shipped_at",
+  type: "Timestamp",
 });
 ```
 
@@ -1344,32 +1344,32 @@ Aouda is flexible — it supports everything from zero-auth development to full 
 
 ```
 Is the database embedded in your process?
- YES → No auth needed. Your code is the only accessor.
+  YES → No auth needed. Your code is the only accessor.
 
 Is this for local development or prototyping?
- YES → Use `aouda start --port 5433` (no auth)
- Then create databases explicitly via API/CLI
+  YES → Use `aouda start --port 5433` (no auth)
+        Then create databases explicitly via API/CLI
 
 Do end users of YOUR APPLICATION need accounts?
- (signup, signin, user profiles, per-user data isolation)
- YES → Enable Application Auth on the database
- See: Getting-Started-Auth.md
+  (signup, signin, user profiles, per-user data isolation)
+  YES → Enable Application Auth on the database
+        See: Getting-Started-Auth.md
 
 Do you need to control which SERVICES/DEVELOPERS access the server?
- (database-scoped permissions, CI/CD service accounts)
- YES → Enable Server Authentication
- See: Section 8 below
+  (database-scoped permissions, CI/CD service accounts)
+  YES → Enable Server Authentication
+        See: Section 8 below
 
 Is this a cache or low-sensitivity internal database?
- YES → Consider running without auth (network security only)
- See: Section 9 below
+  YES → Consider running without auth (network security only)
+        See: Section 9 below
 ```
 
 ### Deployment Scenarios at a Glance
 
 | Scenario | Server Auth | App Auth | Setup |
 |----------|:-----------:|:--------:|-------|
-| **Embedded** (in-process, tests, tools) | — | — | `AoudaEmbedded.OpenDatabaseAsync` |
+| **Embedded** (in-process, tests, tools) | — | — | `AoudaEmbedded.OpenDatabaseAsync()` |
 | **Server (prototyping, no auth)** | — | — | `aouda start --port 5433` |
 | **Server with app auth** (testing auth flows) | — | Yes | `aouda start --port 5433` + create/link auth DB |
 | **Production cache** (low sensitivity) | Optional | — | Create DB without `auth.enabled` |
@@ -1407,21 +1407,21 @@ Server authentication follows the same pattern as traditional databases: a serve
 ```
 Aouda Server Instance
 ├── Server Admin (superuser)
-│ ├─ Access: ALL databases, ALL operations
-│ └─ Analogy: PostgreSQL's `postgres`, SQL Server's `sa`
+│   ├─ Access: ALL databases, ALL operations
+│   └─ Analogy: PostgreSQL's `postgres`, SQL Server's `sa`
 │
 ├── Server Users (database-scoped)
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
-│ └─ Analogy: PostgreSQL roles with per-database GRANT
+│   └─ Analogy: PostgreSQL roles with per-database GRANT
 │
 ├── Server API Keys (database-scoped)
 a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
-│ └─ Analogy: Service accounts / connection strings
+│   └─ Analogy: Service accounts / connection strings
 │
-├── Database: "myapp" ← server users/keys need db_* role to access
-├── Database: "analytics" ← separate role grants
-└── Database: "cache" ← no linked auth database: open before setup;
- after it, server credentials on the admin listener (BL-1017)
+├── Database: "myapp"     ← server users/keys need db_* role to access
+├── Database: "analytics"  ← separate role grants
+└── Database: "cache"      ← no linked auth database: open before setup;
+                               after it, server credentials on the admin listener (BL-1017)
 ```
 
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
@@ -1483,11 +1483,11 @@ Response while setup is required:
 
 ```json
 {
- "setupMode": true,
- "serverAuthConfigured": false,
- "adminBootstrapRequired": true,
- "allowedActions": ["postSetup"],
- "nextStep": "POST /api/auth/setup"
+  "setupMode": true,
+  "serverAuthConfigured": false,
+  "adminBootstrapRequired": true,
+  "allowedActions": ["postSetup"],
+  "nextStep": "POST /api/auth/setup"
 }
 ```
 
@@ -1499,10 +1499,10 @@ For server setup, prefer the retryable initializer:
 
 ```bash
 printf '%s' "ChangeMeNow!" | aouda init \
- --admin-email admin@example.com \
- --admin-password-stdin \
- --server http://localhost:5433 \
- --json
+  --admin-email admin@example.com \
+  --admin-password-stdin \
+  --server http://localhost:5433 \
+  --json
 ```
 
 This assumes the server is already running. `aouda init` creates the first server admin if needed, or reports that the server is already initialized. It does not create auth or data databases.
@@ -1520,21 +1520,21 @@ aouda databases create --name user --auth-enabled --auth-database auth --server 
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/setup \
- -H "Content-Type: application/json" \
- -d '{
- "email": "admin@example.com",
- "password": "ChangeMeNow!"
- }'
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@example.com",
+    "password": "ChangeMeNow!"
+  }'
 ```
 
 Response:
 
 ```json
 {
- "accessToken": "eyJhbG...",
- "refreshToken": "...",
- "expiresInSeconds": 900,
- "expiresAt": "2026-01-01T00:00:00Z"
+  "accessToken": "eyJhbG...",
+  "refreshToken": "...",
+  "expiresInSeconds": 900,
+  "expiresAt": "2026-01-01T00:00:00Z"
 }
 ```
 
@@ -1543,14 +1543,14 @@ Setup mode automatically disables after the first admin is created.
 #### Option B: Declare the first admin (**BL-1464, 0.16.0**)
 
 Declare the admin in the declaration file, `aouda.json`: a `server.principals` entry named by the email, holding the role `admin`,
-with a password seed read from a file or an environment variable (or `{ "hash":... }`), never written into the file:
+with a password seed read from a file or an environment variable (or `{ "hash": ... }`), never written into the file:
 
 ```json
 { "version": 1, "server": { "principals": { "admin@example.com": { "roles": ["admin"],
- "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
+    "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
 ```
 
-and name the file at start: `aouda start --declaration./aouda.json` (or `Aouda__Declaration`; there is no default path). The server
+and name the file at start: `aouda start --declaration ./aouda.json` (or `Aouda__Declaration`; there is no default path). The server
 creates the admin when the principal is created, with a forced password change at the first sign-in; the seed is never applied
 again, so a later change of the variable changes nothing. See [Declared access](../guides/declared-access.md).
 
@@ -1561,9 +1561,9 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ```bash
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- --email admin@example.com \
- --password-stdin \
- --data./data
+  --email admin@example.com \
+  --password-stdin \
+  --data ./data
 ```
 
 This creates the admin directly in the data directory without starting the server. ⚠️ **Only with the server stopped**
@@ -1573,9 +1573,9 @@ server stayed in setup mode until a restart. For binary-only or air-gapped insta
 
 ```bash
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- --email admin@example.com \
- --password-stdin \
- --data./data
+  --email admin@example.com \
+  --password-stdin \
+  --data ./data
 ```
 
 Use this native command only for local/offline bootstrap against a data directory. Normal administration belongs in `aouda`, the HTTP admin API, Studio, and future MCP tools.
@@ -1586,21 +1586,21 @@ After bootstrap, clients sign in to get a JWT:
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/signin \
- -H "Content-Type: application/json" \
- -d '{
- "email": "admin@example.com",
- "password": "ChangeMeNow!"
- }'
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@example.com",
+    "password": "ChangeMeNow!"
+  }'
 ```
 
 Response:
 
 ```json
 {
- "user": { "id": "...", "email": "admin@example.com" },
- "accessToken": "eyJhbG...",
- "refreshToken": "dGhpcyBp...",
- "expiresIn": 900
+  "user": { "id": "...", "email": "admin@example.com" },
+  "accessToken": "eyJhbG...",
+  "refreshToken": "dGhpcyBp...",
+  "expiresIn": 900
 }
 ```
 
@@ -1613,9 +1613,9 @@ Include the access token in the `Authorization` header on database requests:
 ```bash
 # Query a protected database
 curl http://localhost:5433/api/databases/myapp/query \
- -H "Authorization: Bearer eyJhbG..." \
- -H "Content-Type: application/json" \
- -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
+  -H "Authorization: Bearer eyJhbG..." \
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
 ```
 
 ### Step 4: Token Refresh
@@ -1624,8 +1624,8 @@ When the access token expires, use the refresh token to get a new one:
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/refresh \
- -H "Content-Type: application/json" \
- -d '{ "refreshToken": "dGhpcyBp..." }'
+  -H "Content-Type: application/json" \
+  -d '{ "refreshToken": "dGhpcyBp..." }'
 ```
 
 ### Step 5: Sign Out
@@ -1634,7 +1634,7 @@ Revoke the session and invalidate the refresh token:
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/signout \
- -H "Authorization: Bearer eyJhbG..."
+  -H "Authorization: Bearer eyJhbG..."
 ```
 
 ### Server Auth Endpoints Reference
@@ -1656,20 +1656,20 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 One credential: a key or a session. [Client integration](../auth/client-integration.md).
 
-####.NET Client
+#### .NET Client
 
 ```csharp
 using Aouda.Client;
 
 var client = new AoudaClient(new AoudaClientOptions
 {
- ServerUrl = "http://localhost:5000",
- DatabaseName = "myapp",
- Credential = AoudaCredential.Key(key),
+    ServerUrl = "http://localhost:5000",
+    DatabaseName = "myapp",
+    Credential = AoudaCredential.Key(key),
 });
 
-var who = await client.WhoAmIAsync;
-var rows = await client.GetTable("orders").Limit(10).ToListAsync;
+var who = await client.WhoAmIAsync();
+var rows = await client.GetTable("orders").Limit(10).ToListAsync();
 ```
 
 #### TypeScript Client
@@ -1678,13 +1678,13 @@ var rows = await client.GetTable("orders").Limit(10).ToListAsync;
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
- serverUrl: "http://localhost:5000",
- database: "myapp",
- apiKey: key,
+  serverUrl: "http://localhost:5000",
+  database: "myapp",
+  apiKey: key,
 });
 
-const who = await client.whoami;
-const rows = await client.table("orders").limit(10).execute;
+const who = await client.whoami();
+const rows = await client.table("orders").limit(10).execute();
 ```
 
 `apiKey` or `session`, never both.
@@ -1695,9 +1695,9 @@ A service is a principal with a key (`aouda_<id>_<secret>`). Mint a stored key o
 
 ```bash
 curl -s -X POST http://localhost:5000/api/auth/_serverauth/principals/ops/keys \
- -H "Authorization: Bearer $AOUDA_KEY" \
- -H "Content-Type: application/json" \
- -d '{ "name": "orders-api" }'
+  -H "Authorization: Bearer $AOUDA_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "orders-api" }'
 ```
 
 ```json
@@ -1735,8 +1735,8 @@ Not every database needs authentication. For cache-style usage, development, or 
 ```bash
 # Create database without auth — no authentication required for access
 curl -X POST http://localhost:5433/api/databases \
- -H "Content-Type: application/json" \
- -d '{ "name": "cache" }'
+  -H "Content-Type: application/json" \
+  -d '{ "name": "cache" }'
 ```
 
 While the server has no server auth database (before `/api/auth/setup`), clients can access this database without any credentials:
@@ -1747,17 +1747,17 @@ var client = new AoudaClient("http://localhost:5433", "cache");
 
 await client.GetTable("fx_quotes").InsertAsync(new Dictionary<string, object?>
 {
- ["key"] = "EURUSD.BID",
- ["value"] = 1.10234,
- ["timestamp"] = DateTime.UtcNow
+    ["key"] = "EURUSD.BID",
+    ["value"] = 1.10234,
+    ["timestamp"] = DateTime.UtcNow
 });
 ```
 
 ```typescript
 const client = createAoudaClient({
- serverUrl: "http://localhost:5433",
- database: "cache",
- // No auth property — open access
+  serverUrl: "http://localhost:5433",
+  database: "cache",
+  // No auth property — open access
 });
 ```
 
@@ -1793,16 +1793,16 @@ A single Aouda server can host many databases. Each database is independent — 
 ```bash
 # Create databases for different purposes
 curl -X POST http://localhost:5433/api/databases \
- -H "Content-Type: application/json" \
- -d '{ "name": "app_production", "durability": "strict" }'
+  -H "Content-Type: application/json" \
+  -d '{ "name": "app_production", "durability": "strict" }'
 
 curl -X POST http://localhost:5433/api/databases \
- -H "Content-Type: application/json" \
- -d '{ "name": "app_staging", "durability": "strict" }'
+  -H "Content-Type: application/json" \
+  -d '{ "name": "app_staging", "durability": "strict" }'
 
 curl -X POST http://localhost:5433/api/databases \
- -H "Content-Type: application/json" \
- -d '{ "name": "cache", "durability": "unlogged" }'
+  -H "Content-Type: application/json" \
+  -d '{ "name": "cache", "durability": "unlogged" }'
 
 # List all databases
 curl http://localhost:5433/api/databases
@@ -1812,14 +1812,14 @@ Or declare them in an optional `appsettings.json` for local dev (API-created dat
 
 ```json
 {
- "Aouda": {
- "DataPath": "./data",
- "Databases": {
- "production": { "Durability": "strict" },
- "staging": { "Durability": "strict" },
- "cache": { "Durability": "unlogged" }
- }
- }
+  "Aouda": {
+    "DataPath": "./data",
+    "Databases": {
+      "production": { "Durability": "strict" },
+      "staging": { "Durability": "strict" },
+      "cache": { "Durability": "unlogged" }
+    }
+  }
 }
 ```
 
@@ -1830,18 +1830,18 @@ Databases are stored in separate directories under the data path:
 ```
 ./data/
 ├── databases/
-│ ├── production/
-│ │ ├── catalog/
-│ │ ├── tables/
-│ │ └── wal/
-│ ├── staging/
-│ │ └──...
-│ └── cache/
-│ └──...
+│   ├── production/
+│   │   ├── catalog/
+│   │   ├── tables/
+│   │   └── wal/
+│   ├── staging/
+│   │   └── ...
+│   └── cache/
+│       └── ...
 ├── _serverauth/
-│ └──...
+│   └── ...
 └── _auth/
- └──...
+    └── ...
 ```
 
 ---
@@ -1862,9 +1862,9 @@ new TableOptions { StorageTemperaturePolicy = StorageTemperaturePolicy.ColdPrefe
 // Let the engine decide based on age and memory pressure
 new TableOptions
 {
- StorageTemperaturePolicy = StorageTemperaturePolicy.Auto,
- TimeColumn = "timestamp",
- HotRetention = TimeSpan.FromHours(24) // Keep last 24h hot
+    StorageTemperaturePolicy = StorageTemperaturePolicy.Auto,
+    TimeColumn = "timestamp",
+    HotRetention = TimeSpan.FromHours(24)  // Keep last 24h hot
 }
 ```
 
@@ -1874,13 +1874,13 @@ Control the total memory Aouda uses:
 
 ```json
 {
- "Aouda": {
- "Memory": {
- "MaxTotalRamBytes": 4294967296,
- "MaxHotBytes": 0,
- "MaxPageCacheBytes": 0
- }
- }
+  "Aouda": {
+    "Memory": {
+      "MaxTotalRamBytes": 4294967296,
+      "MaxHotBytes": 0,
+      "MaxPageCacheBytes": 0
+    }
+  }
 }
 ```
 
@@ -1891,7 +1891,7 @@ When `MaxHotBytes` and `MaxPageCacheBytes` are 0, the engine derives them from t
 ```csharp
 new TableOptions
 {
- HotByteBudget = 1073741824, // 1 GB max hot memory for this table
+    HotByteBudget = 1073741824,  // 1 GB max hot memory for this table
 }
 ```
 
@@ -1906,7 +1906,7 @@ Create lightweight branches for testing or migrations:
 await client.branches.create({ name: "feature-x", from: "main" });
 
 // List branches
-const branches = await client.branches.list;
+const branches = await client.branches.list();
 
 // Get branch info
 const branch = await client.branches.get("feature-x");
@@ -1974,7 +1974,7 @@ deployments is only which supervisor owns the process.
 
 | Mode | Command | Best for |
 |---|---|---|
-| **Development** | `aouda start --data-path./data --port 5433` | Demos, quick testing, local AI-agent workflows |
+| **Development** | `aouda start --data-path ./data --port 5433` | Demos, quick testing, local AI-agent workflows |
 | **Production service** | `aouda service install`, then systemd or the Windows SCM owns it | VMs, bare metal, on-premise |
 | **Container** | `docker run … ghcr.io/aoudadb/aouda-server` | Containerised environments, Kubernetes |
 
@@ -1987,18 +1987,18 @@ registration, where a missing subcommand installs cleanly and then fails to star
 
 ### 16.2 The artefact, and the one prerequisite
 
-⚠️ **Aouda ships framework-dependent.** The binaries do not bundle a.NET runtime, so **the.NET 10
+⚠️ **Aouda ships framework-dependent.** The binaries do not bundle a .NET runtime, so **the .NET 10
 ASP.NET Core runtime must be installed on the target machine** before anything can start. There is
-no self-contained artefact. (**BL-739, 0.2.0**: server 0.1.40 and earlier need the.NET 8 runtime instead.)
+no self-contained artefact. (**BL-739, 0.2.0**: server 0.1.40 and earlier need the .NET 8 runtime instead.)
 
-This is not a footnote. Without the runtime, the process fails in the.NET host loader — *before a
+This is not a footnote. Without the runtime, the process fails in the .NET host loader — *before a
 single line of Aouda code runs* — so there is no Aouda error message at all, and there cannot be.
 The install scripts check for it first and print what to run; `aouda doctor` reports the runtime's
 **version**, because by the time it can run, the runtime is present by definition.
 
 ```bash
-sudo apt-get install -y aspnetcore-runtime-10.0 # Debian / Ubuntu
-dotnet --list-runtimes | grep Microsoft.AspNetCore.App # verify
+sudo apt-get install -y aspnetcore-runtime-10.0          # Debian / Ubuntu
+dotnet --list-runtimes | grep Microsoft.AspNetCore.App  # verify
 ```
 
 **Platforms:** `linux-x64`, `linux-arm64`, `win-x64`, `win-arm64`.
@@ -2048,7 +2048,7 @@ sudo install -m 600 /dev/null /etc/aouda/admin-password
 sudo sh -c 'printf "%s" "$PASSWORD" > /etc/aouda/admin-password'
 
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- --password-file /etc/aouda/admin-password --data /var/lib/aouda
+  --password-file /etc/aouda/admin-password --data /var/lib/aouda
 ```
 
 ⚠️ A file readable beyond its owner is **refused** — on Linux/macOS, by mode (naming the mode it
@@ -2059,7 +2059,7 @@ found and the `chmod 600` to fix it); on Windows, by DACL (naming `icacls` if `E
 
 ```bash
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
- --email admin@example.com --password-stdin --data /var/lib/aouda
+  --email admin@example.com --password-stdin --data /var/lib/aouda
 ```
 
 ⚠️ `printf`, not `echo`: `echo` appends a newline. Aouda strips exactly one trailing newline and no
@@ -2071,7 +2071,7 @@ admin itself on its first start* (**BL-1464, 0.16.0**). In the declaration file:
 
 ```json
 { "version": 1, "server": { "principals": { "admin@example.com": { "roles": ["admin"],
- "credentials": { "password": { "file": "/etc/aouda/admin-password" } } } } } }
+    "credentials": { "password": { "file": "/etc/aouda/admin-password" } } } } } }
 ```
 
 and start the server with `--declaration <path>` (for the unit, `Environment=Aouda__Declaration=<path>`). The seed is applied only
@@ -2084,8 +2084,8 @@ when the principal is created, with a forced password change at the first sign-i
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/setup \
- -H "Content-Type: application/json" \
- --data-binary @- <<'JSON'
+  -H "Content-Type: application/json" \
+  --data-binary @- <<'JSON'
 {"email": "admin@example.com", "password": "REPLACE-ME"}
 JSON
 ```
@@ -2096,9 +2096,9 @@ Mint a stored key on the operator's principal, or derive one (`aouda keys derive
 
 ```bash
 curl -s -X POST http://localhost:5000/api/auth/_serverauth/principals/ops/keys \
- -H "Authorization: Bearer $AOUDA_KEY" \
- -H "Content-Type: application/json" \
- -d '{ "name": "orders-api" }'
+  -H "Authorization: Bearer $AOUDA_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "orders-api" }'
 ```
 
 Store the returned key in a secret manager immediately. Do not keep it in source control or in a plaintext install script.
@@ -2108,11 +2108,11 @@ Store the returned key in a secret manager immediately. Do not keep it in source
 One command, on either platform:
 
 ```bash
-sudo aouda service install # Linux: writes and starts a systemd unit
+sudo aouda service install                 # Linux: writes and starts a systemd unit
 ```
 
 ```powershell
-aouda service install # Windows, elevated: registers with the SCM
+aouda service install                      # Windows, elevated: registers with the SCM
 ```
 
 It writes a unit (or a service registration) carrying the resource limits and hardening that a
@@ -2129,8 +2129,8 @@ Day-to-day:
 
 ```bash
 aouda service status | start | stop | uninstall
-aouda status # running? ready? where? which version? what budget?
-aouda doctor # what is misconfigured on this machine
+aouda status        # running? ready? where? which version? what budget?
+aouda doctor        # what is misconfigured on this machine
 ```
 
 Both `status` and `doctor` take `--output json`, which every command accepts; commands with
@@ -2141,15 +2141,15 @@ registration, so it needs no arguments for a default install. Exit codes are lis
 ### 16.7 Scripted installs
 
 The install scripts remain the entry point for CI/CD and scripted deployment, and they now do
-exactly one thing the binary cannot: check for the.NET 10 runtime before running a binary that needs
+exactly one thing the binary cannot: check for the .NET 10 runtime before running a binary that needs
 it. Everything else they delegate.
 
 ```powershell
-.\scripts\install-aouda.ps1 -ArtifactDir.\win-x64 --port 5433
+.\scripts\install-aouda.ps1 -ArtifactDir .\win-x64 --port 5433
 ```
 
 ```bash
-sudo./scripts/install-aouda.sh --artifact-dir./linux-x64 --port 5433
+sudo ./scripts/install-aouda.sh --artifact-dir ./linux-x64 --port 5433
 ```
 
 Any option a script does not recognise is passed through to `aouda service install`.
@@ -2160,12 +2160,12 @@ Any option a script does not recognise is passed through to `aouda service insta
 
 | Operation | Embedded (.NET) | Server (.NET Client) | Server (TypeScript) |
 |-----------|----------------|---------------------|-------------------|
-| Open/connect | `AoudaEmbedded.OpenDatabaseAsync` | `new AoudaClient(url, db)` | `createAoudaClient({...})` |
+| Open/connect | `AoudaEmbedded.OpenDatabaseAsync()` | `new AoudaClient(url, db)` | `createAoudaClient({...})` |
 | Get table | `db.GetTable("t")` | `client.GetTable("t")` | `client.table("t")` |
 | Insert dict | `.InsertAsync(dict)` | `.InsertAsync(dict)` | `.insert({...})` |
 | Insert typed | `.InsertAsync(obj)` | `.InsertAsync(obj)` | `.insert({...})` |
 | Identity-insert | `.InsertAsync(..., identityInsert: true)` | `.InsertAsync(..., identityInsert: true)` | `.insert(row, { identityInsert: true })` |
 | Bulk-load identity-insert | `BulkLoadOptions { IdentityInsert = true }` | same | `.bulkLoad(rows, { identityInsert: true })` |
-| Query | `.Where(...).ToListAsync` | `.Where(...).ToListAsync` | `.where(...).execute` |
-| List tables | `db.Schema.ListTablesAsync` | `client.Schema.ListTablesAsync` | `client.tables.list` |
-| Dispose | `await db.DisposeAsync` | `await client.DisposeAsync` | `await client.disconnect` |
+| Query | `.Where(...).ToListAsync()` | `.Where(...).ToListAsync()` | `.where(...).execute()` |
+| List tables | `db.Schema.ListTablesAsync()` | `client.Schema.ListTablesAsync()` | `client.tables.list()` |
+| Dispose | `await db.DisposeAsync()` | `await client.DisposeAsync()` | `await client.disconnect()` |

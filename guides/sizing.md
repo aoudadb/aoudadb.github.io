@@ -8,7 +8,7 @@ parent: "Guides"
 
 Aouda treats `MaxTotalRamBytes` as a **process RSS ceiling**, not an advisory subtotal. Leave it unset and the server derives it from detected host (or cgroup) memory: **70%** when detection found a real cgroup isolation boundary, **40%** when it fell back to physical RAM (a fallback result proves nothing about how much of the host Aouda actually owns). Set it explicitly when you need a pinned number. Resize live from Studio (Settings → Server), `PATCH /admin/config`, or `aouda budget`. See the [Defaults Reference](defaults-reference.md) for every downstream number this derives (governed budget, per-database shares, the L2 cache ceiling, the bulk-load ingest buffer budget) worked at several host sizes.
 
-> **The ceiling holds for the whole process (BL-983, 0.4.0).** It used to hold for the.NET heap only, with a fixed reserve
+> **The ceiling holds for the whole process (BL-983, 0.4.0).** It used to hold for the .NET heap only, with a fixed reserve
 > of about 6 % for the memory outside it (the runtime's native allocations, glibc's per-thread malloc arenas, JIT code, thread
 > stacks) — measured at 150–200 MiB under a bulk load with materialized queries, so the process could sit 2–5 % above
 > `MaxTotalRamBytes` and a container limit equal to it killed the server. The server now measures that memory every 10 s (anonymous
@@ -53,8 +53,8 @@ Set a limit: Kubernetes `resources.limits.cpu`, `docker --cpus`, or `Aouda:Cpu:C
 
 ```
 CPU budget derivation: machine=28, quota=none, configured=none, schedulable=28,
- source=ProcessorCount — no CPU quota found; sizing from the machine's cores.
- Set a CPU limit or Aouda:Cpu:ConfiguredCores if this process is co-tenanted.
+  source=ProcessorCount — no CPU quota found; sizing from the machine's cores.
+  Set a CPU limit or Aouda:Cpu:ConfiguredCores if this process is co-tenanted.
 ```
 
 `GET /api/server/memory` carries the same facts under `cpu`, with `source` naming where `schedulableCores` came from: `Configured`, `CgroupV2`, `CgroupV1` or `ProcessorCount`. **`source` is the field to read** — a core count alone cannot tell a real 8-core allocation from 8 cores you are sharing with twenty-eight other containers.
@@ -83,7 +83,7 @@ run their own background loops at full width; nothing needs configuring.
 
 ### Garbage collection and the thread pool (**ColumnarCore S14, 0.2.0**; **LoadScan, 0.5.0**)
 
-The server runs.NET's **Server GC with DATAS** (dynamic adaptation) and a heap hard limit of 85 % of the memory it may
+The server runs .NET's **Server GC with DATAS** (dynamic adaptation) and a heap hard limit of 85 % of the memory it may
 use, and (**LoadScan, 0.5.0**) its **thread pool's spin limit is 10** (.NET's default is 70): an idle worker spins less before
 it sleeps. All of it is in the server's `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores, the spin limit cut the
 server's steady bulk load by 6–11 % (about 3.15 to 2.8–3.0 CPU-s per million rows) and, in four of five measurements, a fresh
@@ -113,13 +113,13 @@ off** was cheaper still on the load (about 2.4 CPU-s per million rows with the s
 process can see — peak memory 41–61 % higher on four cores, and on a host with many cores and no CPU limit, one heap per core of
 the host — so DATAS stays on.
 
-To override, use.NET's own variables, which take precedence over the `runtimeconfig`: `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit`
-sets the spin limit (the value is hexadecimal: `46` is.NET's 70), `DOTNET_GCDynamicAdaptationMode=0` turns DATAS off — on a host
+To override, use .NET's own variables, which take precedence over the `runtimeconfig`: `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit`
+sets the spin limit (the value is hexadecimal: `46` is .NET's 70), `DOTNET_GCDynamicAdaptationMode=0` turns DATAS off — on a host
 whose CPU limit is set and where memory is plentiful. The startup line `Runtime GC configuration: serverGC=…,
 dynamicAdaptation(DATAS)=…` says what is in force; before LoadScan it read `False` whenever DATAS came from the `runtimeconfig`.
 
 **If you embed the engine in your own process** (the embedded package, or `AoudaEngine` directly), your application's
-GC settings apply, and.NET's default is Workstation GC. Turn Server GC on (`<ServerGarbageCollection>true</ServerGarbageCollection>`
+GC settings apply, and .NET's default is Workstation GC. Turn Server GC on (`<ServerGarbageCollection>true</ServerGarbageCollection>`
 in the project, or `DOTNET_gcServer=1`): an in-process insert of 2,000-row batches measured 1.8 CPU-s per million rows
 with it and 2.5 without, with GC pauses at 0 % instead of 4 %.
 
@@ -163,31 +163,31 @@ queries fell ~34 s behind during the burst. (**WorkloadCore S09, 0.3.0**) Both r
 inside its own commit, which is removed (next bullet).
 
 - **The queries follow the insert, off its commit (**WorkloadCore S09, 0.3.0**).** An insert hands its change batch to its
- queries' maintainers at the commit and returns; they apply it in the background, so right after an insert its
- queries may be a moment behind (read with its consistency token to wait for them). A rate above what the queries
- can keep up with shows up as lag and as a maintenance backlog charged on the memory budget; past the backlog's
- bound (64 MiB an update lane) a query is marked stale and rebuilt. In 0.2.0 (**ColumnarMerge S11**) an insert
- maintained its table's aggregates and latest / first-per-key queries inside its own commit: they were current when
- it returned, and a rate above what the writer plus its queries could do showed up as a lower achieved rate. Watch
- `stalenessMs` on `GET /api/databases/{db}/materialized-queries/{name}` — how old the oldest change the query does
- not yet reflect is (**ColumnarMerge S01, 0.2.0**); `currentLag` is how long it has been behind without a
- break, which under a steady stream grows however promptly each commit is applied.
+  queries' maintainers at the commit and returns; they apply it in the background, so right after an insert its
+  queries may be a moment behind (read with its consistency token to wait for them). A rate above what the queries
+  can keep up with shows up as lag and as a maintenance backlog charged on the memory budget; past the backlog's
+  bound (64 MiB an update lane) a query is marked stale and rebuilt. In 0.2.0 (**ColumnarMerge S11**) an insert
+  maintained its table's aggregates and latest / first-per-key queries inside its own commit: they were current when
+  it returned, and a rate above what the writer plus its queries could do showed up as a lower achieved rate. Watch
+  `stalenessMs` on `GET /api/databases/{db}/materialized-queries/{name}` — how old the oldest change the query does
+  not yet reflect is (**ColumnarMerge S01, 0.2.0**); `currentLag` is how long it has been behind without a
+  break, which under a steady stream grows however promptly each commit is applied.
 - **Batch.** 1,000–5,000 rows per call. Each commit is maintained as one batch per query, so small
- commits pay the per-commit cost many times over.
+  commits pay the per-commit cost many times over.
 - **Fewer, narrower queries are cheaper than a bigger machine.** Cost is per query per commit; a query
- nobody reads still costs its share.
+  nobody reads still costs its share.
 - **A load, not a stream, is better done as a bulk load.** Bulk loads fold their rows into the queries
- in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
- rows/s end to end *with the queries current*. (**WorkloadCore S10, 0.3.0**) An `Auto` load's queries are brought
- current by the table's pass, started at the commit — the load itself does no materialized-query work while it
- streams — and `:commit` waits for them up to `mqWaitMs` (30 s by default in 0.3.0; **no wait — `0` — by default from the
- 0.4.0**, LoadSpeed M.2); in 0.2.0 (**ColumnarCore S12**) the load
- folded them while it wrote its segments and returned with them written. A query the pass cannot fold or replay is
- rebuilt by a background job after the pass (**WorkloadCore S17, 0.3.0**).
+  in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
+  rows/s end to end *with the queries current*. (**WorkloadCore S10, 0.3.0**) An `Auto` load's queries are brought
+  current by the table's pass, started at the commit — the load itself does no materialized-query work while it
+  streams — and `:commit` waits for them up to `mqWaitMs` (30 s by default in 0.3.0; **no wait — `0` — by default from the
+  0.4.0**, LoadSpeed M.2); in 0.2.0 (**ColumnarCore S12**) the load
+  folded them while it wrote its segments and returned with them written. A query the pass cannot fold or replay is
+  rebuilt by a background job after the pass (**WorkloadCore S17, 0.3.0**).
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
- uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
- against each segment once. (**ColumnarMerge S02, 0.2.0**) An id the engine allocates is not
- probed at all: it is unique by construction.
+  uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
+  against each segment once. (**ColumnarMerge S02, 0.2.0**) An id the engine allocates is not
+  probed at all: it is unique by construction.
 
 ### Auto-increment ids on time series (**ColumnarMerge S02, 0.2.0**)
 
@@ -249,10 +249,10 @@ its **raw payload plus 32 bytes**, and a null costs 8:
 | Cell | Bytes charged to the memory budget |
 |---|---|
 | a null (**BL-035, 0.9.0**) | 8 |
-| `Double`, `Int64` of *n* elements (**BL-035, 0.9.0**) | 8 + 24 + 8*n* |
-| `Float32`, `Int32` of *n* (**BL-035, 0.9.0**) | 8 + 24 + 4*n* |
-| `Byte` of *n* (**BL-035, 0.9.0**) | 8 + 24 + *n* |
-| `String` of *n* elements, *u* bytes of UTF-8 in all (**BL-035, 0.9.0**) | 8 + 24 + 4 + 4*n* + *u* |
+| `Double[]`, `Int64[]` of *n* elements (**BL-035, 0.9.0**) | 8 + 24 + 8*n* |
+| `Float32[]`, `Int32[]` of *n* (**BL-035, 0.9.0**) | 8 + 24 + 4*n* |
+| `Byte[]` of *n* (**BL-035, 0.9.0**) | 8 + 24 + *n* |
+| `String[]` of *n* elements, *u* bytes of UTF-8 in all (**BL-035, 0.9.0**) | 8 + 24 + 4 + 4*n* + *u* |
 
 There is no validity bitmap and no compression in these tiers: **size memory for the raw bytes.** A row of ten array cells costs
 their raw bytes plus 320. A curve table whose rows hold about 6.9 KB of arrays (the reference workload below) charges about
@@ -279,14 +279,14 @@ hold them:
 | `FitMarket`, 100 `Double` rounded to 1e-6 (**BL-035, 0.9.0**) | 121.7 | 1,072.3 |
 | `StubDf`, 50 `Double` (**BL-035, 0.9.0**) | 219.0 | 540.3 |
 | `FitDistanceBp`, 100 `Float32` (**BL-035, 0.9.0**) | 400.3 | 540.3 |
-| `NodeDays`, `FitIds` (`Int32`), `FitBandBp` (`Float32`), `FitGrade` (`Byte`), constant or tiny (**BL-035, 0.9.0**) | 5.0 · 3.1 · 1.9 · 1.0 | 11.4 · 6.1 · 6.1 · 1.4 |
+| `NodeDays`, `FitIds` (`Int32[]`), `FitBandBp` (`Float32[]`), `FitGrade` (`Byte[]`), constant or tiny (**BL-035, 0.9.0**) | 5.0 · 3.1 · 1.9 · 1.0 | 11.4 · 6.1 · 6.1 · 1.4 |
 
 These are the numbers of one generator's data. Your arrays compress as well as they resemble it, and not better than their raw
 size by more than the repetition they hold.
 
 **A cold page is cut by bytes as well as rows.** A table with an array column ends a page before the row that would take any array
 column past 1 MiB of array payload (a constant, not a setting), otherwise at 8,192 rows, and every column of the table is cut at
-the same rows. A column of 400-element `Double` values (3.2 KB each) gets pages of about 300 rows; a numeric value is at most 512 KiB, so the largest fit two a page, and a `String` of about 1 MiB holds one value a page; and a table whose arrays are small keeps the 8,192-row pages. Wide array rows make short pages for every column of the table.
+the same rows. A column of 400-element `Double[]` values (3.2 KB each) gets pages of about 300 rows; a numeric value is at most 512 KiB, so the largest fit two a page, and a `String[]` of about 1 MiB holds one value a page; and a table whose arrays are small keeps the 8,192-row pages. Wide array rows make short pages for every column of the table.
 
 **Retention and merges** treat an array table like any other: retention drops whole segments, and a compaction or merge carries
 the values bit for bit.
@@ -504,14 +504,14 @@ hard line over `Aouda:Memory:IngestStallHorizon`, 60 s). Ingest then settles at 
 drains, between the lines, instead of running into the refusal or the rebuild behind the hard line.
 
 - **The wait happens before the write takes any lock**, so a paced write never holds up another writer
- of the same table. (The WAL's old 85 % throttle was a fixed delay *inside* the commit.)
+  of the same table. (The WAL's old 85 % throttle was a fixed delay *inside* the commit.)
 - **One write waits at most 10 s** and is never refused by the curve.
 - **An `UPDATE` or `DELETE` is not paced** (**WorkloadCore group 5 review, 0.3.0**) — the curve does not see a statement's size before
- it scans, so a very large update still runs into the WAL's refusal line rather than slowing (BL-904).
+  it scans, so a very large update still runs into the WAL's refusal line rather than slowing (BL-904).
 - **A write of 64 KiB or less is never paced** — the small writes and auth requests the held reserve
- keeps admitted.
+  keeps admitted.
 - **Every batch of a bulk load's `:append` is paced whatever its size** (**WorkloadCore group 5 review, 0.3.0**): the 64 KiB exemption is
- for single small writes, and a load sent as small frames was never slowed.
+  for single small writes, and a load sent as small frames was never slowed.
 - **Maintenance, flushes and rebuilds are never paced**: they are what clears the debt.
 
 `GET /api/server/memory` shows each database's curve under `ingestStall`: `engaged`, `pressure` (0 below
@@ -533,9 +533,9 @@ checkpoint is refused). The cap is not configurable; it is derived:
 
 - **At open:** a tenth of the volume's free space, at least `min(256 MB, free / 4)` and at most 4 GiB.
 - **After a reclaim** (at most once a minute): the larger of that bootstrap — now over the free space **plus the WAL's own
- files** — and **twice the largest working set** the log has held when retention reclaimed it, never more than half that
- space. A change of more than 5 % is applied, with `T25`–`T27`, and logged. The segment size (`T24`) and the slot keep
- (`MaxSlotWalKeepBytes`, `T28`) stay as they were opened.
+  files** — and **twice the largest working set** the log has held when retention reclaimed it, never more than half that
+  space. A change of more than 5 % is applied, with `T25`–`T27`, and logged. The segment size (`T24`) and the slot keep
+  (`MaxSlotWalKeepBytes`, `T28`) stay as they were opened.
 
 The basis: in steady state the log grows by what is appended between two reclaims. A working set above `T25` forces a
 checkpoint every cycle, and one near `T27` refuses writes every cycle **with the disk free** (a lab ran 2 h 52 min of refused
@@ -602,8 +602,8 @@ is exhausted — never because another database filled the process. Declare the 
 
 ```json
 {
- "storageTemperature": "HotOnly",
- "residency": { "targetMemoryBytes": 268435456, "hotOnlyBackstop": "RefuseWrites" }
+  "storageTemperature": "HotOnly",
+  "residency": { "targetMemoryBytes": 268435456, "hotOnlyBackstop": "RefuseWrites" }
 }
 ```
 
@@ -696,12 +696,12 @@ database's budget as before.
 
 ```json
 "candles_bid_1m": {
- "type": "aggregate",
- "sourceTable": "quotes",
- "groupBy": [ { "column": "ticker" },
- { "column": "time", "function": "TruncateToMinute", "outputName": "time" } ],
- "aggregates": [ /* … */ ],
- "storage": { "storageTemperature": "ColdPreferred" }
+  "type": "aggregate",
+  "sourceTable": "quotes",
+  "groupBy": [ { "column": "ticker" },
+               { "column": "time", "function": "TruncateToMinute", "outputName": "time" } ],
+  "aggregates": [ /* … */ ],
+  "storage": { "storageTemperature": "ColdPreferred" }
 }
 ```
 
@@ -736,20 +736,20 @@ decide where what it stores lives. Unlike the duration above, a window needs no 
 that arrives in a bucket folds into that bucket's one group.
 
 - **Groups ≈ series × buckets in `keep`**, plus at most about one time slice (a quarter of `keep`) and one horizon tick. It does not
- grow with history. On the soak's `scale` shape, minute candles over 60 days are 26.3 M groups unwindowed and **2,098,324** in
- the last seven days — what a `7d` window holds, after ten years as after one week.
+  grow with history. On the soak's `scale` shape, minute candles over 60 days are 26.3 M groups unwindowed and **2,098,324** in
+  the last seven days — what a `7d` window holds, after ten years as after one week.
 - **Measured at steady state** (in process, the clock moved through several windows): **1.140 ×** the groups in `keep` for `7d`
- minute candles with day slices, **1.028 ×** for a `1d` window with hour slices — and **3.1 ×**, growing, with expiry taken out.
+  minute candles with day slices, **1.028 ×** for a `1d` window with hour slices — and **3.1 ×**, growing, with expiry taken out.
 - **Disk:** one segment per time slice, so more, smaller segments than an unwindowed result; on the Derive-shaped runs their
- metadata was 1.37 % (`lab`) and 1.03 % (`scale`, 2 GB) of the column bytes. A slice that falls behind the horizon leaves whole,
- with nothing rewritten.
+  metadata was 1.37 % (`lab`) and 1.03 % (`scale`, 2 GB) of the column bytes. A slice that falls behind the horizon leaves whole,
+  with nothing rewritten.
 - **A rebuild folds only the window** — it reads its source from the horizon — so its grant ([§ rebuilds](materialized.md#211b-what-a-rebuild-costs-and-what-bounds-it))
- is sized by the window's groups, not the history's.
+  is sized by the window's groups, not the history's.
 - **A read below the horizon is charged to the read's budget**, as its computed groups grow. A part that fits half of what the read
- may still grow to is folded at once; a larger one in bucket-aligned pieces, one held at a time, as a stored read holds one
- segment. A single bucket that alone outgrows the read-path ceiling is refused, as a stored read of that size is —
- `400 STATEMENT_TOO_LARGE` with no `Retry-After`; it was `503` + `Retry-After`, which no retry could satisfy. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
- history keyset-paged 10,000 at a time needed 8.5 MB against a 512 MB server's 4 MB read ceiling, and was refused on every retry.
+  may still grow to is folded at once; a larger one in bucket-aligned pieces, one held at a time, as a stored read holds one
+  segment. A single bucket that alone outgrows the read-path ceiling is refused, as a stored read of that size is —
+  `400 STATEMENT_TOO_LARGE` with no `Retry-After`; it was `503` + `Retry-After`, which no retry could satisfy. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
+  history keyset-paged 10,000 at a time needed 8.5 MB against a 512 MB server's 4 MB read ceiling, and was refused on every retry.
 
 ## Formula tables: what they cost (**ADR 0072, 0.14.0**) {#formula-tables-what-they-cost}
 
@@ -757,18 +757,18 @@ A [formula](formulas.md) is a value in a row of your own table, so a formula tab
 into the hot tier as any updated row does, and leaves it like any other.
 
 - **Cells.** At most 100 000 formula cells per database. Every formula cell has an entry in an in-memory index (its parsed formula and the
- cells it reads), built when the database opens; an input row has none.
+  cells it reads), built when the database opens; an input row has none.
 - **Per write.** A write to a table with an Expression column is checked against the rows it writes (a formula row's value is refused
- there); after it commits, the index is updated for each written row. A write that sets a formula or changes a formula table's key is
- validated against the whole graph and serialized database-wide; an input edit is not serialized. A bulk load into a formula table takes
- it only at its `:commit`.
+  there); after it commits, the index is updated for each written row. A write that sets a formula or changes a formula table's key is
+  validated against the whole graph and serialized database-wide; an input edit is not serialized. A bulk load into a formula table takes
+  it only at its `:commit`.
 - **Per commit.** A commit to a row some formula reads wakes those formulas and everything downstream of them, in one pass, each once; only
- a changed value is written, as an ordinary update of that one column. There is no cost limiter.
+  a changed value is written, as an ordinary update of that one column. There is no cost limiter.
 - **A cold row.** A formula reads a value by its row's primary key, from any tier. When the row's copy is cold, or the table holds vectors,
- the read is a counted scan of that one key rather than an index probe.
+  the read is a counted scan of that one key rather than an index probe.
 - **Restart.** Every open rebuilds the index from the formula rows (a row group whose statistics show no formula is skipped) and
- recomputes every formula. At the cap — 100 000 formula cells in one table — the open took 7 s and 21 s in two runs on an 8-vCPU machine,
- the recompute after it about 5 s more. A token read waits for it.
+  recomputes every formula. At the cap — 100 000 formula cells in one table — the open took 7 s and 21 s in two runs on an 8-vCPU machine,
+  the recompute after it about 5 s more. A token read waits for it.
 
 ## Memory is granted before work starts, and small writes have a reserve (**WorkloadCore S06, 0.3.0**)
 
@@ -910,7 +910,7 @@ one startup line:
 
 ```
 Memory ladder: admission=on, stall curve (T43=80 %, T44=00:01:00, T45=00:00:30),
- processHotCeiling=on, flushAlwaysHotFirst=off
+  processHotCeiling=on, flushAlwaysHotFirst=off
 ```
 
 (**WorkloadCore S17, 0.3.0**: `rung0=…` and `T42` are gone with rung 0, and the stall curve is always on, so it has
