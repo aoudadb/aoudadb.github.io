@@ -1699,7 +1699,18 @@ is empty when `ready`. The single `reason` string is gone, so a caller that prin
 const status = await client.admin.replication.status();
 const topology = await client.admin.replication.topology();
 const coverage = await client.admin.replication.coverage();
+
+// (BL-1477, next train) Which secondary is behind, per database: ask the primary. The topology's members carry no lag.
+for (const member of status.members) {
+  for (const [db, entry] of Object.entries(member.perDatabaseStatus)) {
+    console.log(member.address, db, entry.lagBytes ?? 'unknown');
+  }
+}
 ```
+
+(**BL-1477, next train**) `status().members` is the topology's member list with `perDatabaseStatus` and `subscriptions`; it needs `manage`
+on the server. `lagBytes` is `null` when the server asked does not know the primary's position, and a member it has not heard from has an
+empty `perDatabaseStatus`: both are unknown, not "no lag". `topology().members` has neither field.
 
 ### Cluster Management (P16)
 
@@ -1912,18 +1923,20 @@ const status = await client.materializedQueries.status('active_users_summary');
 // status.state: 0=Building, 1=Ready, 2=Rebuilding, 3=Error
 // status.rowCount, status.lastUpdatedUtc, status.errorMessage
 
-// ⚠️ state === Ready means READABLE, not CURRENT. Read these three for currency:
-//   status.isStale      — true when the result is readable but not up to date
-//   status.staleReason  — why, in a sentence; null unless isStale
-//   status.currentLag   — how long it has BEEN behind; null when it is not behind
-// A caught-up idle query reports currentLag === null forever, not a growing number, so
-// null means "current", never "unknown". See reference/http-api.md, "Is this query
-// current?". Polling state alone is how twelve of thirteen queries on one production
+// ⚠️ state === Ready means READABLE, not CURRENT. Read these for currency:
+//   status.current       — the server's own rule, for a reader starting now
+//   status.isStale       — true when the result is readable but not up to date; omitted otherwise
+//   status.staleReason   — why, in a sentence; there exactly when isStale is
+//   status.currentLagMs  — how long it has BEEN behind, in whole milliseconds; null exactly when isStale
+//                          is not true (BL-1477, next train)
+// A caught-up idle query reports currentLagMs === null forever, not a growing number, so
+// null on a Ready query means "current", never "unknown" (one that is Building, Rebuilding or in
+// Error says so in state). See reference/http-api.md, "Is this query current?". Polling state alone is how twelve of thirteen queries on one production
 // deployment reported Ready while holding 1.7 % of their source (BL-642, 0.1.38).
 //
 // For "how fresh is it", read status.stalenessMs (server 0.2.0, @aouda/client 0.2.0): the age in
 // milliseconds of the oldest change the result does not reflect yet; absent when current.
-// currentLag is not that number — under a steady insert stream it grows for as long as the
+// currentLagMs is not that number — under a steady insert stream it grows for as long as the
 // stream runs, however promptly each commit is applied.
 
 // Query results (returns all rows; options reserved for future use)

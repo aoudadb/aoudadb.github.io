@@ -170,7 +170,7 @@ inside its own commit, which is removed (next bullet).
   maintained its table's aggregates and latest / first-per-key queries inside its own commit: they were current when
   it returned, and a rate above what the writer plus its queries could do showed up as a lower achieved rate. Watch
   `stalenessMs` on `GET /api/databases/{db}/materialized-queries/{name}` — how old the oldest change the query does
-  not yet reflect is (**ColumnarMerge S01, 0.2.0**); `currentLag` is how long it has been behind without a
+  not yet reflect is (**ColumnarMerge S01, 0.2.0**); `currentLagMs` (**BL-1477, next train**) is how long it has been behind without a
   break, which under a steady stream grows however promptly each commit is applied.
 - **Batch.** 1,000–5,000 rows per call. Each commit is maintained as one batch per query, so small
   commits pay the per-commit cost many times over.

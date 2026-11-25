@@ -1948,17 +1948,14 @@ The list route returns an array of the same object.
 {
   "name": "EquityTradeOhlc1M",
   "sourceTable": "EquityTrade",
-  "type": 1,
+  "type": 3,
   "state": 1,
   "rowCount": 41200,
   "createdUtc": "2026-09-19T08:14:02.0000000Z",
   "lastUpdatedUtc": "2026-09-19T09:41:55.0000000Z",
-  "currentLag": "00:00:00.2500000",
+  "currentLagMs": null,
   "rebuildProgress": null,
   "errorMessage": null,
-  "isStale": false,
-  "staleReason": null,
-  "current": true,
   "amplification": {
     "sourceRowsIngested": 1000000,
     "keysPlanned": 1000000,
@@ -1975,19 +1972,24 @@ The list route returns an array of the same object.
     "readAmplification": 4.0,
     "isEmpty": false
   },
-  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
+  "current": true,
+  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213",
+  "currency": "current"
 }
 ```
 
+That is a query that is current. One that is behind also has `isStale`, `staleReason` and `stalenessMs`; a member the table below calls
+omitted is not sent as `null` or `false`.
+
 | Field | Type | Description |
 |---|---|---|
-| `type` | integer | Raw `MaterializedQueryType` enum value. **No `JsonStringEnumConverter` is registered anywhere in the server**, so this is an integer on every enum on every route. |
+| `type` | integer | Raw `MaterializedQueryType` enum value (`1` latestPerKey, `2` firstPerKey, `3` aggregate, `4` filter, `5` topNPerGroup). **No `JsonStringEnumConverter` is registered anywhere in the server**, so this is an integer on every enum on every route. |
 | `state` | integer | Raw `MaterializedQueryState` enum value (`Building`, `Ready`, `Rebuilding`, `Error`). |
 | `rowCount` | integer | Rows currently in the result table. |
-| `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
+| `currentLagMs` | integer? | (**BL-1477, next train**) **How long this query has been behind without a break**, in whole milliseconds; `null` exactly when `isStale` is not `true`. Always sent. It takes the place of `currentLag`, a .NET `TimeSpan` string (`"00:01:30"`), which is **removed**. See the honesty note below (**BL-642, 0.1.38**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
-| `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
-| `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (an `"auto"` load folded by the pass — held while its table goes on loading, **LoadSpeed M.3, 0.4.0**; **WorkloadCore S10, 0.3.0**: every load but a `"skip"` one; until the 0.4.0 also a `"deferred"` load). `0` when none; absent on older servers. While it is above zero the query is also `isStale` (behind) and not `current`, with a `staleReason` like "2 bulk load(s) into its source are pending the table's pass…"; it is owed work, not holed, so `staleOnly` does not select it and `currentLag` counts from the oldest owed load's commit (**WorkloadCore S10**). `:refresh` of the query runs the table's pass at once. |
+| `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current**, and why. **Omitted** when it is current. See below. |
+| `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (an `"auto"` load folded by the pass — held while its table goes on loading, **LoadSpeed M.3, 0.4.0**; **WorkloadCore S10, 0.3.0**: every load but a `"skip"` one; until the 0.4.0 also a `"deferred"` load). `0` when none; absent on older servers. While it is above zero the query is also `isStale` (behind) and not `current`, with a `staleReason` like "2 bulk load(s) into its source are pending the table's pass…"; it is owed work, not holed, so `staleOnly` does not select it and `currentLagMs` counts from the oldest owed load's commit (**WorkloadCore S10**). `:refresh` of the query runs the table's pass at once. |
 | `stalenessMs` | integer? | (**ColumnarMerge S01, 0.2.0**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
 | `current` | boolean | (**WorkloadCore, 0.3.0**) **Whether the result is current for a reader starting now** — the one rule the server uses to route a source-table read to this result and to decide whether a consistency token is covered by it: no lost update (`isStale` for that reason), nothing queued or in flight for it or for a query it is built on (an incremental update, a bulk-load publish, a load past its commit point), no commit to its source still being routed, and its frontier (`token`) at the WAL head. `false` on older servers. |
 | `frontierLagBytes` | integer? | (**WorkloadCore, 0.3.0**) How many WAL bytes the query's frontier is behind the head. **Omitted** when it is at the head. A size, not a position: positions are only ever on the wire as tokens. |
@@ -1997,7 +1999,7 @@ The list route returns an array of the same object.
 | `horizon` | string? | (**Horizon, 0.5.0**) The result's current horizon (UTC): groups at or after it are stored, older ones are computed from the source on read. It follows the server's clock minus `keep` on the query's bucket, is persisted before any reader sees it, and never moves back. Absent without a window. |
 | `currency` | string | (**Lead S27b, 0.6.0**) The query's currency as declared: `"current"` or `"rebuild"`. Always present. A `rebuild` query a change has left behind reads `current: false` and `isStale: true`, with a `staleReason` that names its currency, until its rebuild publishes; a `:commit` that waits for its queries (`mqWaitMs`) does not wait for it. |
 
-#### ⚠️ Is this query current? Read `isStale`, `staleReason` and `currentLag` — not `state`
+#### ⚠️ Is this query current? Read `current`, `isStale`, `staleReason` and `currentLagMs` — not `state`
 
 **`state: Ready` means the query is *readable*. It does not mean it is *current*.** The two are
 deliberately separate, and reading `state` alone is the mistake this section exists to prevent.
@@ -2010,40 +2012,43 @@ otherwise the table answers, with the same rows as ever. Its currency is reporte
 
 | Field | Meaning |
 |---|---|
-| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. (**WorkloadCore S09, 0.3.0**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). (**BL-989, 0.4.0**) A query built on another query's result is also `isStale` while that query is behind — its `staleReason` names it ("The query it is built on, 'x', is behind…") and its own `pendingDeferredJobs` stays `0`; before, it read `isStale: false` with `current: false`. |
-| `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
-| `currentLag` | How long the query has **been behind** without a break. `null` when it is not behind — including for a caught-up query that has been idle for days. |
-| `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is. Omitted when current. |
-| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. (A query behind only because the query it is built on is behind reports `isStale` too since **BL-989, 0.4.0**.) |
+| `isStale` | `true` when the result is readable and **not current**: work is queued and unfinished, a bulk load into its source is owed, the query it is built on is behind, an update was lost before it reached the maintainer or a maintenance apply failed part-way, or its `currency` is `rebuild` and a source has changed. **Omitted when `false`.** (**WorkloadCore S09, 0.3.0**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). (**BL-989, 0.4.0**) A query built on another query's result is also `isStale` while that query is behind — its `staleReason` names it ("The query it is built on, 'x', is behind…") and its own `pendingDeferredJobs` stays `0`; before, it read `isStale: false` with `current: false`. |
+| `staleReason` | Why, in a sentence meant for a human. Present exactly when `isStale` is. |
+| `currentLagMs` | (**BL-1477, next train**) How long the query has **been behind** without a break, in whole milliseconds. **`null` exactly when `isStale` is not `true`** — including for a caught-up query that has been idle for days; `0` is "behind, for less than a millisecond", never "current". A query that is stale by its mark (a `"skip"` load, a lost update, currency `rebuild`) has a lag too: how long ago it was marked. Until this release it read `isStale: true` beside a `null` lag. A query built on another query has at least that one's lag while that one is behind, also when it has queued work of its own: the period does not restart each time the query it is built on hands it an update. |
+| `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is: the freshness number. Omitted when `0`. (**BL-1477, next train**) A change the query it is built on still owes counts whether or not this query has queued work of its own. |
+| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, while a bulk load into any table of the database is accepted and not visible yet, or while the query is not `Ready`. (A query behind only because the query it is built on is behind reports `isStale` too since **BL-989, 0.4.0**.) |
 
-⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLag`.** Under a steady stream of
-inserts that never lets a query's queue empty, `currentLag` grows for as long as the stream runs — it is
+These describe a *readable* result. A query that is `Building`, `Rebuilding` or `Error` says so in `state` and `errorMessage`; its
+`isStale` may be absent, which is not a claim that it can be read.
+
+⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLagMs`.** Under a steady stream of
+inserts that never lets a query's queue empty, `currentLagMs` grows for as long as the stream runs — it is
 how long the query has been continuously behind — even when every insert is applied within a few hundred
 milliseconds. `stalenessMs` stays at the age of the oldest change still owed. A query ingesting 50,000
-rows a second and applying each batch promptly reports `currentLag` in minutes and `stalenessMs` in the
+rows a second and applying each batch promptly reports a `currentLagMs` of minutes and a `stalenessMs` in the
 low hundreds.
 
-⚠️ **`currentLag` is not "time since the result was last updated".** A caught-up idle query reports
-`null`, not a number that grows forever. If you are computing freshness, `null` means *current*, not
-*unknown*.
+⚠️ **`currentLagMs` is not "time since the result was last updated".** A caught-up idle query reports
+`null`, not a number that grows forever. If you are computing freshness of a `Ready` query, `null` means *current*,
+not *unknown*.
 
 **This matters because the previous behaviour was silence (BL-642, 0.1.38).** Before it,
-`currentLag` was `null` on every response — the field existed on the wire and was never populated.
+the lag was `null` on every response — the field existed on the wire and was never populated.
 On one production deployment, **twelve of thirteen materialized queries reported `state: Ready`,
-`errorMessage: null`, `currentLag: null` while holding 1.7 % of their source rows.** Every consumer
+`errorMessage: null` and a `null` lag while holding 1.7 % of their source rows.** Every consumer
 read stale data as current. A client that polls `state` and nothing else will still do so.
 
 **Recommended check:**
 
 ```jsonc
-// current (WorkloadCore, 0.3.0: read `current`; older servers: `isStale: false` and `currentLag: null`)
-{ "state": 1, "isStale": false, "currentLag": null, "current": true }
+// current: read `current` (isStale and staleReason are omitted)
+{ "state": 1, "currentLagMs": null, "current": true }
 
 // readable, but behind — act on this (WorkloadCore S10, 0.3.0: a load's queries are owed the table's pass;
 // before, this read "3 bulk-load publish(es) for this query have been queued and have not finished. …")
 { "state": 1, "isStale": true, "pendingDeferredJobs": 3, "current": false,
   "staleReason": "3 bulk load(s) into its source are pending the table's pass. The result is readable but is not current; refresh the query, or update the table, to bring it current now.",
-  "currentLag": "00:00:12.4310000", "stalenessMs": 4120 }
+  "currentLagMs": 12431, "stalenessMs": 4120 }
 ```
 
 > **Removed: `workingSetTruncated` (BL-583, 0.1.38).** It was hard-wired `false` from the train
@@ -4264,39 +4269,89 @@ While a backup captures (or uploads) a database's branches, creating or deleting
 
 #### `GET /admin/replication/status`
 
-Get replication status.
+Get replication status: this node's own, and the replica set's members as this node knows them. Needs `manage` on the server.
 
-**Response:**
+**Response** (asked of the primary):
 
 ```json
 {
-  "role": "Secondary",
-  "currentPrimary": "primary:5000",
-  "walPosition": 12345,
+  "role": "Primary",
+  "currentPrimary": null,
+  "walPosition": 1000,
   "lagBytes": 0,
-  "fencingToken": 1,
-  "canAcceptWrites": false,
+  "fencingToken": 0,
+  "canAcceptWrites": true,
   "perDatabaseLag": {
-    "mydb": {
-      "walPosition": 12345,
-      "primaryPosition": 12345,
+    "app": {
+      "walPosition": 1000,
+      "primaryPosition": 1000,
       "lagBytes": 0,
-      "tokenCoveredPosition": 9999,
-      "bulkLoadHold": { "jobId": "3f2a…", "position": 10000, "sinceUtc": "2026-10-19T20:01:02Z", "loadsHeld": 1 }
+      "tokenCoveredPosition": 649,
+      "bulkLoadHold": {
+        "jobId": "a9e0605372aa4c3a9e772e5534cc1cfb",
+        "position": 650,
+        "sinceUtc": "2026-11-25T16:58:43.2467576Z",
+        "loadsHeld": 1
+      }
     }
-  }
+  },
+  "members": [
+    {
+      "address": "node-a:5433",
+      "role": "Primary",
+      "isSelf": true,
+      "temperatureProfile": "Balanced",
+      "isHidden": false,
+      "isReadCandidate": true,
+      "perDatabaseStatus": { "app": { "walPosition": 1000, "lagBytes": 0 } },
+      "subscriptions": null
+    },
+    {
+      "address": "node-b:5433",
+      "role": "Secondary",
+      "isSelf": false,
+      "temperatureProfile": "Balanced",
+      "isHidden": false,
+      "isReadCandidate": true,
+      "perDatabaseStatus": { "app": { "walPosition": 700, "lagBytes": 300 } },
+      "subscriptions": null
+    },
+    {
+      "address": "node-c:5433",
+      "role": "Secondary",
+      "isSelf": false,
+      "temperatureProfile": "Balanced",
+      "isHidden": false,
+      "isReadCandidate": true,
+      "perDatabaseStatus": {
+        "app": { "walPosition": 1000, "lagBytes": 0 },
+        "archive": { "walPosition": 10, "lagBytes": null }
+      },
+      "subscriptions": null
+    }
+  ]
 }
 ```
 
-`perDatabaseLag` has one entry per database this node has a position for. (**Lead S18a, 0.6.0**) `tokenCoveredPosition` is
+The top-level `lagBytes` is this node's, the largest of its databases; `0` on a primary and on a standalone server.
+
+`perDatabaseLag` has one entry per database this node has a position for, and is this node's own view. `primaryPosition` is the
+primary's position as this node knows it — on a primary and on a standalone server its own (**BL-1477, next train**; it was `0` there, or
+a dead predecessor's after a failover) — and `0` when it is not known, with a `lagBytes` of `0`. (**Lead S18a, 0.6.0**) `tokenCoveredPosition` is
 the position a consistency token for that database is covered at here: `walPosition`, or one below `bulkLoadHold.position` while a
 replica has seen a bulk load committed and not fetched all of its segments (`jobId` empty when its closing frame could not be
 decoded; `loadsHeld` counts every such load). `bulkLoadHold` is `null` when there is none. A read presenting a token at or past
 the hold waits, then answers `TOKEN_UNSATISFIED` or `TOKEN_FETCH_PRIMARY` as for any lagging replica.
 
-(**BL-1466, 0.13.1**) `members` is the topology's member list with what the anonymous topology no longer carries: each
-member's `perDatabaseStatus` (`{ "<database>": { "walPosition", "lagBytes" } }`) and, for a connected secondary, its `subscriptions`
-(`[{ "database", "filterMode", "tableNames" }]`; `null` otherwise). On a standalone node it holds the node itself.
+(**BL-1466, 0.13.1**) `members` is the topology's member list with what the anonymous topology does not carry. **Which secondary is
+behind is read here, and from the primary**: a secondary knows the other members from their heartbeats only. On a standalone node it
+holds the node itself.
+
+| Member field | Meaning |
+|---|---|
+| `address`, `role`, `isSelf`, `temperatureProfile`, `isHidden`, `isReadCandidate` | as in the [topology](#get-adminreplicationtopology) |
+| `perDatabaseStatus` | database name → `{ "walPosition", "lagBytes" }`. `walPosition` is where the member is in that database's log; `lagBytes` is how many WAL bytes that is behind the primary, `0` for the primary itself. (**BL-1477, next train**) `lagBytes` is **`null` when this node does not know the primary's position** for the database, and a member this node has not heard from has an **empty** `perDatabaseStatus`: both are *unknown*, not *no lag*. Until this release an unknown lag was `0`, and so was every secondary's when the primary was asked and the asked node's own |
+| `subscriptions` | what a connected secondary receives, `[{ "database", "filterMode", "tableNames" }]`; `null` when not known |
 
 ---
 
@@ -4690,9 +4745,9 @@ data: {"timestampUtc":"...","level":"Information","category":"...","message":"..
 
 Get cluster topology: the replica set's name, its members (address, role, temperature profile, hidden, read candidate), the
 read candidates and the primary. No credential is needed — a node joining with `--join` reads it before it has one — so it names no
-database and carries no WAL position or table subscription (**BL-1466, 0.13.1**: each member's `perDatabaseStatus` is now `{}`
-and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replication/status`](#get-adminreplicationstatus) as
-`members`).
+database and carries no WAL position or table subscription (**BL-1466, 0.13.1**). (**BL-1477, next train**) A member has **exactly** the
+six fields below: `perDatabaseStatus` and `subscriptions`, sent as `{}` and `null` since 0.13.1, are removed. Per-database positions and
+lag are on the admin-only [`GET /admin/replication/status`](#get-adminreplicationstatus) as `members`.
 
 **Response:**
 
