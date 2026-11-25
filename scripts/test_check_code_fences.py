@@ -162,6 +162,13 @@ class AgainstBase(unittest.TestCase):
                 "A restore syncs what it wrote before it reports success.\n")
         self.assertEqual(self.both(base, text), ([], []))
 
+    def test_a_long_tail_two_lines_share_is_not_a_splice(self):
+        base = ("A restore of a set refuses what is damaged (**BL-1739, next train**), then the database refuses to open until a restore of it completes.\n"
+                "A cancelled restore returns only once every download it started has finished, whatever the destination is and however it was cancelled.\n"
+                "A crash part-way is the same (**BL-1740, next train**), then the database refuses to open until a restore of it completes.\n")
+        text = base.replace(" (**BL-1739, next train**)", "").replace(" (**BL-1740, next train**)", "")
+        self.assertEqual(self.both(base, text), ([], []))
+
     def test_a_swallowed_passage_is_found(self):
         base = ("The level is set in `aouda.json` (**BL-1463, 0.16.0**; it was a setting, which is refused now).\n\n"
                 "The default is `Replicate`. That single key is the entire profile, and there is no separate mode flag to discover.\n\n"
