@@ -9,8 +9,8 @@ parent: "Guides"
 Document status: Approved baseline  
 Primary owner: Aouda maintainers  
 Last updated: 2026-10-27
+
 This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, a paged screener, and real-time ranking — all from a **browser-tier caller** on the data-plane listener, holding no key. Every recipe in §§2–8 is executable against the published conformance fixture.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **Related guides:**
 
