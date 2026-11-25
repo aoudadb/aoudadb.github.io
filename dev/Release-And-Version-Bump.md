@@ -51,6 +51,13 @@ python3 scripts/check-next-train.py        # siblings found next to this repo; -
 
 It reads each sibling's `origin/main` changelog (`--ref` to change it) and fails, with `file:line`, the BL id and the release it shipped in, for every marker whose id is in a released section. `_ALLOW` holds ids whose released changelog mention is an older open note, not the fix still marked `next train` — clear an id in the same commit that removes its markers. Run it after the tag exists, and again as the last step before the PR. A marker with no BL id (`Lead S12 (next train)`) is not checked; retire those by hand (`grep -rni "next train" --include=*.md --include=*.txt .`). Tests: `python3 -m unittest discover -s scripts -p "test_*.py"`.
 
+**Retire markers as edits of the marker, never as a rewrite of the page.** The 0.17.0 sweep (`42bfd3b`) ran one pattern that began at any `(**` and one that tidied the spaces and brackets a marker leaves; it broke the code of 80 pages and swallowed 18 passages (BL-1865). A pattern matches one marker, on its own ids (`(**BL-NNN, next train**)`), and touches nothing outside it; what punctuation it leaves is fixed by hand. A script that rewrote pages is checked before the PR, and its diff read:
+
+```bash
+python3 scripts/check-code-fences.py --base origin/main   # exit 0; --max-lines N for an intended change of more than two such lines
+git diff --stat origin/main                               # a marker sweep changes as many lines as there were markers
+```
+
 Also move `CHANGELOG.md` **Unreleased** bullets into a dated section that names the same versions. Keep Unreleased for not-yet-shipped clarifications only. Changelog bullets may cite a card once when it helps an operator; do not decorate every guide sentence with backlog ids.
 
 ---
@@ -59,6 +66,7 @@ Also move `CHANGELOG.md` **Unreleased** bullets into a dated section that names 
 
 - [ ] Matrix row matches the versions the maintainer approved
 - [ ] Shipped `next train` markers are **removed** (not version-stamped), and `python3 scripts/check-next-train.py` exits 0
+- [ ] `python3 scripts/check-code-fences.py --base origin/main` exits 0, and the diff removes markers only
 - [ ] Changelog dated section reviewed
 - [ ] Ready to **commit** on a branch, push it, and **open the PR**? (publishes nothing)
 - [ ] Ready to **merge**? (the docs site deploys from `main`; merge after the versions the pages cite exist)
