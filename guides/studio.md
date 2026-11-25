@@ -18,14 +18,14 @@ _Repo: `aouda-studio` (Next.js / React)_
 Aouda Studio is the web management console for Aouda. It provides:
 
 - **Data Explorer** — browse, query, filter, edit, and navigate data (admin listener)
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **Schema Management** — view/edit tables, columns, ERD diagrams, insert-time compute
 - **Named Artifacts** — catalog from `schema.export()`, test/subscribe by name, structured authoring via schema apply
 - **Cluster Management** — node operations, topology, backup, configuration
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **Admin Console** — monitoring, access (principals, roles, sign-up, sessions, audit log), streaming (table + named query), bulk-load job monitor
 - **Hub Integration** — team server management, authentication, multi-server switching
 - **AI Integration** — natural language cluster operations
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Listener.** Studio always connects to the **admin** listener (`GET /api/databases` is the probe). Pointing it at the data-plane listener yields 404, not “no auth”. Studio is an operator client: it connects with a key or a session of a `_serverauth` principal. A browser app on the data-plane holds no key at all. See [Direct client access](direct-client-access.md).
 
 ---
 
@@ -43,6 +43,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Toggle auto-increment on a column | §5.5 Toggle AutoId |
 | Author unique / derived / checks / `call` / route / tee | §5.5 Insert-time compute |
 | Catalog and test named queries / mutations | §5.6 Named Artifacts |
+| See who may do what, and mint a key | §13 Access |
 | Subscribe by named-query name | §13 Streaming Explorer |
 | Seed an explicit auto-increment ID on Add Row | §5.5 Identity-insert |
 | Manage branches | §5 Branches |
@@ -194,8 +195,9 @@ Navigate to a table, then open the **Schema** tab. The schema view has three pan
 
 1. **Columns table** — all columns with type, nullability, key role, reference, auto-increment, unique, and derived.
 2. **Storage Policy** — per-table temperature policy (`Auto`, `HotOnly`, `ColdPreferred`).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-4. **Checks / route / tee** — write-time predicates and insert routing (see below).
+3. **Checks / route / tee** — write-time predicates and insert routing (see below).
+
+Who may read or write a table is not a setting of the table: it is in the statements of principals and roles ([§13 Access](#access)).
 
 ### The Columns Table
 
@@ -289,7 +291,7 @@ Above the columns table, three table-level action buttons are available:
 | **Rename table** | Rename the table across the catalog |
 | **Delete table** | Drop the table and all its data (confirmation required) |
 | **Generate Types** | Generate TypeScript type definitions from the current schema |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| **Ask AI** | Open the AI schema assistant (requires an LLM provider's key in Studio preferences) |
 
 ### Storage Policy
 
@@ -316,13 +318,13 @@ When you apply a schema change from the **Migrations** tab (Settings → Schema 
 
 When the diff includes `UpdateColumnAutoIncrement` changes, the summary line shows `N column(s) altered` alongside the total change count.
 
-Named-query / named-mutation / materialized-query changes render as human labels (create / replace / drop). **BL-174:** if the pasted desired JSON **has** a `materializedQueries` key — including `{}` — that map is desired state and **live MQs not listed will be dropped** (empty `{}` drops all; apply requires Allow Destructive). If the key is **omitted** or `null`, live MQs are left unmanaged and Studio does **not** warn-as-drop. The apply wizard always requests access-surface (`?access=true`) and can attach the same identities file as branch review. See [Schema CI/CD](schema-cicd.md) and [Access-surface diff](../auth/authorization.md#audit).
+Named-query / named-mutation / materialized-query changes render as human labels (create / replace / drop). **BL-174:** if the pasted desired JSON **has** a `materializedQueries` key — including `{}` — that map is desired state and **live MQs not listed will be dropped** (empty `{}` drops all; apply requires Allow Destructive). If the key is **omitted** or `null`, live MQs are left unmanaged and Studio does **not** warn-as-drop. See [Schema CI/CD](schema-cicd.md).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+### Opening a table to the browser
 
-On the Schema **Auth** card:
-
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+A table has no switch for it (**BL-1464, 0.16.0**). A browser runs named queries and mutations only, and may run one when `anonymous`, `signup` or
+the user's role holds an `execute` statement for it. Write the statement in **Settings → Access**, or in `aouda.json` when the declaration owns the
+object; put its `where` in the same change for anything a user owns.
 
 Details: [Direct client access](direct-client-access.md).
 
@@ -497,7 +499,7 @@ Top bar component that:
 2. Server selection from registry
 3. Server auth detection (health check)
 4. Credential lookup in Hub vault
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+5. If no credential → auth dialog (a key or email/password)
 6. Optional "Save to Hub" for credential vault storage
 
 ---
@@ -508,16 +510,17 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ### 10.1 Connect-to-Server Dialog
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+The first time you visit `studio.aouda.com`, a **Connect to Server** dialog opens automatically. Enter the URL of your Aouda server and a key of a `_serverauth` principal.
 
 | Field | Description |
 |-------|-------------|
 | Server URL | Full URL of the Aouda server, e.g. `http://localhost:5000` or `https://my-server.example.com` |
+| Key | A key (`aouda_...`) of a principal of the server auth database — leave blank to sign in, or on a server in setup mode |
 | Remember key | Checked by default — persists the URL and key in browser `localStorage` |
 
 Once connected, the server URL appears in the top navigation bar. Click it at any time to open the Connect dialog again and switch to a different server.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+The chosen server URL and key survive page reloads (stored in `localStorage`). They can be cleared by opening the dialog and connecting with no values, or by clearing browser storage.
 
 **Always use the admin listener URL.** A data-plane listener returns 404 for `GET /api/databases` and `/_studio/config`. Studio treats that 404 as "this is a data-plane URL" — connect to the admin port instead. See [Direct client access](direct-client-access.md#studio-and-hub).
 
@@ -571,9 +574,9 @@ Aouda does not manage TLS certificates. The reverse proxy is the TLS boundary.
 
 Then set `Aouda:ForwardedHeaders` so Aouda trusts that proxy. Until you do, per-IP rate limits, lockout attribution, and `_audit_log` client IPs are the proxy's address. Worked nginx and cloud-LB examples: [Behind a reverse proxy](../deployment/reverse-proxy.md).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Layer 3 — Application: a credential on every call**
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Every admin-listener endpoint needs a credential. Use a key (`aouda_...`) with the Connect dialog, of a principal that holds only the statements its user needs; `admin` is the role of an operator.
 
 **Layer 4 — Optional: VPN / Zero-Trust**
 
@@ -719,8 +722,8 @@ Admin password (input hidden):
 
 Press Enter to accept defaults. The setup app then:
 1. Copies binaries to the install directory (skips any `appsettings*.json` in the release zip)
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-3. Registers and starts the Windows Service (or systemd unit) with `--data-path` and `--port` on the command line
+2. Registers and starts the Windows Service (or systemd unit) with `--data-path` and `--port` on the command line
+3. Creates the first admin through the running server, and mints its key
 4. Creates Start Menu shortcut (Windows) or `.desktop` shortcut (Linux)
 5. Prints the completion banner
 
@@ -735,14 +738,14 @@ Aouda is running!
 Server URL : http://localhost:5433
 Studio     : http://localhost:5433  (future embedded mode)
 Cloud      : https://studio.aouda.com → connect to http://localhost:5433
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+Key        : aouda_...
 
 Recommended browser for localhost: Chrome or Edge
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+Store the key in a secret manager now: this is the only time it is shown.
 =============================================
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+The key is a stored key of the admin it created. Copy it to a secret manager immediately — it is not stored anywhere after the banner is dismissed.
 
 ### Service Registration Details
 
@@ -790,10 +793,11 @@ Cloud      : https://studio.aouda.com → connect to http://localhost:5433
 
 `Aouda.Setup` bootstraps the admin account using this sequence:
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-2. Waits for `GET /health` to return 200 (up to 30 retries × 2 seconds = 60 seconds). That only proves the process is alive; wait for `GET /ready` (and `GET /api/databases/{name}` `state=Active`) before schema apply.
-3. Calls `POST /api/auth/setup` with email + password. If the server returns 403 `ALREADY_CONFIGURED` (admin already exists), falls back to `POST /api/auth/signin`.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+1. Waits for `GET /health` to return 200 (up to 30 retries × 2 seconds = 60 seconds). That only proves the process is alive; wait for `GET /ready` (and `GET /api/databases/{name}` `state=Active`) before schema apply.
+2. Calls `POST /api/auth/setup` with email + password. If the server returns 403 `ALREADY_CONFIGURED` (admin already exists), falls back to `POST /api/auth/signin`.
+3. Uses the returned token to call `POST /api/auth/_serverauth/principals/{email}/keys` and obtain a stored key, shown once.
+
+In manual mode no server is running yet, so it creates no admin and prints the commands instead: start the server, then `aouda init`.
 
 ### Existing Install Scripts (Preserved)
 
@@ -830,13 +834,13 @@ In Hub mode: aggregate health overview across all registered servers.
 
 Navigation items and features gated by user role (owner/admin/member/viewer).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+### Connecting with a Key
 
-Connect to password-protected servers using API keys from Studio settings.
+Connect to a server with a key from the Connect dialog, or from the connection card in **Settings → Access**.
 
-### Server Admin Key Management
+### Keys and Principals
 
-View, create, and revoke server admin API keys from Studio settings/auth page.
+Create principals and roles, edit statements and attributes, mint, limit, revoke and delete keys, and set `signup`, from **Settings → Access**. An object the declaration file owns is shown read-only with the file it is declared in.
 
 ### Materialized Queries Browser
 
@@ -846,11 +850,11 @@ View, create, and revoke server admin API keys from Studio settings/auth page.
 
 This page talks to the **runtime** MQ HTTP API. Schema-file desired state is a different axis: a **present** `materializedQueries` map on apply (including `{}`) drops live MQs that are not listed. See §5.5 Schema Diff View and [Schema CI/CD](schema-cicd.md).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+### Access
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Settings → Access** (**BL-1464, 0.16.0**) shows one auth database at a time — `_serverauth`, or an application's — with the tabs *Who am I*, *Principals*, *Roles*, *Sign-up* (application auth databases), *Sessions*, *Audit log* and *OIDC discovery*. *Who am I* is [`whoami`](../auth/whoami.md) of the connection's own credential: the principal, and every statement with where it came from.
 
-HTTP 400 (`AUTH_IDENTITY_INVALID`, `AUTH_IDENTITY_NOT_FOUND`) **fails closed** — Studio shows the code and message. It does **not** treat an error as “full access”. Studio calls `client.policy.inspect` on the **admin** listener. See [Access-surface diff](../auth/authorization.md#audit).
+A refusal is shown with its `remedy`: the statement to grant, and whether the declaration file owns the principal. What a declared principal that is not connected would be allowed is [`aouda policy explain`](../reference/cli.md#policy-explain), offline. **Settings → Declaration** shows what the server runs on and exports it.
 
 ### Streaming Explorer
 
@@ -898,9 +902,10 @@ Tables with derived columns, checks, or transforms reject `:begin` unless the cl
 | P12 | Users panel, roles/permissions panel, sessions/audit log panel | `aouda-studio/docs/tasks/P12-*` |
 | P16 Epic B | Hub integration, server switcher, connection auth, Docker image, config file, offline mode, env vars | `aouda-studio/docs/tasks/P16-SB3-*`, `P16-SB4-*` |
 | P16 Epic C | Cluster ops (add/remove/promote/failover), node detail, backup management, memory editor, topology viz, all config editors | `aouda-studio/docs/tasks/P16-SC1-*` through `P16-SC3-*` |
+| P16 Epic D | Log viewer, query worksheet, role-based UI, key authentication, settings, alerts, slow query, PITR, join UI, aggregate UI, branches UI, advanced filters, materialized queries, admin keys | `aouda-studio/docs/tasks/P16-SD1-*` through `P16-SD5-*` |
 | P16 Epic F | Studio cloud integration (projects, clusters) | `aouda-studio/docs/tasks/P16-SF3-*` |
 | P16 Epic G | Natural language cluster operations | `aouda-studio/docs/tasks/P16-SG2-*` |
 | P34 | Hosted Studio at `studio.aouda.com` (Vercel), Connect-to-Server dialog, localStorage persistence, first-run detection, CORS for `studio.aouda.com`, `/_studio/config` endpoint, `Aouda.Setup` cross-platform installer | `aouda/docs/tasks/P34/StudioDist-*` |
 | P36 | Column evolution UI (alter type/null/encoder/references, PK, reorder, Toggle AutoId via `alterColumn`) | `aouda-studio/docs/tasks/P36-*` |
 | P37 | Access-surface on branch review; data-plane 404 connect copy | `aouda-studio` P37 slices |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| P39 | Operator parity: named artifacts, insert-time compute, route/tee, named-query subscribe, schema-file MQ maps, identity-insert, bulk-load intent copy | `aouda-studio/docs/tasks/P39/` |
