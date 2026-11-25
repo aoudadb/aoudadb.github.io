@@ -23,7 +23,7 @@ _Repo: `aouda-client-ts`_
 - **Branch operations** — create, delete, diff, merge via `client.branches.*`
 - **Real-time streaming** — WebSocket subscriptions for live data
 - **Admin API coverage** — health, metrics, replication, cluster, backup, config, node
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **Authentication and access** — one credential (a key or a session), `client.auth` for sign-in and sessions, `client.whoami()`, `client.access` for principals, roles and credentials
 - **MCP tools** — AI-consumable tool definitions for cluster management
 - **CLI** — type generation, schema seed, and more
 
@@ -144,7 +144,7 @@ rows for `insert` and `upsert` definitions that declare them (**NativeClients, 0
 ### With Authentication
 
 ```typescript
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+// A browser app: URL and database only, no key. Until a user signs in, its calls act as `anonymous`.
 const client = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
@@ -156,19 +156,19 @@ await client.auth.signIn('user@example.com', 'secret', { deviceInfo: 'Ann’s la
 await client.auth.signOut({ scope: 'others' });
 const devices = await client.auth.listSessions();
 
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+// A backend: a principal's key. `apiKey` takes a key of any kind: stored, derived or limited
 const backend = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+  apiKey: process.env.AOUDA_KEY, // 'aouda_...'
 });
 await backend.connect();
 
 // A server key, for server/admin calls: the same option
-const admin = new AoudaClient({
+// An operator, for server/admin calls: a key of a `_serverauth` principal, in the same option
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+  apiKey: process.env.AOUDA_OPERATOR_KEY,
 });
 await admin.connect();
 ```
@@ -176,8 +176,8 @@ await admin.connect();
 **Keeping tokens across restarts** (**NativeClients, 0.4.0**): `client.auth.onTokensChanged(({ accessToken, refreshToken,
 reason }) => …)` is called on sign-in, on every refresh (automatic ones too) and on sign-out (`reason`: `"signedIn"` /
 `"refreshed"` / `"signedOut"`); it returns the unsubscribe, and any number of listeners may subscribe. Persist the pair each time
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-040).
+and seed a restarted client with `session: { token, refreshToken }` — the server rotates the refresh token on every refresh, and a
+spent one ends the session.
 
 **One session at a time** (**BL-1852, next train**; BL-1014). `signIn`, `signUp`, `exchangeCode` and `exchangeOidcToken` replace the session
 the client holds, and a call in flight belongs to the session it was made in:
@@ -264,16 +264,25 @@ A token used elsewhere is `403 AUTH_POLICY_DENIED` with remedy `none` and `reaso
 like `AUTH_REFRESH_TOKEN_INVALID` — the client clears its tokens, reports `"signedOut"` and does not retry, and the realtime transports
 stop reconnecting. See [Sessions](../reference/http-api.md#sessions).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-type. Every kind goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves the kind; the client reads the
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**One credential (BL-1464, 0.16.0, breaking).** `apiKey` takes a key of any kind (stored, derived or limited; all have the one format
+`aouda_<id>_<secret>`), `session` a signed-in session. The options `appAuth`, `serverAuth` and `userToken` are gone, with no alias: the
+constructor throws, naming what replaces each. A key goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves it to
+its principal; nothing about the key's text says what it may do. The client checks the key at construction (shape, checksum, the retired
+format) and the error never contains the value. `client.whoami()` says which principal the credential is and what it may do.
+`client.databases.list()` and `create()` need `manage` on `server`, which only a principal of `_serverauth` can hold; another principal
+is refused `403 AUTH_POLICY_DENIED`.
 
 **Auth option rules:**
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- `apiKey` cannot be combined with a `session` that holds a token: a key and a signed-in session are two credentials, refused at
+  construction. With neither, the client is keyless: `client.auth` signs a user in, and until then its calls act as `anonymous` on the
+  [data-plane listener](../guides/direct-client-access.md) (the admin listener answers `401 AUTH_CREDENTIAL_MISSING`).
+- `session.scope` says where sign-in, refresh and sign-out go: `"database"` (the default) is the auth database that governs the client's
+  database, `"server"` is `_serverauth`, for an operator with a password. A key has no such option.
 - `refreshToken` requires `token` to also be set.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- A client with `apiKey` does not sign in: `client.auth.signIn` and the other calls that make a session throw. Use one client per user.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Common mistake:** sending a backend's key and a user's token together. A request carries one credential. To act as a user, use a client
+that holds that user's session, or a [limited key](../auth/credentials.md#limited-keys) minted from it (`client.auth.createLimitedKey`).
 
 **A refused credential (BL-1386, 0.11.0).** The client never retries a 401 or a credential-refusing 403, but a writer that treats
 the error as "try again later" drops or re-buffers every row while the key is bad. Opt in with `authFailurePolicy`:
@@ -289,41 +298,60 @@ const client = new AoudaClient({
 });
 ```
 
-Fatal is HTTP 401, and HTTP 403 with `AUTH_KEY_ROUTE_MISMATCH`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `AUTH_API_KEY_INVALID`,
-`AUTH_API_KEY_REQUIRED`, `AUTH_TOKEN_*` or `AUTH_ACCOUNT_DISABLED`; not `AUTHORIZATION_DENIED`, `AUTH_PLS_*` or `AUTH_GRANT_*` (the key is
-valid). A streak is consecutive such failures with no successful request between them, counted over HTTP requests (queries, inserts,
+Fatal is HTTP 401 (`AUTH_CREDENTIAL_MISSING`, `AUTH_KEY_MALFORMED`, `AUTH_CREDENTIAL_INVALID`, `AUTH_CREDENTIAL_EXPIRED`,
+`AUTH_CREDENTIAL_REVOKED`, ...), and HTTP 403 with `AUTH_WRONG_AUTH_DATABASE` or `AUTH_ACCOUNT_DISABLED`; not `AUTH_POLICY_DENIED` or
+`AUTH_ROW_DENIED` (the credential is valid, and another table or operation may be allowed). A streak is consecutive such failures with no successful request between them, counted over HTTP requests (queries, inserts,
 bulk load, schema calls); a realtime socket's own handshake is not counted, an authentication failure stays out of the circuit
 breaker, and neither the error nor `info` carries the key. The SDK has no batch writer: a loop of `insert` / `bulkLoad` calls should
 stop on `AoudaAuthenticationFatalError`.
 
-**Refusals that name the key kind and the option (BL-1422).** Server side, since **0.12.0**, a refusal's `suggestion` names the key kind and prefix
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-of an auth-admin, browser-tier or scoped key). In `@aouda/client` **0.12.0** (npm, 2026-11-12) the `message` of an HTTP 401 or 403 with one of those codes (and
-`AUTH_API_KEY_REQUIRED`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `UNAUTHORIZED`, `AUTH_TOKEN_INVALID` / `_EXPIRED` / `_REVOKED`, `AUTHORIZATION_DENIED`) then carries
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400, ...) keeps the
+**Refusals that say what to do (BL-1464, 0.16.0).** A refusal of the credential or the policy (`AUTH_CREDENTIAL_*`, `AUTH_KEY_MALFORMED`,
+`AUTH_WRONG_AUTH_DATABASE`, `AUTH_POLICY_DENIED`, `AUTH_ROW_DENIED`, `AUTH_PUBLIC_UNRESTRICTED`) carries the server's
+[`remedy`](../auth/whoami.md#remedy) as a typed value on the error. The error's `message` is the server's, then the remedy as a sentence, and for
+`sign-in` and `fix-key` the option to set (`apiKey` or `session`) with the
+kind of credential the client was sending, a key by its public id. `code`, `statusCode` and `requestId` are unchanged; a data error (404, 400, ...) keeps the
 server's message exactly. The `/ready` reason codes `schema_pending` and `schema_drift` are documented in the [HTTP API](../reference/http-api.md#get-ready).
 
-**Named queries and mutations need an `execute` statement (**BL-1464, 0.16.0**).** The client sends named-artifact calls as before. A `403
+**Named queries and mutations need an `execute` statement (BL-1464, 0.16.0).** The client sends named-artifact calls as before. A `403
 AUTH_POLICY_DENIED` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` on a call that worked before
 means the caller's statements do not `execute` that artifact; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. `INSUFFICIENT_PERMISSIONS` is not produced. See
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+[Execute](../auth/authorization.md#execute).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+### Managing access — `client.access` (**BL-1464, 0.16.0**)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`client.access` calls the [access routes](../reference/http-api.md#access-routes): principals, roles, the `signup` setting and credentials
+of one auth database. The caller needs `manage` on what it changes and must itself hold every statement it grants
+([Grant only what you hold](../auth/authorization.md#grant-only-what-you-hold)). What a user may reach is an attribute of the principal that a
+statement's `where` reads; the entitlement calls of 0.13 to 0.15 (`createEntitlement`, `listEntitlements`, `deleteEntitlement`) are gone.
 
 ```ts
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
-await client.auth.deleteEntitlement(userId, e.id);                                                                 // -> void
+const access = client.access.authDatabase('auth');
+
+await access.roles.create({
+  name: 'member',
+  statements: [{
+    actions: ['read', 'write'],
+    resources: ['chat/table/messages'],
+    where: { column: 'room', op: 'in', principal: 'attributes.rooms' },
+  }],
+});
+await access.principals.create({ name: 'ann@example.com', roles: ['member'], attributes: { rooms: ['room_42'] } });
+await access.principals.update('ann@example.com', { attributes: { rooms: ['room_42', 'room_43'] } });   // replaces the member
+
+await access.principals.create({ name: 'feeder', roles: ['writer'] });
+const { key, id } = await access.credentials('feeder').mintKey({ name: 'first' });   // `key` is in this answer once
+await access.credentials.revoke(id);
 ```
 
-| Type | Shape |
+| Call | Route |
 |---|---|
-| `CreateEntitlementRequest` | `{ dimension: string; key: string; level?: string; grantedBy?: string; validFrom?: string; validTo?: string }`. `key` is sent verbatim (`""` is a key) and must be a string |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| `principals.list` / `get` / `create` / `update` / `delete` | `/api/auth/{authDatabase}/principals[/{name}]` |
+| `roles.list` / `get` / `create` / `update` / `delete` | `/api/auth/{authDatabase}/roles[/{name}]` |
+| `signup.get` / `set` | `/api/auth/{authDatabase}/signup` |
+| `credentials(name).list` / `mintKey` / `addOidcTrust` | `…/principals/{name}/credentials`, `/keys`, `/oidc` |
+| `credentials.delete(id)` / `revoke(id)` | `…/credentials/{id}`, `…/credentials/{id}/revoke` |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+A write to an object the declaration file owns is refused `409 DECLARED_IN_CONFIGURATION`. In .NET the same calls are on `client.Access`.
 
 ---
 
@@ -384,9 +412,9 @@ const open = await client.table('orders')
 ```
 
 **The flag is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: what the query returns is what
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-credential that holds no grant at all on a table with partition-level security is still refused there. Which
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+the caller's `read` statements admit, with the flag or without it. A statement with no `where` admits every partition; one whose `where`
+names the partition column, only the partitions it admits; and a caller with no `read` statement on the table is still refused
+(`403 AUTH_POLICY_DENIED`). See [Row conditions](../auth/authorization.md#row-conditions).
 The **data-plane** listener (the browser tier) ignores the flag. For subscriptions and named queries see
 [A subscription that spans partitions](#a-subscription-that-spans-partitions) and
 [Named queries and the flag](#named-queries-and-the-flag).
@@ -983,7 +1011,7 @@ early expiry), on any other table it is one log record and whole segments retire
 
 ### Databases
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`client.databases.create(name, options)` (**BL-1123, 0.6.0**) sends `kind` and `auth` only when the caller sets each one, and sends both when the caller sets both. On `auth`, `enabled` and `database` are included only when set there. The server rejects `kind: "auth"` together with an `auth` object (400). `kind: "data"` with `auth` is valid. Sign-up is not an option of the call: set it with `client.access.authDatabase(name).signup.set(...)`; the removed options `allowSelfSignup` and `selfSignupRole` throw, naming it (**BL-1464, 0.16.0**).
 
 (**Lead S26, 0.6.0**) A database's durability level is `options.durability` — `'strict'` (the server's default when
 omitted), `'os'`, `'unlogged'` or `'memory'` (the `DurabilityLevel` type), sent only when set. It replaces `enableWal` (`false` is
@@ -1329,16 +1357,16 @@ mistake — an unknown member, an empty group — is the server's to refuse, `IN
 refused. The server refuses a filter with no condition (`{}`) given alone: to subscribe to every row, give no filter.
 
 **Which listener takes this.** `client.table(t).subscribe(...)` is a **table subscription** (a table and a filter). It works on the
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**admin** listener, for a principal with `read` on the table. The **data-plane** listener, the one browsers reach, refuses
 it with `NAMED_QUERY_SUBSCRIBE_REQUIRED`: its callers cannot compose a query, so they subscribe **by name**
 (`client.namedQueries.subscribe(name, args)`, see [Named queries](../guides/named-queries.md#subscribe-by-name)). A trusted backend that
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+wants a filtered table subscription connects to the admin listener with its key. Do not work around the error by moving the
 filter into a different request: there is none, by design ([Direct client access](../guides/direct-client-access.md)).
 
-**What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and its change events follow the same grants as an
-HTTP query by the same credential, `subscribe` is authorized by the same role check (`read` on the table), and the server re-reads the
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
-open its socket too. How it works: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
+**What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and its change events hold the rows the caller's `read`
+statements admit, as an HTTP query by the same credential does; `subscribe` is authorized as that query is (`read` on the table; for a named
+query `execute` on it), and the server re-reads the principal's statements on every `subscribe`. Every credential that works over HTTP on the
+database opens its socket too. How it works: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
 
 #### A subscription that spans partitions
 
@@ -1366,7 +1394,8 @@ const sub2 = client.table('orders')
 
 The SDK sends `cross_partition_access: true` on the `subscribe` message, only when you ask, and sends it again on every resubscribe after
 a reconnect. **It is a cost waiver, not a grant**: it waives `PARTITION_FILTER_REQUIRED` and nothing else, so the snapshot and the events
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+are what the caller's `read` statements admit (a statement with no `where` admits every partition, those created
+later too; one whose `where` names the partition column, only the partitions it admits). The data-plane listener ignores it. An older server ignores the field and
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The wire rule:
 [A subscription that spans partitions](../guides/partitioning.md#a-subscription-that-spans-partitions).
 
@@ -1550,7 +1579,7 @@ contract](../reference/http-api.md#subscribe).
 
 > **Fixed in 0.1.25 (`BL-635`), released 2026-09-23.** Before that release `connect()` was not idempotent:
 > each subscription's start opened its **own** socket, orphaning the previous one — still open,
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+> unpinged, still delivering — and overwriting the single pair of handshake resolvers, so one
 > socket's `auth_ok` completed a different socket's `connect()` and the rest never settled. An
 > application binding several live views in one tick got several server sessions, and the
 > reconnect replay could then land a subscription id on a session that already held it. The server
