@@ -43,10 +43,10 @@ An untrusted caller (a browser, a mobile app) must not compose an arbitrary `Que
 
 1. **Cost** — a five-way join or an unfiltered scan is unbounded.
 2. **Schema coupling** — the UI is welded to physical column names (the PostgREST failure).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+3. **Column exposure** — a statement's `where` scopes rows and partitions. The named query's `select` is the only column-level control.
 4. **Review** — a query that can leak a tenant is a schema change, not a string in a SPA.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Trusted callers (Studio operators, a backend with `read` statements, on the **admin** listener) still have the ad-hoc query surface. Named queries are **required** on the [data-plane listener](direct-client-access.md).
 
 ### Performance: what is actually true
 
@@ -188,7 +188,8 @@ Notes:
 - A **joined** definition writes its `select`, `orderBy` and `orderByChoices` as `Table.Column`, as the join's result names its columns; column names are case-sensitive. `schema apply` checks every column a definition names the way the engine reads it at execute — against the table its clause binds to, a join's table and key columns existing and comparable (`JOIN_KEY_TYPE_MISMATCH`), and a sort column of a type the engine orders — and refuses what cannot execute with `NAMED_QUERY_COLUMN_INVALID`, naming the clause and the spelling to use. A joined parameter is typed by its own table's column.
 - `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](../auth/authorization.md#audit).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top. **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still a required param. Write `"required": false` explicitly for optional args (and always when pairing with `whenParamPresent`).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- A table needs no opt-in to be read by a named query, on either listener, and neither does a materialized-query result table. Who may run the definition is an `execute` statement; the removed member `dataPlaneAccess` is refused `SCHEMA_UNKNOWN_MEMBER`.
+- **The `where` of the caller's `execute` statement scopes the definition's primary table** (its `table`). **A joined table is read as the definition wrote it** (**BL-1464, 0.16.0**): the caller's table statements play no part, so put the condition that matters on the primary table, or in the definition. `crossPartitionAccess` is not carried to a joined table. For `anonymous` and sign-up principals the joined tables count: an unconditional `execute` that reaches a table other statements restrict is refused `AUTH_PUBLIC_UNRESTRICTED` ([Public reach](../auth/authorization.md#public-reach)).
 
 ### Legal `where` operators
 
@@ -416,18 +417,18 @@ Body is `{ "args": { … } }` only. No `database` field (the path already has it
 ### HTTP
 
 ```bash
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-# with AUTH_KEY_LISTENER_MISMATCH.
+# Data-plane listener. With no Authorization header the call acts as `anonymous`.
+# $AOUDA_TOKEN is a signed-in user's session (or a key) whose statements `execute` this query.
 curl -s -X POST \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+  -H "Authorization: Bearer $AOUDA_TOKEN" \
   -H "Content-Type: application/json" \
   http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Success looks like any other query result: column arrays (`columns`, `types`, `data`, `rowCount`). (**Lead S12, 0.6.0**) There is no `format` parameter any more; `?format=` is refused `400 INVALID_FORMAT`. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. On the **data-plane listener**, a caller with no `execute` statement for this name (`anonymous` included) gets the **same** 404 — not 401/403 — so names are not enumerable. The **admin listener** still returns 401 (`AUTH_CREDENTIAL_MISSING`) / 403 (`AUTH_POLICY_DENIED`).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**Permission (BL-1464, 0.16.0).** The caller needs a statement with the action `execute` on `<db>/query/<name>`, or `<db>/query/*` (a named mutation: `<db>/mutation/<name>`). Table `read` / `write` do not run an artifact, and an `execute` statement gives no table access. Of the built-in roles, `reader` may execute every named query, `writer` every named query and mutation, `admin` everything; a principal with no role and no statement may execute none. See [Execute](../auth/authorization.md#execute). Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
 
 ### TypeScript (`@aouda/client`)
 
@@ -437,10 +438,11 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "https://data.example.com", // data-plane listener
   database: "trading",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
+  // no apiKey: a browser holds no key
 });
 await client.connect();
-// after user sign-in, attach the user JWT — do not put identity in args
+// until a user signs in, calls act as `anonymous`; then they carry the user's session — do not put identity in args
+await client.auth.signIn("trader@example.com", password);
 
 const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
   ticker: "AAPL",
@@ -450,10 +452,12 @@ const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
 ### C# (`Aouda.Client`)
 
 ```csharp
-var client = new AoudaClient("https://data.example.com", "trading")
+var client = new AoudaClient(new AoudaClientOptions
 {
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
-};
+    ServerUrl = "https://data.example.com",
+    DatabaseName = "trading",
+    Credential = AoudaCredential.SignIn("trader@example.com", password), // or AoudaCredential.Key(...)
+});
 
 var result = await client.NamedQueries.ExecuteAsync(
     "equity.quoteByTicker",
@@ -481,7 +485,7 @@ A dashboard of independent panels should not issue N sequential executes. A batc
 }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+HTTP **200** means the envelope was accepted. A missing name, a name the caller may not execute, or a bind failure is that slot's `code`:
 
 ```json
 {
@@ -494,7 +498,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 Envelope **400** (no `results`): empty array, more than 32 elements, or a **named-mutation** name (`NAMED_QUERY_BATCH_MUTATION`).
 
-**Permission (BL-1417, 0.12.0).** The route itself needs only an authenticated caller. Each slot is checked for its own `named-query` `execute` row; a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND`, exactly like an unknown name, on both listeners. A caller who may execute none of the slots therefore gets HTTP 200 with every slot masked, where before 0.12.0 a caller holding only table rights got a route-level 403. (**BL-1417 review, 0.13.0**) In that case the envelope carries `"token": ""`, not a live consistency token.
+**Permission (BL-1417, 0.12.0).** Each slot is checked for its own `execute` statement; a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND`, exactly like an unknown name, on both listeners. A caller who may execute none of the slots therefore gets HTTP 200 with every slot masked, where before 0.12.0 a caller holding only table rights got a route-level 403. (**BL-1417 review, 0.13.0**) In that case the envelope carries `"token": ""`, not a live consistency token.
 
 ```typescript
 const slots = await client.namedQueries.batch([
@@ -529,7 +533,7 @@ Two sequential single executes under a concurrent writer **may disagree**. The b
 
 On the data-plane, WebSocket `subscribe` **requires** `"name"` (and optional `args`). Ad-hoc `target` + `filter` is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+The server conjoins the named query's own `where` with the `where` of the caller's `execute` statements into one effective predicate at subscribe time and **pins** that hash for the connection. Redeploying the alias does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -581,7 +585,7 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
   "conflate": { "collapse_inserts": true } }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+The server conjoins the named query's own `where` with the `where` of the caller's `execute` statements into one effective predicate at subscribe time and **pins** the bound `Where` + `Select` for the connection. Editing the named query does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -849,13 +853,13 @@ This is the recommended path for a bounded, continuous-trickle insert feed (e.g.
 
 ## Authorization (always underneath)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Every named-query execute, batch element, mutation, and subscribe is scoped by **the caller's** `execute` statement: its `where` is added to the definition's primary table. A bug in a definition's filter cannot leak a row of that table the `where` does not admit. A table the definition joins is not scoped by it: a join is part of what you review, and `aouda policy explain --action execute --resource <db>/query/<name>` says what a declared principal's statements decide.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Access is **granted**, never implied by the kind of credential. An `execute` statement with no `where` runs the artifact on all its rows; one with a `where` runs it on the rows the condition admits. Keys are for backends, not browsers. A call that an unconditional statement decided, on a table other statements restrict, is audited: one `unconditional_access` row per table and statement per request, and a batch whose slots read one table writes one row per statement, not one per slot. See [Audit](../auth/authorization.md#audit). (**BL-1464, 0.16.0**)
 
 ### `crossPartitionAccess` per call
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+A named-query call on the **admin** listener can send `crossPartitionAccess: true` (an execute body, or one item of a batch; `cross_partition_access` on a [subscribe](#subscribe-by-name)). It waives the partition-filter guard when the query's `where` binds no partition key, and nothing else: the rows stay what the caller's `execute` statement admits, and a caller without one is still refused. A definition cannot set it, and the data-plane listener ignores it. A browser binds the key in the definition instead, or in its `execute` statement's `where`; see [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener). (**BL-1227, 0.9.0**)
 
 There is no catalog field, header, or option that runs a named query as someone else.
 
@@ -866,6 +870,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Symptom | Cause | Action |
 |---|---|---|
 | `404 NAMED_QUERY_NOT_FOUND` | Name not deployed or typo | Apply schema; use the schema key as a string literal |
+| Data-plane execute 404 (no 401/403) | No `execute` statement for the name: `anonymous` has none until you write one, and a table `read` / `write` does not count | Expected on the data-plane. Give `anonymous`, `signup` or the user's role an `execute` statement. The admin listener answers 401/403 (`AUTH_POLICY_DENIED`, whose `remedy` is the statement to grant). `whoami?database=` shows what the caller holds |
 | `400 NAMED_QUERY_BIND_FAILED` | Arg type/constraint | Check `params` (`maxLength`, `min`/`max`, `enum`, `maxItems`) |
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |
 | Schema apply `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` | Set a numeric cap (or a constrained `limitParam`) |
@@ -884,7 +889,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| Data-plane `POST /query` 404 | Listener allowlist | Use named-query execute, or connect the backend to the **admin** listener |
 
 ---
 
@@ -904,7 +909,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ## Related
 
 - [How to build apps effortlessly with Aouda](build-apps.md) — where named queries fit in the whole build path
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [Direct client access](direct-client-access.md) — listeners, the browser's credential, quotas
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in
