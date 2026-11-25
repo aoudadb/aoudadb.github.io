@@ -131,7 +131,8 @@ aouda plan: declaration /etc/aouda/aouda.json, 3 databases, 2 schema files, agai
 
 changes
   schema   rates: 1 change (AddColumn SwapQuote.Venue)
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+  roles       added auth/auditor (declared)
+  principals  added auth/checkout (declared)
 
 warning  SCHEMA_DESTRUCTIVE_REFUSED  /etc/aouda/bond.schema.json
          Database 'bond': schema file '/etc/aouda/bond.schema.json' differs from the catalog; refused (a reload never applies a destructive change): DropColumn BondQuote.LegacyId
@@ -146,7 +147,7 @@ no problems; 3 changes (see above).
 In the JSON (`--json`), `target` is `{ "kind": "server", "url", "contacted", "role", "writes" }`, `changes` is the server's, `declaration.planHash` is the hash of what
 the **server** planned and `declaration.localPlanHash` the plan's own (they differ when the two machines' settings differ: the server validates under its own).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+**The key.** `--server` needs a key of a principal with `manage` on `server` of that server (an operator), from **exactly one** of `--key-file PATH` (read once, one trailing newline removed) or
 `--key-env NAME`, holding one key on one line (a line break, a space or a non-ASCII character is exit `64`, naming the file or the variable). There is no `--key`: a key on the command line stays in the shell's history and the process list, so `--key` is refused (exit `64`) without the value
 being repeated. `--server` is never taken from `AOUDA_SERVER` / `AOUDA_URL`, and the key never from `AOUDA_TOKEN`: an environment left in a CI job must not turn an
 offline plan into a call to a server. The key is sent only as the bearer to the URL you named — **a redirect is not followed** (it would be the easiest way to send a
@@ -155,7 +156,7 @@ server key elsewhere) — and is printed nowhere. The URL is an absolute `http:/
 **What is sent, and what is not.** The candidate carries every declared database entry, the access section as written (`server` and each auth database's
 `signup`, `roles` and `principals`, a stored key as the id and SHA-256 the file declares, a password seed as the marker `{ "seeded": true }` and nothing else — no reference, path or value; **BL-1464, 0.16.0**), every
 schema file as its **merged document** (the overlay applied where the plan ran), and the paths of the declaration and schema files as **labels** for the findings
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+(a path that contains a key is `<redacted>`). The old candidate members for the identities file, its keys, the bootstrap key and the first admin are gone: a body that carries one
 is `400` (an unknown member). It never carries a key, a password, a secret file's content or path, or an environment variable's name. The server opens
 no path the body names, re-reads none of its own configuration, and validates under its **own** process settings (named-query limits, `SkipDatabases`, the dev-admin
 flag, the hosting environment), which a body cannot set. A key's hash is in every row of the auth database already; the bearer key is the more sensitive value either way:
@@ -191,6 +192,8 @@ case $? in 0) echo "nothing to change" ;; 2) echo "changes: review the plan abov
 ```
 
 The image listens on port **5000** (not 8080), and Docker Compose mounts a service's `secrets:` at **`/run/secrets/<secret name>`**, so `aouda_server_key` here is the name of the secret in your compose file. The key file must be mounted in the container that runs the plan, which a service that lists the secret under `secrets:` has. The URL names the service on the compose network (`aouda`); from the host use whatever address you publish, for example `http://127.0.0.1:5000`.
+
+**In CI** (secrets not on the runner), with the operator's key as a CI secret in an environment variable:
 
 ```bash
 aouda plan --declaration deploy/aouda.json --skip-secrets \
@@ -336,7 +339,7 @@ docker run --rm --entrypoint aouda -v "$PWD/deploy:/deploy:ro" \
 | `aouda schema check --file F --env E` | a declaration file with `{ "version": 1, "databases": { "app": { "kind": "data", "schema": "F" } } }`, then `aouda plan --declaration aouda.json --env E` (**BL-1463, 0.16.0**; in 0.14.0 it was `aouda plan --Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=F --Aouda:Databases:app:SchemaEnvironment=E`, which is refused now) |
 | `aouda schema check` for a schema that is not declared | `aouda schema diff` against a server |
 | exit `2` from either command | exit `1` (or `64` for misuse); `2` no longer means "could not check" |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+| the declaration listing `keys check` printed | not printed. 0.14.0 listed a running server's configured keys over HTTP; `GET /api/auth/whoami` with the key itself, and `GET /api/admin/declaration`, replace it (**BL-1464, 0.16.0**) |
 
 The `schema check` page's two lessons still hold. **`plan` and `schema validate` are different:** `plan` asks whether the declaration is acceptable on its own, with no server; `schema validate` asks whether
 a live database matches a file (drift), and needs one. And **the start runs the same checks:** a declared database's schema file is checked before the start changes any database, with that server's own

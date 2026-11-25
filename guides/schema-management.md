@@ -86,14 +86,13 @@ falls back to the `AOUDA_TOKEN` environment variable when the flag is omitted, t
 ```bash
 export AOUDA_SERVER=http://localhost:5433
 export AOUDA_DATABASE=myapp
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+export AOUDA_TOKEN="$(cat operator.key)"   # a key (aouda_...) or a session token of a principal with manage on myapp
 
 dotnet aouda schema diff                # no flags needed
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
+dotnet aouda schema apply --token "$OPERATOR_KEY"   # or pass it explicitly
 ```
 
-Without one, these commands exit `2` with `AUTH_TOKEN_MISSING`. Against a database with auth
-disabled, omit the token entirely — no `Authorization` header is sent.
+Without one, these commands exit `2` with `AUTH_CREDENTIAL_MISSING`.
 
 #### Option B: TypeScript / JavaScript / Node
 
@@ -108,7 +107,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 ### 3. Verify
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- **Diff**: Shows a human-readable plan (add table, add column, a changed named query or mutation, etc.). Use it on every PR to review schema changes; who may run a name is in `aouda.json`, reviewed with [`aouda plan`](plan.md). Named queries live under `namedQueries` in the same file ([Named queries](named-queries.md)); optional `freshness` on the named query is keyed by name ([Freshness](freshness.md)). Omitting a name deletes the definition (there is no `dropNamedQueries`). Materialized queries live under [`materializedQueries`](#materialized-queries-in-the-schema-file).
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
 - **Check**: Use `aouda plan` in CI before anything is running — it validates a *declared* schema file with no server (exit 0 valid, 1 invalid; **BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**). See [Plan a declaration](plan.md). A schema file that is not declared is checked against a server with `schema diff`.
 - **Validate**: Use `schema validate` in CI — it needs a running server and exits 0 if the server matches the file, 1 if there is drift.
@@ -190,7 +189,7 @@ Five shapes, discriminated by `type`:
 | `filter` | `sourceTable`, `predicate` | A maintained subset of a table |
 | `topNPerGroup` | `sourceTable`, `orderBy`, `n` (`groupBy` optional) | At most **N rows per group** (or global top N when `groupBy` is omitted). Result PK is the source PK |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All five shapes accept `updateMode` (`async` | `sync`), **`maxCoalesceMs`** (the freshness knob, 0–60000 ms, default 0: how long an `async` query's batches may coalesce before one apply — **ColumnarMerge S10, 0.2.0**; changing it replaces the query) and `storage.storageTemperature`. A browser reads a result table through a named query it may `execute`; nothing is set on the MQ entry.
 
 **`window`** (**Horizon, 0.5.0**) — `"window": { "keep": "7d" }` (plus `"column"` where it must be named) on an `aggregate` with a `TruncateToMinute` / `Hour` / `Day` / `Week` bucket, or on a `topNPerGroup` grouped by a time column: the result keeps only its groups at or after the horizon (the server's clock minus `keep`), and a read of anything older is computed from the source, so the answer does not change. Every other declaration is refused at apply with its reason — the full list is in [Materialized queries — what is refused](materialized.md#window-refusals). `schema export` writes it, and changing it replaces the query.
 
@@ -240,7 +239,7 @@ If you declare your databases in the declaration file (`aouda.json`, **BL-1463, 
 
 in `/etc/aouda/aouda.json`, started with `Aouda__Declaration=/etc/aouda/aouda.json` and `AOUDA_ENVIRONMENT=prod`. A relative `schema` path is relative to the directory of `aouda.json` (**BL-1463, 0.16.0**; before, to the working directory), so the example reads `/etc/aouda/schemas/ledger.json`.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+What happens, in this order: **every `schema` file is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` and its declared operators start, **then each `schema` file is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no key is needed, and it goes through the same code as `POST .../schema/apply`.
 
 | You want to know | Answer |
 |---|---|
@@ -348,11 +347,11 @@ The overlay's name comes from the base file's: `<base without .json>.<env>.json`
 | `settings` | `durability` (`replicationFactor`) |
 | `tables.<a table of the base file>` | `policy` (`storageTemperature`, `retention`), `durability` (`level`, `replicationFactor`) |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+Any other member, including one the base file may carry (`columns`, `partitionKey`, `clusterColumns`,
 `namedQueries`, `database`, `settings.allowTruncatingTimestampToDate`, …), is refused, never ignored:
 
 ```text
-a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
+SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED: member 'columns' at /tables/orders is not allowed in an overlay: an overlay overrides only settings.durability and an existing table's policy and durability. Move it to the base file.
 ```
 
 Before, the merge dropped such a member without a word: an overlay turning partition-level security on applied with it off.

@@ -153,7 +153,7 @@ They:
 
 1. Copy **binaries only** to the install directory (any path the operator chooses).
 2. Create the **data directory** (default `C:\ProgramData\Aouda\data` on Windows, `/var/lib/aouda` on Linux).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+3. Write the declaration file (`aouda.json`) with the first operator in `server.principals`, or plan to run `aouda init` once the service is up.
 4. Register the OS service with bootstrap flags embedded in the service definition.
 
 **Windows Service** (`binPath` / `BinaryPathName`):
@@ -364,7 +364,7 @@ it is replicating — the deletions reach it through replication, like any other
 configuring for this; the sweep reads the node's role.
 
 ℹ️ **`_api_keys` is deliberately not swept**, though it also has an `expires_at`. That column is
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+nullable there (`null` means *never expires*), and a key's row is an administrative record: an
 expired key is *refused* at validation time, but the row stays so it still appears in the admin
 listing as expired rather than vanishing. `_audit_log` is not swept either — it is the one auth
 table left demotable on purpose, so unbounded growth pages to disk instead of exhausting a pin.
