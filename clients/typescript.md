@@ -904,6 +904,12 @@ arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use 
   it: on any failure before the commit is sent, and on a refusal of it; a lost answer after the last attempt aborts nothing, since
   the commit may be running. The error does not carry the generated key. A job does not survive a server restart: the same key
   then starts a fresh job and the load is sent from its first frame.
+- **A table another load holds** (**BL-1743, next train**). `conflictPolicy: "block"` (the default) waits for it, at most 30 s;
+  `"failFast"` does not wait. A load that cannot have it rejects with an `AoudaConflictError` whose `code` is
+  `BULK_LOAD_TABLE_LOCKED`; `JSON.parse(error.details)` names the table (`table`) and the job that holds it (`activeJobId`) — every
+  member is in [the HTTP reference](../reference/http-api.md#a-table-another-load-holds-bulk_load_table_locked) — and
+  `error.retryAfterSeconds` says when to call again. Nothing was committed, and neither `bulkLoad` nor `bulkLoadJobs` sends it again
+  by itself. (It was a `500` from the commit.)
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
   `409 BULK_LOAD_INVALID_STATE`).
