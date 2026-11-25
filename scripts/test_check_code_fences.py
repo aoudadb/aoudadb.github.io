@@ -106,6 +106,10 @@ class StaticRules(unittest.TestCase):
     def test_each_damage_alone(self):
         for code, rule in (
             ("await client.connect;", "call"),
+            ("await client.table('t').openWriteStream;", "call"),
+            ("const rows = await client.table('t')\n  .where('a', '=', 1)\n  .toArray;", "call"),
+            ("const a = { rows:, n: 1 };", "value"),
+            ("const a = { n: 1, rows: };", "value"),
             ("const s = new MemoryConsistencyTokenStore;", "call"),
             ("const d = new Date.toISOString,", "call"),
             ("stream.on('end', => { go(1); });", "call"),
@@ -124,10 +128,13 @@ class StaticRules(unittest.TestCase):
         self.assertEqual(rules(page("log('let a = ; await x.y;'); // new Foo; = ;")), [])
         self.assertEqual(rules("Call `await client.connect;` and `let a = ;`.\n"), [])
         self.assertEqual(rules(page("serve {\n listen 80;\n}", "nginx")), [])
+        self.assertEqual(rules(page("return (await client.table('t').execute()).rows;")), [])
         self.assertEqual(rules(page("/**\n * A JSDoc body is indented by one space.\n */")), [])
 
     def test_a_fence_in_a_list_and_a_fence_of_four_are_read(self):
         self.assertEqual(rules("- Item:\n\n  ```ts\n  await client.connect;\n  ```\n"), ["call"])
+        self.assertEqual(rules("> Note:\n>\n> ```ts\n> await client.connect;\n> ```\n> Call `await client.connect;`.\n"), ["call"])
+        self.assertEqual(rules("> ```json\n> {\n>   \"rows\": [],\n>   \"n\": 1\n> }\n> ```\n"), [])
         self.assertEqual(rules("````md\n```ts\nawait client.connect;\n```\n````\n"), [])
 
 
@@ -181,6 +188,20 @@ class AgainstBase(unittest.TestCase):
         self.assertRegex(swallowed[0], r"^\d{3} characters of a\.md are gone inside this line: The level is set")
 
 
+    def test_an_allowed_line_passes(self):
+        base = "Call `a()`.\nCall `b()`.\n"
+        ccf._ALLOW.add(("a.md", "Call `a`."))
+        self.addCleanup(ccf._ALLOW.discard, ("a.md", "Call `a`."))
+        self.assertEqual(self.both(base, "Call `a`.\nCall `b`.\n"), (["Call `b`."], []))
+        spliced = "The level is set in the file. An `os` load writes none |"
+        base = ("The level is set in the file (**BL-1463**; it was a setting, refused now).\n" + "A line of text between the two.\n" * 5
+                + "| Frames | Written always (**BL-1118, next train**). An `os` load writes none |\n")
+        self.assertEqual(len(self.both(base, spliced)[1]), 1)
+        ccf._ALLOW.add(("a.md", spliced))
+        self.addCleanup(ccf._ALLOW.discard, ("a.md", spliced))
+        self.assertEqual(self.both(base, spliced), ([], []))
+
+
 class CommandLine(unittest.TestCase):
     def setUp(self):
         self._dir = tempfile.TemporaryDirectory()
@@ -223,6 +244,20 @@ class CommandLine(unittest.TestCase):
         self.assertIn("a.md:3: stripped: Call `c`.", out)
         self.assertEqual(self.run_main()[0], 0)
         self.assertEqual(self.run_main("--base", "no-such-ref")[0], 2)
+
+    def test_base_is_where_the_branch_left_the_ref(self):
+        self.write("a.md", "Call `a`.\nCall `b`.\nCall `c`.\n")
+        self.git("init", "-q", "-b", "main")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("branch", "work")
+        self.write("a.md", "Call `a()`.\nCall `b()`.\nCall `c()`.\n")
+        self.git("commit", "-qam", "main writes the brackets")
+        self.git("checkout", "-q", "work")
+        self.assertEqual(self.run_main("--base", "main"), (0, ""))
+        self.git("merge", "-q", "main")
+        self.write("a.md", "Call `a`.\nCall `b`.\nCall `c`.\n")
+        self.assertEqual(self.run_main("--base", "main")[0], 1)
 
 
 class TheSweep(unittest.TestCase):

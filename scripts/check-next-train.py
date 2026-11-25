@@ -14,6 +14,8 @@ The spellings in use (all found by the one rule "a BL id list directly before th
     (**BL-1234, next train**)     (**BL-1234, BL-1235, next train**)     (**BL-1234 review, next train**)
     (aouda BL-1234, next train)   BL-1234, next train: one option ...    since **BL-1234, next train**)
 
+A line break inside a marker (`(**BL-1234, next` / `train**)`) does not hide it; its line is the first id's.
+
 A marker with no BL id (`Lead S12 (next train)`, `(**Next train:** ...)`) cannot be checked and is skipped.
 
 How "released" is decided: a BL id that appears in a released version's section of a sibling checkout's changelog is released.
@@ -53,6 +55,8 @@ SKIP_DIRS = {".git", ".claude", "_site", "vendor", "node_modules", "_review", ".
 SCAN_SUFFIXES = (".md", ".txt")
 
 _MARKER = re.compile(r"next[\s-]+train", re.IGNORECASE)
+# A line break inside a paragraph (with the next line's indent and quote marks): no blank line, list item, heading or table row after it.
+_SOFT_BREAK = re.compile(r"[ \t]*\r?\n[ \t>]*(?![ \t>\r\n]|[-+*][ \t]|#|\|)")
 # A BL id list straight before the words: "BL-1", "BL-1, BL-2", "BL-1 review", "aouda BL-1" (the prefix is skipped).
 _IDS_BEFORE = re.compile(r"(BL-\d+(?:[ \t]+[A-Za-z]+)?(?:[*`_]*[ \t]*[,/&][ \t]*[*`_]*BL-\d+(?:[ \t]+[A-Za-z]+)?)*)$")
 _BL = re.compile(r"BL-(\d+)")
@@ -93,12 +97,13 @@ class Finding:
 def find_markers(text: str) -> list[tuple[int, list[str]]]:
     """Every `next train` marker that names BL ids: (1-based line, [ids]) in reading order."""
     found: list[tuple[int, list[str]]] = []
-    for number, line in enumerate(text.split("\n"), start=1):
-        for match in _MARKER.finditer(line):
-            prefix = line[: match.start()].rstrip(" \t*`_,")
-            ids = _IDS_BEFORE.search(prefix)
-            if ids:
-                found.append((number, ["BL-" + n for n in _BL.findall(ids.group(1))]))
+    flat = _SOFT_BREAK.sub(lambda m: " " * len(m.group()), text)  # the same length, so an offset in it is an offset in the text
+    for match in _MARKER.finditer(flat):
+        start = flat.rfind("\n", 0, match.start()) + 1
+        prefix = flat[start : match.start()].rstrip(" \t*`_,")
+        ids = _IDS_BEFORE.search(prefix)
+        if ids:
+            found.append((text.count("\n", 0, start + ids.start()) + 1, ["BL-" + n for n in _BL.findall(ids.group(1))]))
     return found
 
 

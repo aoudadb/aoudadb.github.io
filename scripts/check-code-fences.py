@@ -15,9 +15,10 @@ Without `--base`, each code fence is checked for what only a missing `()`, `[]` 
 
 - `indent`    a line indented by one space right after a line that opens a block, or a `.call(` chain link at the margin;
 - `value`     an assignment, argument or JSON member with no value (`= ;`, `"rows": ,`);
-- `call`      `new Name;`, `await a.b;` (a method never called), an arrow or a `function` with no parameter list.
+- `call`      `new Name;`, `await a.b;` (a method never called), a chain that ends in `.name;`, an arrow or a `function` with no
+              parameter list.
 
-With `--base REF`, every page is also compared with REF:
+With `--base REF`, every page is also compared with REF (with the commit where this branch left it: `git merge-base`):
 
 - `stripped`  a line that differs from a line of REF only by lost `()`, `[]` or (in a fence) its indentation or inner spaces. More than
               `--max-lines` of them (default 2, so a deliberate edit of one line passes) fail;
@@ -25,7 +26,7 @@ With `--base REF`, every page is also compared with REF:
               (it does not see a passage that went inside one line, or whole lines: read the diff for those).
 
 Run it with `--base` after any edit made by a script (a sweep, a search-and-replace), and in a release PR (dev/Release-And-Version-Bump.md
-section 2). A line that is right as it is goes into `_ALLOW`, with the reason. Exit status 1 when anything is found, 0 otherwise.
+section 2). A line that is right as it is goes into `_ALLOW`, with the reason (every rule reads it). Exit status 1 when anything is found, 0 otherwise.
 """
 
 from __future__ import annotations
@@ -45,19 +46,22 @@ SWALLOWED_CHARS = 120
 # (path, stripped line) that a rule reads as damage and is right. Empty: add one only with its reason.
 _ALLOW: set[tuple[str, str]] = set()
 
+_QUOTE = re.compile(r"^(?:[ \t]*>[ \t]?)+")                                         # a fence inside a block quote
 _FENCE = re.compile(r"^\s*(`{3,})\s*([\w+-]*)")
 _CODE = {"ts", "typescript", "js", "javascript", "tsx", "jsx", "csharp", "cs"}
 _JSON = {"json", "jsonc"}
 _OPENS = re.compile(r"(?:[{\[(]|=>)\s*(?://.*|/\*.*\*/\s*)?$")
-_VALUE = re.compile(r"(?<![=!<>+\-*/%&|^?:])=\s*(?:;|,|\)|$)(?!=)|[(,]\s*,|:\s*;")
+_VALUE = re.compile(r"(?<![=!<>+\-*/%&|^?:])=\s*(?:;|,|\)|$)(?!=)|[(,]\s*,|:\s*[;,}]")
 _JSON_VALUE = re.compile(r'"\s*:\s*[,}\]]|[\[,]\s*,')
 _CALL = re.compile(r"\bnew\s+[A-Za-z_][\w.]*(?:<[\w<>,\s.\[\]]*>)?\s*[;,)]"          # new Name;
                    r"|\)\.(?:execute|count|toList|delete|truncate|toListAsync|countAsync|ToListAsync|CountAsync|FirstOrDefaultAsync);"
+                   r"|^\s*\.[A-Za-z]\w*;"                                             # the end of a chain
                    r"|[(,=]\s*(?:async\s*)?=>"                                        # an arrow with no parameter list
                    r"|\bfunction\s+[A-Za-z_$][\w$]*\s*[:{]")
 # Members that are awaited as they are (a task, not a method).
 _AWAITABLE = {"Task", "Outcome", "outcome", "MqRebuildCompleted"}
-_AWAIT = re.compile(r"\bawait\s+(?:[\w$]+\.)+([A-Za-z_$][\w$]*)\s*(?:;|$)")           # await a.b;
+_AWAIT = re.compile(r"\bawait\s+(?:[\w$]+\.)+([A-Za-z_$][\w$]*)\s*(?:;|$)"            # await a.b;
+                    r"|(?<!\()\bawait\b[^;]*\)\.([A-Za-z_$][\w$]*)\s*;")                # await a.b(c).d;
 _STRING = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\\n])*`")
 _LINE_COMMENT = re.compile(r"//.*")
 _BLOCK_COMMENT = re.compile(r"/\*.*?\*/")
@@ -75,16 +79,21 @@ class Finding:
         return f"{self.path}:{self.line}: {self.rule}: {self.text.strip()[:140]}"
 
 
+def _unquoted(line: str) -> str:
+    return _QUOTE.sub("", line)
+
+
 def fences(lines: list[str]) -> list[tuple[int, int, str]]:
     """Every code fence: (index of its first body line, index after its last, language). An unclosed one runs to the end."""
     found: list[tuple[int, int, str]] = []
     i = 0
     while i < len(lines):
-        opening = _FENCE.match(lines[i])
+        opening = _FENCE.match(_unquoted(lines[i]))
         if opening:
             close = re.compile(r"^\s*`{" + str(len(opening.group(1))) + r",}\s*$")
+            quoted = _QUOTE.match(lines[i]) is not None
             j = i + 1
-            while j < len(lines) and not close.match(lines[j]):
+            while j < len(lines) and not close.match(_unquoted(lines[j]) if quoted else lines[j]):
                 j += 1
             found.append((i + 1, j, opening.group(2).lower()))
             i = j
@@ -100,8 +109,9 @@ def _bare(line: str) -> str:
 def check_fence(path: str, lines: list[str], start: int, end: int, language: str) -> list[Finding]:
     found: list[Finding] = []
     previous = ""
+    quoted = _QUOTE.match(lines[start - 1]) is not None
     for k in range(start, end):
-        line = lines[k]
+        line = _unquoted(lines[k]) if quoted else lines[k]
         if not line.strip():
             previous = ""
             continue
@@ -121,7 +131,7 @@ def check_fence(path: str, lines: list[str], start: int, end: int, language: str
                 if _VALUE.search(bare) and not re.search(r"=\s*$", bare):
                     rules.append("value")
                 awaited = _AWAIT.search(bare)
-                if _CALL.search(bare) or (awaited and awaited.group(1) not in _AWAITABLE):
+                if _CALL.search(bare) or (awaited and awaited.group(awaited.lastindex) not in _AWAITABLE):
                     rules.append("call")
         found.extend(Finding(path, k + 1, rule, line) for rule in dict.fromkeys(rules) if (path, line.strip()) not in _ALLOW)
         previous = line
@@ -165,7 +175,7 @@ def compare_text(path: str, base: str, text: str) -> tuple[list[Finding], list[F
     flat = [squash(line) for line in old]
     for k, line in enumerate(new):
         key = squash(line)
-        if line in in_old or not key:
+        if line in in_old or not key or (path, line.strip()) in _ALLOW:
             continue
         before = gone.get(key)
         if before:
@@ -225,6 +235,12 @@ def _git_show(root: str, ref: str, path: str) -> str | None:
     return result.stdout.decode("utf-8-sig") if result.returncode == 0 else None
 
 
+def _branch_point(root: str, ref: str) -> str:
+    """Where this checkout's HEAD left REF, so that what REF gained since is not read as lost here; REF when they share nothing."""
+    result = subprocess.run(["git", "-C", root, "merge-base", ref, "HEAD"], capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else ref
+
+
 def check(root: str, base: str | None = None, max_lines: int = 2) -> list[Finding]:
     findings: list[Finding] = []
     stripped: list[Finding] = []
@@ -254,7 +270,7 @@ def main(argv: list[str]) -> int:
         print(f"error: {args.base} is not a commit of {args.root} (git fetch there first)", file=sys.stderr)
         return 2
 
-    findings = check(args.root, args.base, args.max_lines)
+    findings = check(args.root, _branch_point(args.root, args.base) if args.base else None, args.max_lines)
     for finding in findings:
         print(finding)
     if findings:

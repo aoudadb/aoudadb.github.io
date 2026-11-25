@@ -282,8 +282,8 @@ Logging__LogLevel__Aouda.Engine.Storage=Debug
 ⚠️ **Any `Logging:LogLevel` setting replaces the shipped levels as a whole**, not just its own category: the moment one key is
 set, from `appsettings.json`, an environment variable or the command line, the server applies none of the defaults in the table
 above, and every category you did not name falls to .NET's own default, `Information` — four ASP.NET lines for every request
-among them. Restate `Default` and the two `Information` categories beside the one you turn up, as above (**LoadScan, next
-train**: the benchmarks were found running this way).
+among them. Restate `Default` and the two `Information` categories beside the one you turn up, as above (the
+benchmarks were found running this way).
 
 ```json
 {

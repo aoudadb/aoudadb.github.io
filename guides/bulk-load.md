@@ -772,8 +772,8 @@ An **absent** cell of a column that has a default is neither: it takes the colum
 level, as an insert stores it. Only a null (or an absent cell of a column without a default) is what the table above describes.
 
 Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value
-in a column the row's own table (`_table`) does not have, even when another table of the job has it (**Lead group 6 review, next
-train**; a null there carries nothing and passes). The server checks each
+in a column the row's own table (`_table`) does not have, even when another table of the job has it
+(a null there carries nothing and passes). The server checks each
 `:append` frame before any of it is applied: a frame it refuses answers `400 INVALID_REQUEST` naming the column, the frame and the
 row, with none of that frame's rows applied and the frames before it kept, so the job stays open. An auto-increment column is exempt
 from the null check — a missing value takes the next id.
@@ -1296,8 +1296,8 @@ bytes and charged to the memory governor (`MaxQueuedAppendBytes` above).
 
 (**IngestAtSpeed S09, 0.1.40**) **The SDKs send rows column by column.** Against a server that
 advertises it in `:begin` (`acceptedAppendFormats`), `Aouda.Client` and `@aouda/client` send each
-`:append` as a binary column-batch frame (`ACB2`, advertised as `"column-batch-v2"` since **Lead S09, next
-train**; an `ACB1` body is refused `415 FRAME_VERSION_UNSUPPORTED`): typed values, each distinct string once per
+`:append` as a binary column-batch frame (`ACB2`, advertised as `"column-batch-v2"`;
+an `ACB1` body is refused `415 FRAME_VERSION_UNSUPPORTED`): typed values, each distinct string once per
 batch, no JSON per row. Nothing changes in how you call `BulkLoadAsync` / `bulkLoad`, in what is loaded,
 or in the resume cursor. A batch holding something the frame cannot carry (a nested object, an array, a
 column whose rows disagree on type) is sent as NDJSON, and so is every batch to an older server. NDJSON

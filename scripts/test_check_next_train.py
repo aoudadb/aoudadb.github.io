@@ -62,6 +62,14 @@ class FindMarkersTests(unittest.TestCase):
     def test_two_markers_on_one_line(self):
         self.assertEqual(self.ids("(**BL-1, next train**) and (**BL-2, next train**)"), [["BL-1"], ["BL-2"]])
 
+    def test_a_marker_a_line_break_cuts(self):
+        self.assertEqual(cnt.find_markers("one\nas sent (**BL-1, next\ntrain**; see values)."), [(2, ["BL-1"])])
+        self.assertEqual(cnt.find_markers("as sent (**BL-1,\n  next train**)."), [(1, ["BL-1"])])
+        self.assertEqual(cnt.find_markers("as sent (**BL-1, BL-2,\n> BL-3, next\n> train**)."), [(1, ["BL-1", "BL-2", "BL-3"])])
+        self.assertEqual(cnt.find_markers("as sent (**BL-1, next\r\ntrain**)."), [(1, ["BL-1"])])
+        self.assertEqual(self.ids("see BL-9\n\nnext train"), [])
+        self.assertEqual(self.ids("- see BL-9\n* next train"), [])
+
 
 class ParseReleasedTests(unittest.TestCase):
     def test_earliest_release_wins_and_unreleased_and_historical_are_not_released(self):
