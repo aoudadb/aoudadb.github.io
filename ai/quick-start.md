@@ -99,10 +99,10 @@ Use embedded mode for:
 
 ```bash
 aouda start --port 5433 --data-dir ./data
-# Bootstrap server admin, then POST /api/databases with auth enabled — see auth/setup.md
+# Create the operator (aouda init), then POST /api/databases with auth enabled — see auth/setup.md
 ```
 
-Create does not return a key. Declare the principal, or mint a key on it. a principal's statements, proved by an `aouda_` key or a session (`GET /api/auth/whoami`) (**BL-1464, 0.16.0**)
+Create does not return a key, and a browser app needs none: a user signs in, and the session is the credential. Enable `signup` with the statements a user needs first ([Signup](../auth/principals.md#signup)); a signed-up principal can do nothing until you do. A backend's key belongs to a principal: declare it, or mint a key on it (**BL-1464, 0.16.0**).
 
 ```typescript
 const client = createAoudaClient({
@@ -124,18 +124,18 @@ const session = await client.auth.signIn("alice@example.com", "Password123!");
 
 ## Error format
 
-All Aouda errors follow a stable machine-readable contract:
+Access refusals follow a stable machine-readable contract:
 
 ```json
 {
-  "error": "AUTH_TOKEN_EXPIRED",
-  "message": "The access token has expired.",
-  "suggestion": "Call POST /api/auth/refresh with your refreshToken.",
-  "requestId": "req_abc123"
+  "error": "AUTH_CREDENTIAL_EXPIRED",
+  "message": "The session has expired.",
+  "requestId": "00000000000000000000000000000000",
+  "remedy": { "kind": "renew" }
 }
 ```
 
-Use `error` for programmatic retry/fix logic. Use `suggestion` to generate the corrective action.
+Use `error` for programmatic retry/fix logic. Use [`remedy`](../auth/whoami.md#remedy) to generate the corrective action. Other errors carry `error` and `message`, and some a `suggestion`.
 
 ---
 
@@ -147,8 +147,8 @@ Use `error` for programmatic retry/fix logic. Use `suggestion` to generate the c
 | Password reset / invite email (server email provider) | Available — configure `Aouda:Auth:Email` (`console` or `sendgrid`) — see [auth/notifications.md](../auth/notifications.md) |
 | Schema-on-write (no DDL needed) | Available |
 | Identity-insert (`identityInsert: true` on insert / bulk-load) | Available — seed reserved autoIncrement IDs without schema flip; see [Getting Started](../getting-started/index.md) |
-| Structured errors with `suggestion` field | Available |
-| Two-layer auth with generated API keys | Available |
+| Structured errors with a `remedy` | Available |
+| One access model: principals, statements, one credential; `whoami` and `policy explain` | Available |
 | MCP cluster tools in `@aouda/client` | Available |
 | Full MCP server package (`@aouda/mcp-server`) | Planned |
 | Natural-language query interface | Planned |
@@ -164,9 +164,9 @@ For full capability details see [AI Agents](index.md).
 - [Local CLI testing (agents)](local-cli-testing.md) — throwaway server recipe + CLI/schema/data-plane traps
 - [Full Getting Started guide](../getting-started/index.md) — embedded mode, server mode, schema, auth, identity-insert
 - [Bulk Load](../guides/bulk-load.md) — high-throughput ingest + `options.identityInsert`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [Auth for AI agents](index.md#212-scenario-playbooks-minimum-three) — bootstrap, acting for a user, attributes and row conditions
 - [HTTP API reference](../reference/http-api.md) — all endpoints
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+- [Named queries](../guides/named-queries.md) — execute by name; a browser does not compose ad-hoc queries
 - [Direct client access](../guides/direct-client-access.md) — data-plane vs admin. PKCE is not shipped.
 - [.NET client](../clients/dotnet.md) — full `Aouda.Client` reference, including column batches and bulk load
 - [TypeScript client](../clients/typescript.md) — full SDK reference
