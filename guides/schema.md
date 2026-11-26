@@ -340,7 +340,11 @@ Key anchors:
 1. Table column add request enters `TablesController`.
 2. Catalog adds column metadata.
 3. Engine triggers cold column backfill for aligned default pages where required.
-4. Query paths preserve row alignment and return defaults for historical rows.
+4. Query paths preserve row alignment and return the column's rule for historical rows: its configured default, else null when it is
+   nullable — whatever its type, and whether the rows are in the write buffer, a hot or a cold segment — else the type's default
+   (**BL-1738, next train**: up to 0.17.1 a nullable `String` column read `""`, not null, for the rows in the write buffer when it was
+   added, and was flushed so; a derived column whose expression is null read `""` (a `String`) or kept its previous value (any other
+   type) for buffered rows). A row already stored as `""` keeps it: repair it with an update `where w eq ""`, or drop and add the column.
 5. Existing rows remain immutable (no full historical rewrite).
 
 ### Walk-through D: Branch schema lifecycle

@@ -1124,6 +1124,21 @@ server could not read was not refused: it filtered less, or nothing.
   A list or a member given twice (`"and": [...], "and": [...]`) is `400 REQUEST_MEMBER_DUPLICATE` (**BL-1664, next train**): up to 0.17
   the second list won, so a `DELETE` with two `and` lists deleted what the second alone selected. Up to 0.16.0 a condition at the top level left an empty where clause, and the read answered **every row**; a stray list
   beside a valid one dropped those conditions, which widened what an update or a delete touched.
+- **A condition's `value` is a value** (**BL-1797, next train**): a JSON object is never an operand, whatever the column's type
+  and whatever the operator (`like` and `ignoreCase` included); a JSON array is the operand of `in` / `nin` only, and a member of that
+  list is neither an object nor an array. It is `400 INVALID_REQUEST` naming the column, before anything is read or written: *Column
+  'name': a JSON object is not a filter operand — compare with a String value.* (*a JSON array in an in/nin list is not a filter
+  operand* for a member; *only in and nin take a list* for an array elsewhere). The same on every surface that takes a condition:
+  `…/query`, `…/query/count`, each `joins[].where`, `PATCH`, `DELETE`, `…/rows/batch`, a nested group, a `setExpr` or `selectExpr`
+  `conditional`'s `when` (the latter `400 SCHEMA_EXPR_UNKNOWN_FUNCTION`, the code of a bad operator there), and a subscription's
+  `filter` (`INVALID_SUBSCRIPTION_FILTER`, structured or shorthand, before a snapshot). A named query's or mutation's parameter given an
+  object is `400 NAMED_QUERY_BIND_FAILED` naming the parameter. **A definition is refused at apply or create**: `schema/apply` (a dry
+  run too) refuses one in a check, a derived column's `when`, a route's or a tee's `when`, a named query's or mutation's `where`, a
+  `setExpr` / `selectExpr` `when` and a filter materialized query's `predicate`, and so does `POST …/materialized-queries`. Up to 0.17.1
+  the object was compared as its JSON text: on a `String` column `ne` and `lt` matched every row, `eq` and `gt` none, and
+  `DELETE … where name ne {"a":1}` deleted every row with a `200`; a check, a derived column or a filter result holding one was stored
+  and true for every row. Nothing converts a definition stored before: a `case when` or a check that holds one now fails where it is
+  evaluated (naming the column), and a filter result takes no row — apply the definition again without it.
 - **A where clause with no condition is `400 INVALID_REQUEST`** — `{}`, `{"and": []}`, `{"or": []}`, `{"groups": []}`, and any group
   inside it or a join's `where` that holds none (`{"and": [{…}], "groups": [{}]}`). The `error` names where it is: *The where clause has
   no condition at 'where.groups[0]': give at least one condition in "and", "or" or "groups", or omit "where" to read every row.* (the
@@ -1460,7 +1475,7 @@ a browser read `Retry-After` as `null` on every 429 / 503).
 | Logical type | Frame kind | Value |
 |---|---|---|
 | `Int64`, `Int32`, `Int16`, `Byte`, `UInt16`, `UInt32` | `Int64` (1) | The value, widened |
-| `UInt64` | `Int64` (1) | The value's 64 bits; read them as unsigned |
+| `UInt64` | `Int64` (1), flagged unsigned (column flag 4) | The value's 64 bits, unsigned (**BL-1775, next train**: the column flag says so) |
 | `Double`, `Float32` | `Double` (2) | The value, widened (exact) |
 | `Boolean` | `Bool` (3) | Bitmap |
 | `String` | `String` (4) | A dictionary per frame |
@@ -2860,7 +2875,8 @@ seed, and the embedded engine:
   type name (`System.Collections.Generic.List`1[System.Object]`), and `PATCH` of an array into a number column answered
   `500 INTERNAL_ERROR`. A read filter follows the same rule: a JSON array as the operand of `eq`, `ne` or a range operator on a
   `String` column is `400 INVALID_REQUEST` naming the column (it was compared with that type name, so `ne` matched every row);
-  `in` / `nin` take their list as before. (A JSON object there is still compared as its JSON text, BL-1643.)
+  `in` / `nin` take their list as before. (**BL-1797, next train**) A JSON object as a filter operand is refused too, on any column and
+  operator — see [Where Clause](#where-clause).
 - **A scalar `-0` is stored as `0`** in a `Double` and a `Float32` column, whatever carried it: a JSON body always stored `0`; a
   frame's cell, a named mutation's parameter, literal or `setExpr`, a seed and the embedded engine kept the sign. An
   [array column](../guides/array-columns.md)'s element keeps its `-0`.
@@ -5945,7 +5961,7 @@ frame   := "ACB2" kind:u8 seq:u64 body
 kind 0  := data   body := rowCount:u32 columnCount:u16 column*
 kind 1  := end    body := length:u32 payload:utf8-json[length]   (at most 1 MiB)
 column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
-flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
+flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows · bit 2: an Int64 column's values are unsigned (BL-1775)
 bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
 kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 8 ScaledDecimal · 9 Array   (6: retired, refused)
 values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
@@ -5955,6 +5971,16 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
          | Array           : elementKind:u8  offsets:(rowCount + 1) × u32  elements        (BL-035, 0.9.0)
 ```
+
+(**BL-1775, next train**) **Column flag bit 2 says an `Int64` column's values are unsigned**: each slot is a `UInt64`'s 64 bits, up to
+18446744073709551615. A reader refuses it on any other kind, and refuses a flag bit it does not know by name (*unknown flags 8*). The
+server sets it on every `UInt64` column it sends (a query response, an export, a dump), and a writer sets it for a column whose values
+pass `Int64.MaxValue` (`Aouda.Client`: a `ulong`, `ColumnBatchColumn.FromUInt64s`; `@aouda/client`: a `bigint`, `column.uint64`). An
+**unflagged** `Int64` value is signed and is written by value: into a `UInt64` column a negative one is refused (`400`, as a JSON `-1`
+is), and a flagged one into another column is refused past that column's range. Up to 0.17.1 a frame did not say, and a `UInt64` column
+took every slot as its 64 bits: a client's `-1L` (or `-1n`), and a JSON `-1` on `POST …/rows`, were stored as 18446744073709551615, each a
+success. An older `Aouda.Client` refuses a server's flagged column (*Column 'v': unknown flags 4*); an older `@aouda/client` reads it as
+before (by the column's type). `aouda load` reads a dump's `UInt64` column as unsigned, so a dump written before the flag loads exactly.
 
 (**BL-035, 0.9.0**) **Kind 9, `Array`**, carries an [array column](../guides/array-columns.md): one whole array per row.
 
