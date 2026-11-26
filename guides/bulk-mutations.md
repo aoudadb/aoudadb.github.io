@@ -245,7 +245,7 @@ await client.table('auditLog').truncate();
 
 `truncate()` is the whole table: on a query with a condition, a `limit` or any other narrowing the TypeScript client refuses it, sending nothing
 (**BL-1788, next train**). The .NET client and the embedded package refuse it the same way (`InvalidOperationException`; embedded
-**BL-1785, next train** — before, an embedded `.Where(…).TruncateAsync()` emptied the table). Use `delete()` for some of the rows.
+**BL-1682, next train** — before, an embedded `.Where(…).TruncateAsync()` emptied the table). Use `delete()` for some of the rows.
 
 ```csharp
 // .NET
@@ -646,7 +646,9 @@ operation takes `where`, `set` and `setExpr`. An update operation with `limit` o
 `400 INVALID_REQUEST` — *Operation[i] update operation cannot include limit/orderBy: they bound a delete.* — before any operation runs;
 before, the server ignored both and updated every row the `where` matched. A delete operation with `set` / `setExpr` is refused too. Both
 SDKs refuse either before sending; the embedded package refuses them with the same words and binds every operation's `where` against the
-table before the first runs.
+table before the first runs. It also checks there what the server checks — a delete's negative `limit` or an
+`orderBy` column empty or named twice, an update's `setExpr` naming a column the table does not have — so a refused operation leaves the
+operations before it unapplied on both surfaces.
 
 ### When to use batch vs multiple calls
 
