@@ -2621,7 +2621,8 @@ and which JWT claim, partition-level security filters on).
   `latestPerKey`, `firstPerKey` or `topNPerGroup` without `selectColumns`), which refuses a rename of any column of its source;
 - a **named query** that reads the table (as its table or a join's) or a **named mutation** of the table names the column;
 - an **access-policy statement** whose `where` reads the column and whose resource reaches the table (`*`, `<db>/*`,
-  `<db>/table/<name or *>`, or a query or mutation of the database) — a role's, a principal's, a limited key's or the signup setting's,
+  `<db>/table/<name or *>`, or a query or mutation of the database) — a role's, a principal's, a limited key's (one that has not expired or been revoked) or the signup
+  setting's,
   in the auth database that governs the database. If that auth database exists and is not open, the rename is refused too: its
   statements cannot be checked.
 
