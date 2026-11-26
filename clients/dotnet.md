@@ -511,7 +511,7 @@ ArgumentException: Column 's' (row 0) is Byte; a byte[] is sent as base64 text, 
 ```
 
 Before, `"0012"`-shaped bytes were stored in a `Byte` column as `12` and others refused by the server. To know the column's type
-the SDK reads the table (`GET …/tables/{name}`) **for every write call that holds a `byte[]`** (**BL-1650, next train**: it kept the
+the SDK reads the table (`GET …/tables/{name}`) **for every write call that holds a `byte[]`** (**next train**, card BL-1650: it kept the
 types from the first such write, so a table dropped and re-made — or a column altered — with a `String` or `Byte[]` column turned `Byte`
 by someone else stored the next `byte[]` as a number), and once at the start of each bulk load. That is one more round trip on such a
 write — an `InsertAsync`, an `UpdateAsync`, a write stream's `WriteAsync` — the price of not storing a number. A row without a
