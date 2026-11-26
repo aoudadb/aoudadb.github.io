@@ -1134,6 +1134,12 @@ server could not read was not refused: it filtered less, or nothing.
 - **A `null` entry in a list is `400 INVALID_REQUEST`** (`"and": [null]`, `"groups": [null]`), naming where it is: *The where clause
   holds a null at 'where.and[0]': …*; a subscription `filter` with one is `INVALID_SUBSCRIPTION_FILTER`. Up to 0.16.0 it answered
   `500 INTERNAL_ERROR`.
+- **A condition's `param` or `whenParamPresent` is `400 INVALID_REQUEST` where nothing binds a parameter** (**BL-1785, next train**) —
+  every route above, a `selectExpr` or `setExpr` `conditional`'s `when` included, and a subscription `filter`
+  (`INVALID_SUBSCRIPTION_FILTER`). The `error` names the condition: *A condition at 'where.and[0]' has "param" or "whenParamPresent":
+  only a named query or mutation binds parameters; send "value".* Nothing is read or written. Up to 0.17 the server read only `value`
+  there, so `{"column": "name", "op": "ne", "param": "p"}` was `name ne null` — *is not null* — and a `DELETE` by it removed every row
+  with a name. A named query's or named mutation's `param` is bound from its `args` as before.
 - A **named query**'s definition already refused an unknown member at `schema/apply` (`SCHEMA_UNKNOWN_MEMBER`). A named query whose
   conditions are all `whenParamPresent` and whose arguments are all absent still reads every row: the rule is about what a client
   sends, not about a definition's bound clause.
@@ -3392,8 +3398,13 @@ before re-sending it). **A batch is still not one transaction.**
 | `operations[].set` | object? | No | Literal SET values (UPDATE operation) |
 | `operations[].setExpr` | object? | No | Expression SET values (UPDATE operation) |
 | `operations[].delete` | bool? | No | `true` for a DELETE operation |
+| `operations[].limit` | number? | No | A DELETE operation only: delete at most this many matching rows (`0` deletes none; at most 10,000). `hasMore` in its result says rows were left |
+| `operations[].orderBy` | object[]? | No | A DELETE operation only: the order in which `limit` picks its rows (`[{ "column": "createdAt", "descending": false }]`, up to the `DELETE …/rows` limit of columns) |
 
-Each operation must specify either (`set` or `setExpr`) or `delete: true`, not both.
+Each operation must specify either (`set` or `setExpr`) or `delete: true`, not both. **An update operation takes no `limit` and no
+`orderBy`** (**BL-1785, next train**): one with either (a non-empty `orderBy`) is `400 INVALID_REQUEST` — *Operation[i] update operation
+cannot include limit/orderBy: they bound a delete.* — before any operation runs. Up to 0.17 both were read by no one, and the update
+changed every row its `where` matched with a `200`. A delete operation with `set` or `setExpr` is refused too.
 
 **Response:** `200 OK`
 
@@ -3412,7 +3423,7 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 
 | Code | Status | When |
 |------|--------|------|
-| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE, or a group inside one with no condition; a JSON array or object in a `set` for a scalar column |
+| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE, or a group inside one with no condition; a JSON array or object in a `set` for a scalar column; an update with `limit` or `orderBy` (**BL-1785, next train**); a condition with `param` or `whenParamPresent` (**BL-1785, next train**); a `set` that names one column in two spellings (**BL-1924, next train**) |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
 | `STATEMENT_TOO_LARGE` | 400 | The first operation's matches alone exceed the read path's ceiling; nothing was applied. No `Retry-After`: narrow or split the operation. See [`STATEMENT_TOO_LARGE`](#request-validation-errors-4xx) |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `DISK_FULL`, `WAL_FAILED`); operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
