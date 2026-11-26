@@ -603,6 +603,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, 0.14.0**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
 | `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, 0.14.0**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells, add an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain, its upstream queries' sources included) — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
 | `COLUMN_RENAME_REFERENCED` | 409 | (**BL-1925, BL-1926, next train**) A column rename (`PATCH …/columns/{c}` with `newName`, Embedded's `AlterColumnAsync` / `RenameColumnAsync`, or a schema apply's or branch merge's rename, where it is the rename's failed entry) is refused while a definition stored outside the catalog reads the column: a materialized query that names it — or, when its result holds the whole source row, any column of its source —, a named query or named mutation that names it, or an access-policy statement whose `where` reads it. Nothing was changed (on the `PATCH` route, no other field of the request either). The message names each definition, a statement by its holder (role, principal, limited key's principal, the signup setting) and never by its `where` values. A rename does not rewrite these definitions: drop or redefine each, rename the column, then re-create them by the new name. |
+| `TABLE_RENAME_REFERENCED` | 409 | (**BL-1929, next train**) A table rename (`PATCH …/tables/{name}`, Embedded's `RenameTableAsync`) is refused while a definition stored outside the catalog names the table: a materialized query that reads it or whose result it is, a named query that reads it (as its table or a join's), a named mutation of it, or an access-policy statement whose resource is `<db>/table/<name>` (a wildcard resource does not count). Nothing was changed. The message names each definition, a statement by its holder. A table rename rewrites other tables' `references` and transforms' `to`, not these definitions: drop or redefine each, rename the table, then re-create them by the new name. |
 | `DECLARED_IN_CONFIGURATION` | 409 | (**BL-1463, 0.16.0**) The call would change an object the declaration file declares — a declared database, the schema of a database that declares one, a declared principal, role, credential or `signup` setting. Nothing was changed; the message names the file and the JSON pointer. Change the declaration, then run `aouda reload`. See [One writer per declared object](#one-writer-per-declared-object) |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
@@ -2512,6 +2513,31 @@ where row conditions applies. statements `drop` is still required and is not eno
 #### `PATCH /api/databases/{db}/tables/{name}`
 
 Rename a table. `newName` follows the [table-name rule](#table-names): breaking it is `400 INVALID_REQUEST`. A `__mqbuild_*` `{name}` is `404 TABLE_NOT_FOUND`.
+
+(**BL-1929, next train**) The rename rewrites every definition in the catalog that names the table, in the same change: other tables'
+`references` to it (its own self-references too) and every table's `tee` / `route` transform whose `to` is it. A point-in-time restore
+and a replica replay the rename the same way. Before, both kept the old name: a tee into the renamed table failed each insert it
+matched, and once another table took the old name the reference and the tee resolved to that table — rows copied into it, a child's key
+checked against it.
+
+A table a stored definition outside the catalog names is not renamed: the request is refused `409 TABLE_RENAME_REFERENCED`, and nothing
+changes, while
+
+- a **materialized query** reads the table (its `sourceTable`), or the table is a materialized query's **result**;
+- a **named query** reads the table (as its `table` or a join's) or a **named mutation** is of the table;
+- an **access-policy statement** whose resource names the table — `<db>/table/<name>` — is a role's, a principal's, a limited key's
+  (one that has not expired or been revoked) or the signup setting's, in the auth database that governs the database. A wildcard
+  resource (`*`, `<db>/*`, `<db>/table/*`) follows the table and does not refuse. If that auth database exists and is not open, the
+  rename is refused too: its statements cannot be checked.
+
+The message names each definition (a statement by its holder). Drop or redefine each, rename the table, then re-create them by the new
+name. Table names match exactly: a definition naming the table in another case names another table. Before, the rename went through:
+the query's maintenance and every named call kept the old name, and a statement granted the table under a name nothing had any more —
+and granted it again to a table created later under that name.
+
+A `newName` that is a table's, or a materialized query's — one being created included, before its result table exists — is
+`409 TABLE_EXISTS` (**BL-1929, next train**: the query's name was not checked, so a table renamed into a query's create was taken for
+the query's result).
 
 **Request:**
 

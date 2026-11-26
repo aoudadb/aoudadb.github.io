@@ -885,6 +885,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |
 | Column rename `409 COLUMN_RENAME_REFERENCED` naming `named query '…'` / `named mutation '…'` *(**BL-1926, next train**)* | A named query reading the table (as its table or a join's) or a named mutation of it names the column; a rename does not rewrite the definition, so every later call would fail `COLUMN_NOT_FOUND` | Drop the definition (or re-apply it without the column), rename, then deploy it again by the new name |
+| Table rename `409 TABLE_RENAME_REFERENCED` naming `named query '…'` / `named mutation '…'` *(**BL-1929, next train**)* | A named query reading the table (as its table or a join's) or a named mutation of it names the table; a rename does not rewrite the definition | Drop the definition, rename the table, then deploy it again by the new name |
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
