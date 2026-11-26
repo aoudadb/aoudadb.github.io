@@ -404,6 +404,7 @@ static factory on `ColumnBatchColumn`, then the batch with `ColumnBatch.Of(...)`
 | Factory | Values | Sent as |
 |---|---|---|
 | `FromInt64s(name, long[] values, byte[]? nullBits = null, byte[]? absentBits = null)` | 64-bit integers | `Int64` |
+| `FromUInt64s(name, ulong[] values, nullBits, absentBits)` (**BL-1775, next train**; also `ulong?[]`) | unsigned 64-bit integers, up to 18446744073709551615 | `Int64`, flagged unsigned (a `UInt64` column stores each value exactly; an unflagged negative `Int64` is refused there) |
 | `FromDoubles(name, double[] values, nullBits, absentBits)` | doubles | `Double` |
 | `FromBools(name, bool[] values, nullBits, absentBits)` | booleans | `Bool` |
 | `FromTimestamps(name, DateTime[] values, nullBits, absentBits)` | instants. A `DateTimeKind.Local` value is converted to UTC; an `Unspecified` one is taken as UTC. | `Timestamp` |

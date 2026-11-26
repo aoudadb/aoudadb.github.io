@@ -340,7 +340,11 @@ Key anchors:
 1. Table column add request enters `TablesController`.
 2. Catalog adds column metadata.
 3. Engine triggers cold column backfill for aligned default pages where required.
-4. Query paths preserve row alignment and return defaults for historical rows.
+4. Query paths preserve row alignment and return the column's rule for historical rows: its configured default, else null when it is
+   nullable — whatever its type, and whether the rows are in the write buffer, a hot or a cold segment — else the type's default
+   (**BL-1738, next train**: up to 0.17.1 a nullable `String` column read `""`, not null, for the rows in the write buffer when it was
+   added, and was flushed so; a derived column whose expression is null read `""` (a `String`) or kept its previous value (any other
+   type) for buffered rows). A row already stored as `""` keeps it: repair it with an update `where w eq ""`, or drop and add the column.
 5. Existing rows remain immutable (no full historical rewrite).
 
 ### Walk-through D: Branch schema lifecycle
@@ -929,7 +933,7 @@ describe the behaviour before that. A security member of the 0.14 access model i
 | ~~`encoder`~~ | — | — | — | Removed (**BL-768, 0.3.0**): it named an encoder preference that changed nothing once columns chose an encoding per vector. A schema file that still carries it applies; the key is ignored, as any unknown key is. |
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
-| `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
+| `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). (**BL-1899, next train**) An operand the written row omits reads as that column's configured default — the value the row is stored with (up to 0.17.1 it read null: `v + x` over an omitted `x DEFAULT 5` stored null, and a NOT NULL derived column refused the write). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
 | `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) Required on every `Decimal` column. |
 | `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
 | `drives` | `drives` | `string` | None | (**ADR 0072, 0.14.0**) On `"type": "Expression"` only: the column of the same table this formula column drives. See [Formulas](formulas.md#the-column). |
