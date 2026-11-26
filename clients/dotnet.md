@@ -511,13 +511,25 @@ ArgumentException: Column 's' (row 0) is Byte; a byte[] is sent as base64 text, 
 ```
 
 Before, `"0012"`-shaped bytes were stored in a `Byte` column as `12` and others refused by the server. To know the column's type
-the SDK reads the table (`GET …/tables/{name}`) the first time a row holds a `byte[]`, keeps it per client and table, reads it again
-when a `byte[]` names a column it does not know or a write that used it fails, and reads it fresh at the start of each bulk load. A
-row without a `byte[]` costs nothing. The read needs `Read` on the table: a principal that may write a table but not read it gets
-that refusal when a row holds a `byte[]`, and nothing is sent. A table that does not exist, and a column it does not have, are left
-to the server, as before. ⚠️ Outside a bulk load the SDK does not notice that someone else changed a column's type: if a table is
-dropped and re-made with a `String` or `Byte[]` column turned `Byte` (or the type altered) after this client read it, a `byte[]`
-sent there is still stored as a number until a write fails or a new client is made (**BL-1650**).
+the SDK reads the table (`GET …/tables/{name}`) **for every write call that holds a `byte[]`** (**next train**, card BL-1650: it kept the
+types from the first such write, so a table dropped and re-made — or a column altered — with a `String` or `Byte[]` column turned `Byte`
+by someone else stored the next `byte[]` as a number), and once at the start of each bulk load. That is one more round trip on such a
+write — an `InsertAsync`, an `UpdateAsync`, a write stream's `WriteAsync` — the price of not storing a number. A row without a
+`byte[]` costs nothing. The read needs `Read` on the table: a principal that may write a table but not read it gets that refusal when a
+row holds a `byte[]`, and nothing is sent. A table that does not exist, and a column it does not have, are left to the server, as before.
+
+**A typed array of another element type is refused the same way** (**BL-1271, next train**). A dictionary row's `double[]`, `float[]`,
+`int[]`, `long[]` or `string[]` is sent as JSON, which any numeric array column takes — a `float[]` for a `Double[]` column was stored as
+each float's shortest text (`0.1`, not the `0.10000000149011612` the float holds). A frame refuses the mismatch; so does every JSON write
+path now, before sending, with `ArgumentException` naming the column and both types:
+
+```text
+ArgumentException: Column 'd' (row 0) is Double[]; a Single[] is Float32[], and an array column takes its own element type — nothing is converted. Send a Double[].
+```
+
+The array must be the column's own CLR type (the table above); nothing is converted. This check uses the column types the client read
+for the table (the first time a row holds an array, again when an array names a column it does not know, and again after a refusal), and a
+bulk load reads them afresh.
 
 ```csharp
 var samples = client.GetTable("Samples");
@@ -544,9 +556,10 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
 - **A value the SDK cannot read as its column's type throws** (`InvalidDataException`); nothing maps to a default. Mapping to an
   object is **exact**: `ToObjects<T>` assigns a property whose type is assignable from the CLR type above (`double[]`,
   `IReadOnlyList<double>`, `object`) and throws `InvalidCastException` otherwise — a `double[]` property for a `Float32[]` column
-  throws, no element is converted. Typed subscriptions are **not** exact: they go through System.Text.Json, so an `int[]` column fills a `double[]` property and a
-  `float[]` property is filled from the widened text, an `object` property gets a `JsonElement`, and a failure arrives as an
-  `InvalidOperationException` (BL-1245). Give a typed subscription the exact CLR type above.
+  throws, no element is converted. A typed subscription (`GetTable<T>().SubscribeAsync`) is exact for array columns too (**BL-1245, next
+  train**): a property whose type is not assignable from its column's CLR array type ends the subscription with
+  `InvalidCastException` naming the property and the column — at the snapshot or at the change that holds it. Before, it went through
+  System.Text.Json's number conversion, and a `float[]` property for a `Double[]` column narrowed every element without a word.
   A `Timestamp` column fills a `DateTime`, `DateTime?` or `DateTimeOffset` property in the snapshot **and in every change**
   (**BL-1381, 0.11.0**; 0.10.0 did it for the snapshot only and a change threw); a `long` property does not read.
   `ToDataTable` columns have the array type.
@@ -984,6 +997,62 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   as an `AoudaSubscriptionLimitException` (an `AoudaRequestException`, not a connection error) with the server's message, which names the cap
   and what raises it.
 
+### When the user changes (**BL-1856, next train**)
+
+A realtime connection belongs to the principal that opened it (the token's issuer and subject): what is subscribed on it was read as that
+principal. So when another principal's session replaces the one the client holds — `SignInAsync`, `SignUpAsync`, `ExchangeCodeAsync` or
+`SignInWithOidcAsync` as another user, or a sign-in on a client made with a key — or the session ends — `SignOutAsync` (local or global scope),
+a refresh the server refuses for good — everything realtime of the earlier session ends, at once and by name, on the WebSocket and on long-poll,
+whatever the connection is doing (open, connecting, falling back, waiting to reconnect):
+
+- Every subscription's enumerator (table, typed table, named query) throws `AoudaSessionReplacedException` with `ErrorCode`
+  `AUTH_SESSION_REPLACED`; its message says whether the session was replaced or ended. Events it had queued and you had not read are
+  **not** handed out, and it is not resumed.
+- A write stream's `WriteAsync` and `CloseAsync` throw the same exception; its `DisposeAsync` does not. Nothing more is sent for it.
+- A subscribe or an `OpenWriteStreamAsync` that was still connecting throws it too.
+- What you make from then on — in a `TokensChanged` handler, after `SignInAsync` returned — is on a new connection, as the user signed in
+  then, and shares nothing with what there was (a shared subscription of the same query is a new one). After a sign-out, with nobody signed
+  in, it is refused as any realtime call without a credential is.
+
+The same user's new token — a refresh, a repeat `SignInAsync` of the same user, an OIDC re-exchange — ends nothing: the connection is
+re-authenticated with it (`re_auth`), over long-poll too. The rows your code already took from an enumerator are yours to clear. The exception
+is not an authentication failure — nothing was refused — so do not answer it by signing the user out: subscribe again if somebody is signed
+in. When the server ends a session first (a sign-out elsewhere, a revoked key: it checks an open connection every heartbeat), the
+subscriptions end with its `AoudaAuthenticationException` (`AUTH_CREDENTIAL_REVOKED`) and the client does not reconnect them under another
+token: handle both. An access token that **expires** on an open connection is not an end: the server closes the session with
+`AUTH_CREDENTIAL_EXPIRED` when nothing renewed the token (an application that only subscribes makes no call that refreshes it), and the client
+reconnects with a refreshed token, as the same user, and its subscriptions resume; only a credential that cannot be renewed (a key past its
+expiry, a refresh the server refuses) ends them.
+
+```csharp
+async Task BindAsync(CancellationToken ct)
+{
+    try
+    {
+        await foreach (var change in client.GetTable("orders").SubscribeAsync(ct))
+            Apply(change);
+    }
+    catch (AoudaSessionReplacedException)
+    {
+        ClearOrders();               // what the earlier user saw is not the next one's
+        if (signedIn)                // your application's own state: somebody is signed in now
+            _ = BindAsync(ct);       // a new subscription, on a new connection, as that user
+    }
+}
+```
+
+The same rule holds for what is not realtime. **A bulk load, a `BulkLoadJobsAsync` sequence and an `IBatchWriter` belong to the user they were
+made by** (a load: when it is called; a writer: when it is created; with nobody signed in then, the first user a request of it carries): none of
+their requests — a job's `:begin`, its `:append`s, its commit or abort, a writer's batch — goes out as another user. The load or the sequence
+throws `AoudaSessionReplacedException` (`AUTH_SESSION_REPLACED`), the jobs it already committed stay committed and their handles were
+yielded; the writer faults with it (inside `BatchWriterFaultedException`), counts its queued rows failed and accepts no more —
+`ContinueOnError` does not continue past it. A job the server has begun and that no request finishes is aborted by the server at its idle
+timeout. **A call is sent in the session it was made in** (**BL-1855, next train**): a call that waited for a token refresh while another user
+signed in, and a call the server refused `401` after the session was replaced, are not sent (again) with the new user's token — they throw
+`AoudaSessionReplacedException` with `ErrorCode` `AUTH_REFRESH_SUPERSEDED`, unsent; a retry (`RetryPolicy`) is not repeated once the session
+changed, and the call throws the failure its last attempt got. `SignOutAsync` signs out the session it was called in: it sends that session's
+token and clears only that session, so a sign-in that completed while it was under way stays signed in.
+
 ---
 
 ## 8b) Which databases a sign-in opens (**BL-1018, 0.9.0**)
@@ -1152,8 +1221,22 @@ public static class BackupExamples
   (`AoudaCapacityException` — memory, WAL capacity, `429 SERVER_AT_CAPACITY` — or `AoudaServerStartingException`) or a connection that
   never opened, so these two reach your code: retry after `RetryAfter` yourself. `SetScheduleAsync` and `SetRetentionAsync` replace the
   whole value and are re-sent after any transient failure, these two included.
-- **After a restore, discard the consistency token this client holds.** A restore rewinds the node; a token from before it is ahead of
-  the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a new client.
+- **A restore discards this client's consistency tokens** (**BL-1731, next train**). A restore rewinds the node; a token from before it is
+  ahead of the node, and every read carrying it answered `409 TOKEN_UNSATISFIED` until it was discarded. A successful `RestoreAsync` (exact
+  or point in time) now forgets every token of the client's `ConsistencyTokenStore`, so its next read is served. Another client that held
+  a token — another process, a client with another store — calls `client.ForgetConsistencyTokens()`; so does the restoring client after a
+  restore whose answer was lost (the server may have restored). A store of your own implements `IConsistencyTokenStore.Forget(database)`
+  and `ForgetAll()` (both new, both required).
+
+### The declaration (**BL-1609, next train**)
+
+`client.Declaration` reads what the server runs on: `ViewAsync()` is `GET /api/admin/declaration` (`DeclarationView`: `Source`, `File`,
+`PlanHash`, the canonical `Declaration` as fingerprints, the declared `Databases`, and `Last` — the last start or reload with its
+`Findings`), and `ExportAsync()` is `GET /api/admin/declaration/export` (`DeclarationExport`: the `Declaration` text of the server's whole
+state, its `SchemaFiles`, `Origins` and `Notes`). Both need `manage` on `server`, on the admin listener; a principal without it gets
+`403`. ⚠️ The export's text can carry stored-key **hashes** — not a key, but the secret class: write it where one belongs. The record's
+`ToString()` does not print it; the SDK never logs or keeps it. The export writes an audit row, so a node that does not accept writes
+refuses it (`503 READ_ONLY`): export from the primary.
 
 ---
 
