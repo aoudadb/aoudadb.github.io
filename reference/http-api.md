@@ -602,6 +602,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `FORMULA_REFERENCE_NOT_READABLE` | 403 | (**ADR 0072, 0.14.0**) A formula reads a row its writer may not read (no read access to the table, a row outside the writer's row or partition conditions, or a row that does not exist and cannot be judged on its key); also a server write that set a formula with no caller to check. The message names the formula row and the reference, never whether the row exists; nothing was written. |
 | `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, 0.14.0**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
 | `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, 0.14.0**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells, add an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain, its upstream queries' sources included) — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
+| `COLUMN_RENAME_REFERENCED` | 409 | (**BL-1925, BL-1926, next train**) A column rename (`PATCH …/columns/{c}` with `newName`, Embedded's `AlterColumnAsync` / `RenameColumnAsync`, or a schema apply's or branch merge's rename, where it is the rename's failed entry) is refused while a definition stored outside the catalog reads the column: a materialized query that names it — or, when its result holds the whole source row, any column of its source —, a named query or named mutation that names it, or an access-policy statement whose `where` reads it. Nothing was changed (on the `PATCH` route, no other field of the request either). The message names each definition, a statement by its holder (role, principal, limited key's principal, the signup setting) and never by its `where` values. A rename does not rewrite these definitions: drop or redefine each, rename the column, then re-create them by the new name. |
 | `DECLARED_IN_CONFIGURATION` | 409 | (**BL-1463, 0.16.0**) The call would change an object the declaration file declares — a declared database, the schema of a database that declares one, a declared principal, role, credential or `signup` setting. Nothing was changed; the message names the file and the JSON pointer. Change the declaration, then run `aouda reload`. See [One writer per declared object](#one-writer-per-declared-object) |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
@@ -2611,6 +2612,25 @@ request carrying only `encoder` is now refused as having nothing to alter. The e
 (**BL-1199, 0.9.0**) A partition-key column is not renamed: `newName` on one is refused `400 PARTITION_KEY_FIXED`, before
 any other field of the request is applied (it was renamed; on a composite key a rename to or from `tenant_id` changed which column,
 and which JWT claim, partition-level security filters on).
+
+(**BL-1925, BL-1926, next train**) A column a stored definition reads is not renamed: `newName` is refused
+`409 COLUMN_RENAME_REFERENCED`, before any other field of the request is applied, while
+
+- a **materialized query** over the table names the column — its filter, `selectColumns`, group-by, an aggregate's input or order, the
+  order or tie-break of a `latestPerKey` / `firstPerKey` / `topNPerGroup` — or its result holds the **whole source row** (a `filter`,
+  `latestPerKey`, `firstPerKey` or `topNPerGroup` without `selectColumns`), which refuses a rename of any column of its source;
+- a **named query** that reads the table (as its table or a join's) or a **named mutation** of the table names the column;
+- an **access-policy statement** whose `where` reads the column and whose resource reaches the table (`*`, `<db>/*`,
+  `<db>/table/<name or *>`, or a query or mutation of the database) — a role's, a principal's, a limited key's (one that has not expired or been revoked) or the signup
+  setting's,
+  in the auth database that governs the database. If that auth database exists and is not open, the rename is refused too: its
+  statements cannot be checked.
+
+The message names each definition (a statement by its holder, never its `where` values). A rename rewrites the table's own definitions
+in the catalog — derived expressions, checks, transforms, references (**Durability-1, next train**) — but not these: drop or redefine
+each, rename the column, then re-create them by the new name. Before, the rename went through: a `filter` query over the renamed column
+answered an **empty** result and reported itself current, a query selecting it (or holding the whole row) went to `Error`, every call of
+a named query or mutation naming it failed `COLUMN_NOT_FOUND`, and a statement on it granted no row of the table.
 
 **Request:**
 
