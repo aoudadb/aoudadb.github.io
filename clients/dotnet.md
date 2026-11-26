@@ -709,7 +709,7 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 
 | `BulkLoadOptions` property | Default | What it does |
 |---|---|---|
-| `IdempotencyKey` | a new GUID | Names the job. Use a stable key in production: re-running a load with the same key resumes it, and re-running one that already committed returns its handle without sending a row. |
+| `IdempotencyKey` | a new GUID | Names the job. Use a stable key in production: re-running a load with the same key resumes it, and re-running one that already committed returns its handle without sending a row. (**BL-1649, next train**) A key belongs to the database as it is: after a drop and create, a restore to before the job or a drop of the job's table it loads again; a key whose job lost some of its tables is refused, `AoudaRequestException` with `ErrorCode` `BULK_LOAD_JOB_EXISTS`, nothing loaded. |
 | `AppendBatchSize` | 50,000 | Most rows in one `:append` body. Lowered to the server's `maxRowsPerAppend` (100,000 by default) when that is smaller. |
 | `MaxAppendBytes` | 8 MiB | Most bytes in one `:append` body; a body closes at whichever limit it reaches first. `0` disables the byte bound. |
 | `RequestTimeout` | 10 minutes | Deadline for each bulk-load HTTP call (not for the job, and not `AoudaClientOptions.Timeout`). A caller-supplied `HttpClient`'s own `Timeout` still caps it. |

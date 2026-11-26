@@ -5586,7 +5586,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `database` | string | Yes | Database name (must match `{db}` in path). |
 | `tables` | string[] | Yes | Tables this load writes to. Index 0 is the primary table. Single-element array for single-table loads. When more than one table is listed, each row in `:append` calls must carry a `"_table"` discriminator field naming its destination. Empty array is rejected (400). |
 | `options` | object? | No | Load options (see below). |
-| `idempotencyKey` | string? | No | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
+| `idempotencyKey` | string? | No | The job's resume handle. A `:begin` with the key of a job **in flight** resumes it (`nextSequence`); with the key of a job that **committed** within `Aouda:BulkLoad:IdempotencyWindowMinutes` it replays that job (`alreadyCompleted: true`) and loads nothing; with the key of a job that failed or was aborted it starts a new job, for that job's beginner only (another credential: `403 AUTH_POLICY_DENIED`). Scoped to the database. (**BL-1649, next train**) A key belongs to the database **as it is**: a drop and create, a restore in place from a backup taken before the job, or a drop of the job's table frees it — the same key starts a new job; a quarantine and reopen, or a restore from a backup that holds the job, keeps it; `TRUNCATE` and `DELETE` do not free it. See [idempotency keys](#idempotency-keys-bl-1649-next-train). (This row read "Not produced (BL-1464…)", the text of an auth row, until **BL-1649**.) |
 
 **Load options:**
 
@@ -5651,7 +5651,7 @@ A table with no write-time compute needs neither flag.
 | `nextSequence` | number | (**Lead S21a, 0.6.0**) The number of the job's next frame: `0` for a new job; for a reconnect to a live job, the first frame it has not applied. A job's frames are [numbered across all its bodies](#a-jobs-frames-are-numbered-lead-s21a-060). Send from this frame. |
 | `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, 0.6.0**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
 | `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count) and `rowsAppended` (number?). **Resume from `nextSequence`** (above): the frames below it are applied, buffered ones included, and `rowsAppended` is the rows they carry — a client that resumes by frames checks that the frames it skips carry exactly that many, so a client whose framing changed (another source, other body bounds) stops instead of loading rows twice or not at all. `rowsDurablyCommitted` counts only the durable rows and is not a position. (**Lead S21a, 0.6.0; breaking**) This replaces `resumeFromRow`, a row cursor, which is gone. ⚠️ No server rebuilds a cursor after a restart yet (BL-067): an open job does not survive one, and a `:begin` with its key afterwards starts a fresh job (`nextSequence: 0`), so the load is sent from its first frame. Both SDKs resume this way (`@aouda/client` from **Lead S22, 0.6.0**). |
-| `alreadyCompleted` | bool | `true` when the idempotency key matched a job that already **committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`): no session is opened, and `:append` / `:commit` on this `jobId` are refused `409 BULK_LOAD_INVALID_STATE`. Read the job's result from `rowsDurablyCommitted` and `token` below. `false` otherwise. |
+| `alreadyCompleted` | bool | `true` when the idempotency key matched a job that already **committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`) **in this database as it is** — its rows are there: no session is opened, and `:append` / `:commit` on this `jobId` are refused `409 BULK_LOAD_INVALID_STATE`. Read the job's result from `rowsDurablyCommitted` and `token` below. `false` otherwise. (**BL-1649, next train**) It was also `true` for a job of a database since dropped and created again, restored to before the job, or whose table was dropped, with none of its rows in the table. |
 | `rowsDurablyCommitted` | number? | With `alreadyCompleted`: the committed job's rows. |
 | `durability` | string | (**Lead S26c, 0.6.0**) The level the job will commit at, `"strict"` or `"os"`; for a replayed completed job (`alreadyCompleted`), the level it committed at. |
 | `validation` | string? | (**Lead S27a, 0.6.0**) The job's validation, `"coerce"` or `"strict"`. Omitted for a job answered from its commit record after a restart (the record does not keep it). |
@@ -5678,6 +5678,32 @@ Content-Type: application/json
   "resumedFromDurableCursor": null
 }
 ```
+
+#### Idempotency keys (**BL-1649, next train**)
+
+A key answers for the database's records as they are now — the server opened them, and the key names a job in them — not for the
+database's name:
+
+- **Freed** (the same key starts a new job, `alreadyCompleted: false`, `nextSequence: 0`): the database dropped and created again;
+  restored in place from a backup taken before the job; dropped and restored from such a backup; the job's table dropped (a table
+  created again under its name is another table). A job of a failed or aborted session is no longer reserved for its beginner either.
+- **Kept** (the key replays the job): a quarantine and reopen; a restore, in place or after a drop, from a backup that holds the job; a
+  server restart within the window; `TRUNCATE` or `DELETE` of the job's rows — the job committed, and the key says so for the window.
+- **Refused** (`409 BULK_LOAD_JOB_EXISTS`, nothing loaded): the key's job loaded several tables and some of them have been dropped
+  since. Replaying would report rows that are gone, loading again would load the others twice. Load what is missing under a new key.
+- A job in flight, or retained, from before a drop and create (or a restore in place, or a reopen) is not the database's: `:append`,
+  a body that commits, `:commit`, `:abort`, `:force-abort` and `GET {jobId}` answer `404 BULK_LOAD_JOB_NOT_FOUND`, and `:list` does
+  not show it. The one exception is a job the database's own records hold — one that **committed** before a reopen, or one a restore
+  brought back with the backup: `GET {jobId}` answers it from those records (`completed`), as after a restart. Before **BL-1649**, the
+  new database answered the old job: a `:begin` with its key resumed it, and its `:commit` failed `500 INTERNAL_ERROR`.
+
+**Errors** (the key's; the options' are with each option above, and the policy's in the paragraph below):
+
+| Code | Status | When |
+|---|---|---|
+| `AUTH_POLICY_DENIED` | 403 | The key belongs to a job another credential began — in flight, committed, or failed or aborted inside the window. The message does not carry the job id. |
+| `BULK_LOAD_JOB_EXISTS` | 409 | (**BL-1649, next train**) The key's committed job loaded several tables and some of them have been dropped since. Nothing was loaded. `details` is JSON text: `jobId`, `tablesLeft` (the job's tables still there), `tablesGone` (how many are not), `requestTablesGone` (this request's tables the job no longer holds). Not retryable: load what is missing under a new key. The ownership refusal (`403`) comes first. |
+| `BULK_LOAD_INVALID_STATE` | 409 | A reconnect to a job in flight whose `:append` did not stop in time: no stable `nextSequence` to give. Retry `:begin`. |
 
 **Authorization (**BL-1464, 0.16.0**).** Every bulk-load route requires a `write` statement on **`<db>/table/*`**: one that names single tables does not open it. `:begin`, every `:append` and `:commit` require besides an unconditional `write` (a statement with no `where`; on `<db>/table/*` it is both) on every table the load writes — the tables in the request, plus transform targets when `applyTransforms` is set. A statement with a `where` admits none of the load: no row check sees the rows. The refusal is `403 AUTH_POLICY_DENIED`, naming each refused table, with remedy `grant` of that unconditional statement (`none` when a credential limit refused it). `AUTHORIZATION_DENIED` is not produced. A table that is gone is `404 TABLE_NOT_FOUND`. A statement with no `where` on a table another statement restricts is audited as [unconditional access](#audit).
 
@@ -5933,7 +5959,7 @@ Content-Type: application/json
 
 | Code | Status | When |
 |---|---|---|
-| `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
+| `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired, or (**BL-1649, next train**) a job of the database as it was before a drop and create, a restore in place or a reopen — unless the database's own records hold it as committed ([idempotency keys](#idempotency-keys-bl-1649-next-train)). |
 | `AUTHORIZATION_DENIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `BULK_LOAD_TABLE_LOCKED` | 409 | (**BL-1743, next train**) Another job holds one of the job's tables: at once under `conflictPolicy: "failFast"`, once the job has waited 30 s under `"block"`. `Retry-After` is set; a body that commits is answered the same. See [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). It was `BULK_LOAD_INVALID_STATE`. |
@@ -6147,7 +6173,7 @@ List the sessions this credential began. Another credential's job is omitted, no
 
 ### `POST {jobId}:abort`
 
-Abort an in-flight session. The beginning principal only: another is `403 AUTH_POLICY_DENIED` with remedy `none` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). A missing job is `404 BULK_LOAD_JOB_NOT_FOUND`.
+Abort an in-flight session. The beginning principal only: another is `403 AUTH_POLICY_DENIED` with remedy `none` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). A missing job is `404 BULK_LOAD_JOB_NOT_FOUND` — and so is a job of the database as it was before a drop and create, a restore in place or a reopen (**BL-1649, next train**).
 
 ### `POST {jobId}:force-abort`
 

@@ -912,7 +912,10 @@ arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use 
   by itself. (It was a `500` from the commit.)
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
-  `409 BULK_LOAD_INVALID_STATE`).
+  `409 BULK_LOAD_INVALID_STATE`). (**BL-1649, next train**) Only while the job's rows can be there: after the database is dropped and
+  created again, restored to before the job, or the job's table dropped, the same key loads again. A key whose job loaded several
+  tables, some of them dropped since, rejects with an `AoudaConflictError` coded `BULK_LOAD_JOB_EXISTS` and loads nothing — load
+  what is missing under a new key ([idempotency keys](../reference/http-api.md#idempotency-keys-bl-1649-next-train)).
 - **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129). With
   `validation: "strict"` it also refuses a null in any NOT NULL column, and a key the job holds twice or the table already holds
   fails the job (`409 BULK_LOAD_DUPLICATE_PK`, an `AoudaApiError` with that `code`); `handle.validation` names the level.
