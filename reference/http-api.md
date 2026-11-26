@@ -681,6 +681,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `SUBSCRIPTION_DATABASE_REPLACED` | WS error | (**BL-1818, next train**) The subscription ended because its database's engine was replaced: a set restore (sent when the restore has finished, whether it succeeded, failed or was cancelled), an unquarantine, a drop and create, or a replica's checkpoint install. Sent once, after the last snapshot page (instead of `snapshot_complete` when the snapshot was still being sent, or right after a `snapshot_complete` already on its way); the code is the database's state when the end is sent, so a quarantine or a drop that is undone at once can end with this code too; the connection stays open and the subscription's limit slot is free. Subscribe again with **no** `resume_from`: a fresh snapshot, whose versions may be lower than those held. `@aouda/client` and `Aouda.Client` do this by themselves, five times at most between two snapshots (0, 250, 500, 1000, 2000 ms). See [When the database is replaced](../guides/real-time.md#when-the-database-is-replaced-bl-1818-next-train) |
 | `DATABASE_QUARANTINED` | WS error | At a `subscribe`: refused, the database is quarantined. On a live subscription (**BL-1818, next train**): it ended — its database was quarantined, or did not open after a restore. Not sent again; the connection stays open |
 | `DATABASE_NOT_FOUND` | WS error | At a `subscribe`: refused, the database is not open. On a live subscription (**BL-1818, next train**): it ended — its database was dropped, or (a replica's checkpoint) did not open again within 60 seconds. The connection stays open |
+| `TABLE_NOT_FOUND` | WS error | At a `subscribe`: refused, the table does not exist. On a live subscription (**BL-1824, next train**): it ended — its table was dropped or renamed, or its materialized query dropped. Sent once, after the last snapshot page; the connection stays open. A table made again under the name is another table: subscribe again once it exists. A materialized query's publication never sends it |
 | `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
 | `CONFLATE_NOOP` | `snapshot_complete` warning | `conflate` is set without `collapse_inserts` and the key is not the table PK (insert-only no-op). Subscribe still registers. |
@@ -2448,6 +2449,8 @@ interface and a named query's row, and a named mutation's argument takes `Float6
 what every path that reads or writes a row gives, so no read needs a cast it cannot make: a `Timestamp` column is `string | Date` (ISO text
 in a query result, a `Date` in a subscription row), a `Date` column `number | Date` (its day number in a query result), a decimal
 `string | number` (a number in a query result). A named query's argument keeps the one value it takes: `Date` for a `Timestamp` or a `Date` column.
+(**BL-1863, next train**) A column the table declares nullable is `T | null` in its interface (`c_Bool: boolean | null`): a read gives
+`null` for an unset nullable cell. An Expression column was already `Formula | null`; a key column is never nullable.
 
 ```typescript
 /**
@@ -4954,7 +4957,8 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `name` | string? | Conditional | Named-query unique name. **Required on the data-plane listener.** |
 | `args` | object? | No | Bind arguments for `name` subscribe. Same shape as HTTP execute `args`. |
 | `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin` and `like`, on the column types the query path accepts them for (no ordering on `Bool` or `Guid`; `like` on `String`). `in` / `nin` take a non-empty array of non-null members of the column's type (**BL-1226, 0.9.0**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). The snapshot and the live events select the same rows, a nullable column included: a null never matches `ne`, `nin`, `lt` or `lte` (`eq null` and `ne null` test for null), as in a query. To state that for live events the server adds an `IS NOT NULL` beside each such condition, and an `or` list needs a copy of itself per alternative, so the cost is bounded (**BL-1226, 0.9.0**): one `or` list may hold at most 6 conditions with `ne`, `nin`, `lt` or `lte`, the rewrite may add at most 256 groups and 2048 conditions to one filter, and it may not nest groups past the depth limit of 5. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot. Fold several `ne` on one column that mean "none of these" into one `nin` (`ne` conditions in an `and` list cost one `IS NOT NULL` per column, which no honest filter reaches the bound with), or split the subscription. Up to 0.8.0 a live event with a null matched those four while the snapshot held none, and a `Bool` column's `eq`, `ne`, `in` and `nin` never matched a live event. The user-filter rewrite is unchanged. The same null rule now holds for an row conditions predicate and for a named query's bound clause on the live path, without that rewrite (**BL-1251, 0.9.0**). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). Read as strictly as a query's `where`: an object with an `and`, `or` or `groups` member is the structured form and may hold nothing else — a shorthand column beside them (`{"v": {"gte": 3}, "and": […]}`) or a member a condition does not have is refused `INVALID_SUBSCRIPTION_FILTER` naming it — and a filter with no condition (`{}`, `{"and": []}`, `{"groups": [{}]}`) is refused too: omit `filter` to subscribe to every row. Up to 0.16.0 the member was dropped (the shorthand half of a mixed filter was lost) and `{}` subscribed to every row. |
-| `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. |
+| `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. (**BL-1823, next train**) A resume only with `resume_stream`: without it the subscribe is a fresh one. |
+| `resume_stream` | string? | No | (**BL-1823, next train**) The `stream` of the last `snapshot_complete` this subscription received — the change stream `resume_from` is a number of. When it is not the stream the database's engine has now (the engine was replaced, or reopened by a restart or after a crash), the answer is a **fresh complete snapshot**, never an error. Ignored without `resume_from`. Opaque: compare it for equality only. |
 | `at_least` | string? | No | Consistency-token pin: snapshot at at least this token. Optional `wait_ms` / `on_exceeded` (same values as HTTP). Omitted `at_least` leaves `resume_from` byte-for-byte today's path. |
 | `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |
 | `on_exceeded` | string? | No | `wait` \| `fetchPrimary` \| `fail`. |
@@ -5010,7 +5014,7 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 After an input edit the subscription receives the input's `change` and then each formula row that changed, once, at its final value; an
 unchanged recompute sends nothing. An `Expression` column's value is the formula's JSON object in a snapshot page's `data` and in a
 change's `row` and `prev` (a map in MessagePack); (**BL-1495, 0.15.0**) a snapshot's `column_types` names it `"Expression"`, as it
-names a `Timestamp`, so a typed client can read the object as a formula. `at_least`, `wait_ms` and `on_exceeded` are judged by the
+names a `Timestamp`, so a typed client can read the object as a formula — and so does a change's (**BL-1866, next train**). `at_least`, `wait_ms` and `on_exceeded` are judged by the
 formula maintainer's progress, as on a read. See [Formulas](../guides/formulas.md#live-subscriptions).
 
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
@@ -5285,9 +5289,9 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `id` | string | Subscription ID this snapshot belongs to. |
 | `columns` | string[] | (**Lead S12, 0.6.0**) The page's column names. |
 | `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
-| `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
+| `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect, with `snapshot_complete.stream` as `resume_stream` (**BL-1823, next train**). |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
-| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. (**BL-1495, 0.15.0**) And each `Expression` column, as `"Expression"` (`{"formula":"Expression"}`): the cell is the formula's JSON object, on every page, a denied subscriber's empty page included. A `change` does not repeat a `Timestamp`, `Date` or `Expression` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
+| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. (**BL-1495, 0.15.0**) And each `Expression` column, as `"Expression"` (`{"formula":"Expression"}`): the cell is the formula's JSON object, on every page, a denied subscriber's empty page included. (**BL-1866, next train**) A `change` names them too, for the columns its `row`, `prev` or `key` carries; read each message by its own `column_types` (up to 0.17.1 a change named array columns only, and a client kept the snapshot's names). `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
 
 **Example:**
 ```json
@@ -5325,6 +5329,7 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 | `horizon` | string? | (**Horizon, 0.5.0**) The subscribed table's horizon, ISO-8601 UTC with seven fractional digits (`"2026-10-11T12:34:00.0000000Z"`), when it has one — a windowed materialized query's result or a table with retention. It is read after the snapshot, so for a moment the snapshot can hold a row below it; a `horizon` message then follows. Apply it to the snapshot as to a notice: drop every row whose `horizon_column` lies below it or is null. Omitted for any other table. A windowed result's snapshot (and a named-query subscribe's `total_matches`) is its **stored** part: nothing below the horizon is computed for a subscription. |
 | `horizon_column` | string? | (**Horizon, 0.5.0**) The column `horizon` applies to; present with it. |
 | `horizon_column_type` | string? | (**Horizon, 0.5.0**) `"date"` when `horizon_column` is a `Date` column — its row values are day numbers (days since the Unix epoch), not Unix milliseconds. Omitted for a `Timestamp`. |
+| `stream` | string | (**BL-1823, next train**) The change stream `version` and every later change's `version` are numbers of: 32 hex characters, made at each open of the database's engine, never persisted. Send it back as `resume_stream` with `resume_from`. A version is comparable only within one stream: a fresh snapshot of another stream has lower numbers — do not drop it for them. |
 
 ```json
 {
@@ -5332,6 +5337,7 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
   "id": "sub-orders-1",
   "version": 100040,
   "row_count": 2,
+  "stream": "7d0c3f5e9a2b4c61b8e0f1a2d3c4b5a6",
   "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
@@ -5342,7 +5348,7 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 
 Server-emitted per-subscription overflow signal. The sequence number is **per-database**, so the client cannot infer a gap from `seq > last + 1`. On the first drop after a clean period the server emits exactly one `gap` on the affected subscription and unregisters it. Other subscriptions on the same connection are unaffected.
 
-Feed `last_seq` to a new `subscribe` as `resume_from` (existing three-outcome path). This is **unintentional** loss. Distinguish from `change.values_skipped` (intentional conflation).
+Feed `last_seq` to a new `subscribe` as `resume_from`, with the subscription's `resume_stream` (existing three-outcome path). This is **unintentional** loss. Distinguish from `change.values_skipped` (intentional conflation).
 
 | Field | Type | Description |
 |---|---|---|
@@ -5377,7 +5383,7 @@ Incremental row change on an active subscription. Sent whenever a row matching t
 | `version` | number | Per-database sequence version of this change. Do not infer gaps from holes. |
 | `values_skipped` | number? | Present on conflated value updates: count of intermediate updates dropped. **Not** a `gap`. |
 | `token` | string? | C-1 token of **this event's** WAL position. Hand to HTTP `?at_least=` to be sure the read sees this change. |
-| `column_types` | object? | (**BL-035, 0.9.0**) As on `snapshot`: the array columns `row` / `prev` carry, name to type name; omitted when there is none. |
+| `column_types` | object? | (**BL-035, 0.9.0**) As on `snapshot`: the array columns `row` / `prev` carry, name to type name; omitted when there is none. (**BL-1866, next train**) And its `Timestamp`, `Date` and `Expression` columns that `row`, `prev` or `key` carries, as a snapshot page names them. |
 
 **Example — insert:**
 ```json

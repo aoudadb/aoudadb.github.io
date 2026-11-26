@@ -808,8 +808,9 @@ the database, a `_serverauth` principal's included, opens its socket too. Detail
 
 (**BL-1381, 0.11.0**) A `Timestamp` cell is a `DateTime` of kind `Utc` on every subscription surface (table, named query, typed),
 with the 100 ns tick kept, in the snapshot rows and in each change's `Row`, `PreviousRow` and `Key`. The server names a `Timestamp`
-column in the snapshot only; the SDK keeps those names for the life of the subscription (across a reconnect, a gap resume and a
-`SLOW_CONSUMER` fresh subscribe) and replaces them when a new snapshot arrives; a resumed stream that sends no snapshot keeps the old names. A null stays null; a value that is not a tick count ends
+column in each message that carries it — a snapshot page and a change alike (**BL-1866, next train**) — and the SDK reads each message by
+its own names: a change after a resume (no snapshot) is typed, and a column dropped and made again as a number is a number. (Up to 0.17.1
+the server named it in the snapshot only, and the SDK kept those names for the life of the subscription.) A null stays null; a value that is not a tick count ends
 the subscription with an `InvalidDataException` naming the column. No converter or option is needed. Wire detail:
 [Real-time Streaming](../guides/real-time.md) (Timestamp columns in a subscription).
 
@@ -941,12 +942,19 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   lost: the subscribers already reading are unaffected.
 - **Snapshot warnings are raised once per server snapshot** (to the client's `NamedArtifactWarning` sink), not once per consumer: a
   subscriber that joins later is not told again.
-- **Resuming from a sequence you hold.** `SubscribeOptions.ResumeFrom` (the `Version` of the last event you saw) sends `resume_from`
-  on the first subscribe, so the stream continues from there (the server answers with a snapshot when it cannot resume; the first
-  event is then a snapshot, otherwise a change). A subscribe with a `ResumeFrom` never shares a server subscription: it continues its
-  own stream, and one reconnect before its first event resumes from the same point.
-- **A reconnect resubscribes once per shared subscription** (with `resume_from`), however many consumers it has, over the WebSocket and
-  the long-poll transport alike. A server error, a refused subscribe included, reaches every consumer of that subscription.
+- **Resuming from a point you hold** (**BL-1823, next train**: a pair, it was a `long`). `SubscribeOptions.ResumeFrom` takes a
+  `SubscriptionResumePoint(Stream, Version)` — the `ResumePoint` of the last event you saw (every `SubscriptionEvent` names its `Stream`,
+  the change stream its `Version` is a number of) — and sends `resume_from` with `resume_stream` on the first subscribe, so the stream
+  continues from there. The server answers with a snapshot when it cannot resume — and always when the stream is not the one the
+  database's engine has now (a restart, a restore, a replacement): the first event is then a snapshot, otherwise a change. A subscribe
+  with a `ResumeFrom` never shares a server subscription: it continues its own stream, and one reconnect before its first event resumes
+  from the same point.
+- **A reconnect resubscribes once per shared subscription** (with `resume_from` and the stream), however many consumers it has, over the
+  WebSocket and the long-poll transport alike; with no stream known it subscribes fresh. A snapshot is never dropped for its version (a
+  new stream's are lower; **BL-1823, next train**). A server error, a refused subscribe included, reaches every consumer of that subscription.
+- **A subscribe or a write stream opened while the long-poll session is lost** waits for the session the reconnect opens and goes out
+  there, once (**BL-1860, next train**; it was posted to the lost session and failed at once). A send the server answers `404` (the session
+  gone, the message not taken) is sent again on the next session.
 - `AoudaClient.ActiveConsumers` and `AoudaClient.ActiveServerSubscriptions` give the sharing ratio.
 
 ### Limits, refusals and reconnects (**BL-1383, 0.11.0**)
