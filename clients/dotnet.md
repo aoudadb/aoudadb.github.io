@@ -1019,7 +1019,10 @@ re-authenticated with it (`re_auth`), over long-poll too. The rows your code alr
 is not an authentication failure — nothing was refused — so do not answer it by signing the user out: subscribe again if somebody is signed
 in. When the server ends a session first (a sign-out elsewhere, a revoked key: it checks an open connection every heartbeat), the
 subscriptions end with its `AoudaAuthenticationException` (`AUTH_CREDENTIAL_REVOKED`) and the client does not reconnect them under another
-token: handle both.
+token: handle both. An access token that **expires** on an open connection is not an end: the server closes the session with
+`AUTH_CREDENTIAL_EXPIRED` when nothing renewed the token (an application that only subscribes makes no call that refreshes it), and the client
+reconnects with a refreshed token, as the same user, and its subscriptions resume; only a credential that cannot be renewed (a key past its
+expiry, a refresh the server refuses) ends them.
 
 ```csharp
 async Task BindAsync(CancellationToken ct)
