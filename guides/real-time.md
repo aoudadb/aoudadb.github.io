@@ -351,8 +351,14 @@ stay open, and the subscription's slot under the connection and identity limits 
 | Dropped (and perhaps created again) | `DATABASE_NOT_FOUND` | at the drop |
 | A replica's checkpoint install | `SUBSCRIPTION_DATABASE_REPLACED` | when the database opens again; `DATABASE_NOT_FOUND` if it has not 60 seconds after it closed |
 
+The code is the database's state when the end is sent, not the operation's name: a quarantine followed at once by an unquarantine, or a
+drop followed at once by a create, can end the subscription with `SUBSCRIPTION_DATABASE_REPLACED`, because the database is open again by
+then. Handle all three codes at any point of a subscription's life.
+
 - **Once per subscription, after the last snapshot page it was sent.** A subscription still receiving its snapshot gets the end instead
-  of `snapshot_complete`; one caught before it was registered gets it instead of its snapshot. Nothing of the replaced engine follows it.
+  of `snapshot_complete` — or right after it, when the replacement came while `snapshot_complete` was being sent; the snapshot it
+  completed is the replaced engine's, so treat the two alike. One caught before it was registered gets the end instead of its snapshot.
+  Nothing of the replaced engine follows it.
 - **On `SUBSCRIPTION_DATABASE_REPLACED`, subscribe again with no `resume_from`**: a fresh snapshot of the new engine. Its versions may be
   lower than the ones you held — a version belongs to one engine's stream — so do not drop a snapshot or a change for a lower version.
   Both SDKs do this by themselves: [`@aouda/client`](../clients/typescript.md#when-the-database-is-replaced-bl-1818-next-train) and
