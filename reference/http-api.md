@@ -5693,8 +5693,9 @@ database's name:
   since. Replaying would report rows that are gone, loading again would load the others twice. Load what is missing under a new key.
 - A job in flight, or retained, from before a drop and create (or a restore in place, or a reopen) is not the database's: `:append`,
   a body that commits, `:commit`, `:abort`, `:force-abort` and `GET {jobId}` answer `404 BULK_LOAD_JOB_NOT_FOUND`, and `:list` does
-  not show it. Before **BL-1649**, the new database answered the old job: a `:begin` with its key resumed it, and its `:commit`
-  failed `500 INTERNAL_ERROR`.
+  not show it. The one exception is a job the database's own records hold — one that **committed** before a reopen, or one a restore
+  brought back with the backup: `GET {jobId}` answers it from those records (`completed`), as after a restart. Before **BL-1649**, the
+  new database answered the old job: a `:begin` with its key resumed it, and its `:commit` failed `500 INTERNAL_ERROR`.
 
 **Errors** (the key's; the options' are with each option above, and the policy's in the paragraph below):
 
@@ -5958,7 +5959,7 @@ Content-Type: application/json
 
 | Code | Status | When |
 |---|---|---|
-| `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired, or (**BL-1649, next train**) a job of the database as it was before a drop and create, a restore in place or a reopen ([idempotency keys](#idempotency-keys-bl-1649-next-train)). |
+| `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired, or (**BL-1649, next train**) a job of the database as it was before a drop and create, a restore in place or a reopen — unless the database's own records hold it as committed ([idempotency keys](#idempotency-keys-bl-1649-next-train)). |
 | `AUTHORIZATION_DENIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `BULK_LOAD_TABLE_LOCKED` | 409 | (**BL-1743, next train**) Another job holds one of the job's tables: at once under `conflictPolicy: "failFast"`, once the job has waited 30 s under `"block"`. `Retry-After` is set; a body that commits is answered the same. See [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). It was `BULK_LOAD_INVALID_STATE`. |
