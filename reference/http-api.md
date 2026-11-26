@@ -463,13 +463,63 @@ All errors return a JSON body with this structure:
 }
 ```
 
+### Request bodies are read strictly (**BL-1659, BL-1664, next train**)
+
+Every JSON request body on every route — both listeners — is read strictly, at any depth, and a body the server cannot read is
+refused before anything is read or written:
+
+- **A member the route does not take is `400 REQUEST_MEMBER_UNKNOWN`** — `"wehre"` for `"where"`, `"limt"` for `"limit"`, a member
+  in a nested object, a list item or a condition. The `error` names the member and its JSON path, and `remedy` lists the names that
+  object takes when the server knows them:
+
+  ```json
+  {
+    "error": "The request body has a member 'wehre' this route does not take, at $.wehre.",
+    "code": "REQUEST_MEMBER_UNKNOWN",
+    "details": null,
+    "requestId": null,
+    "remedy": "Remove it, or spell it as one of: database, table, select, where, orderBy, limit, offset, …"
+  }
+  ```
+
+- **A member given twice in one object is `400 REQUEST_MEMBER_DUPLICATE`** — also in another case (`"name"` and `"NAME"`: member
+  names are read without case, so they are one member), inside a `set` or `args` map, and inside a cell's object value. `error`
+  names it: *The request body gives 'and' twice, at $.where.and: each member once.*
+- **The routes that read their body by hand keep the case**: `POST …/rows`, a JSON `:append`, the branch routes (create, diff, merge, query, insert) and
+  `schema/seed` take their member names exactly as written — `"Columns"` is `REQUEST_MEMBER_UNKNOWN` there, and so is `"TABLE"` beside
+  `"table"`.
+- **Any other body that cannot be read is `400 INVALID_REQUEST`** with the path: not JSON, a value of the wrong type, an empty body,
+  a query or route value that does not parse. No refusal shows a .NET type name, and the framework's validation body
+  (`type`, `title`, `errors`, `traceId`) is never sent.
+
+A name that looks like a key, a hash or a session token is never echoed (the `error` gives the path of its object only), and a name
+is cut to 64 characters. Both codes are never satisfied by a retry: fix the body. The refusal is in the route's own envelope:
+`ProtocolError` (above) on the data and admin routes, the auth envelope (`error` = the code, `message`, `suggestion`) under
+`/api/auth/` and `/api/databases/{db}/auth/`, and `{ "code", "message" }` under `…/stream/longpoll/`. A table named `auth` is not an
+auth route.
+
+Three readers keep their own code for an unknown member, because the CLI and the start read the same documents: a **schema
+document** and its `schema/apply` envelope (`SCHEMA_UNKNOWN_MEMBER`), and a **posted declaration** (`POST /api/admin/reload`,
+`INVALID_REQUEST` with the JSON pointer). A member given twice in a schema document is `REQUEST_MEMBER_DUPLICATE`
+(`"options": {"dryRun": true, "dryRun": false}` applied for real before). A body sent to a route that reads none (`:abort`,
+`promote`, `unquarantine`, …) is ignored, as before. Realtime client messages follow the same rule (see
+[Client → Server Messages](#client--server-messages)).
+
+**What an old client gets.** Up to 0.17 a member a body did not take was dropped and a repeated member kept its last copy: a misspelt
+`where` read **every row**, `"limt": 1` on `DELETE …/rows` deleted every match, and a `where` with two `and` lists kept only the
+second. A client that sends a stray member — a misspelling, a field of another version, a response's field echoed back — now gets
+`400 REQUEST_MEMBER_UNKNOWN` instead, and nothing is applied. `@aouda/client` and `Aouda.Client` send no member the server does not
+read; `@aouda/client`'s `MaterializedQueryDefinition` lost `storage` and `updateMode`, which the server never read.
+
 ### Error Codes
 
 #### Request Validation Errors (4xx)
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path; or a `where` (or a group inside it, or a `joins[].where`) holds no condition (see [Where Clause](#where-clause)) |
+| `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path; or a `where` (or a group inside it, or a `joins[].where`) holds no condition (see [Where Clause](#where-clause)). (**BL-1659, next train**) Every body or value that does not bind is this code, with its path, in the route's own envelope — never the framework's validation body |
+| `REQUEST_MEMBER_UNKNOWN` | 400 / WS error | (**BL-1659, next train**) A request body — or a realtime client message — has a member its route or message does not take, at any depth. `error` names the member and its JSON path; `remedy` lists the names that object takes. Nothing is read or written. Not retryable: remove the member or spell it as the route does. See [Request bodies are read strictly](#request-bodies-are-read-strictly-bl-1659-bl-1664-next-train). Up to 0.17 the member was dropped without a word |
+| `REQUEST_MEMBER_DUPLICATE` | 400 / WS error | (**BL-1664, next train**) A request body — or a realtime client message — gives one member twice in one object, also in another case, also inside a `set` or `args` map or a value. `error` names it and its path. Nothing is read or written. Not retryable: give each member once. Up to 0.17 the last copy won |
 | `INVALID_FORMAT` | 400 | (**Lead S12, 0.6.0**) The request names the `format` query parameter (`/query`, a named query's execute or batch). It is no longer read: every JSON result is column arrays (`columns`, `data`), and the binary form is asked for with `Accept: application/vnd.aouda.column-batch-v2`. Any value is refused, `columnar` included, so an old client asking for `rows` is told rather than handed a body it misreads. Drop the parameter |
 | `ROW_OBJECTS_UNSUPPORTED` | 400 / 415 | (**Lead S12, 0.6.0**) A write body carries row objects (`rows`, or a named mutation's batch argument given as an array of objects), which no surface reads any more: `POST …/rows`, a branch insert, a named mutation's `batchParam`, the schema seed and `aouda.seed.json`, and a WebSocket `stream_rows` (as its `error` code). A bulk-load `:append` sent as NDJSON (`application/x-ndjson`) is refused the same way with `415`. Send [column arrays](#column-arrays-the-write-body) — `columns`, `data` and, for a cell that is not given, `absent` — or upgrade the client library. Nothing was written |
 | `MISSING_TABLE` | 400 | Table name is missing from request |
@@ -573,7 +623,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `IDENTITY_STAMP_REQUIRED` | 400 | Service role omitted a required identity-stamped column |
 | `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE` | 400 | A named mutation's `values` / `set` / `setExpr` names a server-time column (**NativeClients, 0.4.0**) |
-| `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, 0.14.0**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
+| `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, 0.14.0**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word. (**BL-1659, next train**) A member of a request body outside a schema document — a table create, a materialized-query create, a removed access-model member — is `REQUEST_MEMBER_UNKNOWN` |
 | `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, 0.14.0**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda plan`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint; `aouda plan` and the start report it as the finding `SCHEMA_OVERLAY_INVALID` ([Declaration Finding Codes](plan-codes.md)). Fix: move the member to the base file. Before, it was dropped |
 | `EXPRESSION_OVERFLOW` | 400 | (**BL-1481, 0.15.0**) A `setExpr`, or a derived column's expression, overflowed 64-bit integer or 18-digit decimal arithmetic for a row; nothing written |
 | `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp). At `…/bulk-load/:append`, also when `set-identity` was removed from a table's transform since `:begin` and a frame carries a value in such a column |
@@ -1057,23 +1107,22 @@ server could not read was not refused: it filtered less, or nothing.
 - **A member a where clause or a condition does not have is `400`.** A where clause has only `and`, `or` and `groups`; a condition has
   only `column`, `op`, `value`, `param`, `whenParamPresent` and `ignoreCase`. A condition written at the top level
   (`"where": {"column": "v", "op": "gte", "value": 3}` instead of `"where": {"and": [{…}]}`), a misspelt list (`"ors"`) or a misspelt
-  member (`"vlaue"`, `"values"`, `"ignore_case"`) is refused before the request runs, and nothing is read or written. The body is the
-  framework's validation body (it has no `code`); `errors` is keyed by the member's JSON path and the message names the member:
+  member (`"vlaue"`, `"values"`, `"ignore_case"`) is refused before the request runs, and nothing is read or written: `400
+  REQUEST_MEMBER_UNKNOWN` naming the member and its JSON path (**BL-1659, next train**; up to 0.17 the framework's validation body,
+  with no `code`):
 
   ```json
   {
-    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
-    "title": "One or more validation errors occurred.",
-    "status": 400,
-    "errors": {
-      "$.where.column": ["The JSON property 'column' could not be mapped to any .NET member contained in type 'Aouda.Protocol.WhereClause'."]
-    },
-    "traceId": "00-…"
+    "error": "The request body has a member 'column' this route does not take, at $.where.column.",
+    "code": "REQUEST_MEMBER_UNKNOWN",
+    "details": null,
+    "requestId": null,
+    "remedy": "Remove it, or spell it as one of: and, or, groups."
   }
   ```
 
-  `errors` may also hold a `"request"` entry (*"The request field is required."*): the body as a whole could not be read. Up to 0.16.0
-  the member was dropped. A condition at the top level left an empty where clause, and the read answered **every row**; a stray list
+  A list or a member given twice (`"and": [...], "and": [...]`) is `400 REQUEST_MEMBER_DUPLICATE` (**BL-1664, next train**): up to 0.17
+  the second list won, so a `DELETE` with two `and` lists deleted what the second alone selected. Up to 0.16.0 a condition at the top level left an empty where clause, and the read answered **every row**; a stray list
   beside a valid one dropped those conditions, which widened what an update or a delete touched.
 - **A where clause with no condition is `400 INVALID_REQUEST`** — `{}`, `{"and": []}`, `{"or": []}`, `{"groups": []}`, and any group
   inside it or a join's `where` that holds none (`{"and": [{…}], "groups": [{}]}`). The `error` names where it is: *The where clause has
@@ -1746,7 +1795,7 @@ The body is empty (`{}`); the answer is structural.
 
 #### `POST /api/databases/{db}/branches/{name}/query`
 
-Query one table on a branch (**BL-1161, BL-1298, 0.9.0**). The body is `{ "table" }` only; any other property is ignored, and the table name is case-sensitive.
+Query one table on a branch (**BL-1161, BL-1298, 0.9.0**). The body is `{ "table" }`, and optionally `database`, which must equal the path's database (`400 INVALID_REQUEST` otherwise); any other property is `400 REQUEST_MEMBER_UNKNOWN` (**BL-1659, next train**; it was ignored). The table name and the member names are case-sensitive.
 
 `200` is the same columnar body as [`POST …/query`](#post-apidatabasesdbquery): `columns`, `types`, `data`, `rowCount`, `stats`, `token`. The body has no `clrType`.
 
@@ -2126,8 +2175,8 @@ query's name). They do not survive a destructive schema replace.
 
 ⚠️ **`storage` is a schema-file field, not an HTTP create field** (**BL-625, 0.1.37**).
 This page previously said `POST /api/databases/{db}/materialized-queries` accepted it too. It does
-not: `MaterializedQueryCreateBody` has no such property, so a `storage` key posted to that route is
-deserialized away in silence and the result table is created with the engine default. Create the
+not: the create body has no such member. Up to 0.17 a `storage` key posted to that route was dropped in silence and the result
+table created with the engine default; it is now `400 REQUEST_MEMBER_UNKNOWN` (**BL-1659, next train**). Create the
 query through `POST .../schema/apply`, or set the result table's policy afterwards with
 `PUT /api/databases/{db}/tables/{name}/policy`.
 
@@ -2552,7 +2601,7 @@ into its result as a plain `String` column (a result is an ordinary table, never
 (lowest `clusterOrder`) must be a `Timestamp` or `Date`; it may be nullable. A refused declaration — no such column, a `keep` that is
 not a duration, an edge table, a table with a vector column — is `400` naming its reason. The response's `policy` carries `retention` and `horizon`.
 
-**A table carries no security (**BL-1464, 0.16.0**).** `POST …/tables`, `PUT …/tables/{name}/options`, edge-table create, vector-column create and materialized-query create refuse a body that sends a security member with `400 SCHEMA_UNKNOWN_MEMBER`, naming the member. `PUT …/options` sets `culture` only. Who may read or write the table is a statement. See [Policy](../auth/authorization.md).
+**A table carries no security (**BL-1464, 0.16.0**).** `POST …/tables`, `PUT …/tables/{name}/options`, edge-table create, vector-column create and materialized-query create refuse a body that sends a security member with `400 REQUEST_MEMBER_UNKNOWN` (**BL-1659, next train**; `SCHEMA_UNKNOWN_MEMBER` up to 0.17), naming the member and what replaces it, whatever its value. `PUT …/options` sets `culture` only. Who may read or write the table is a statement. See [Policy](../auth/authorization.md).
 
 ```json
 {
@@ -3485,7 +3534,7 @@ write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtables
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
 | `rlsColumn` | string? | No | Adds a nullable `String` column (for example `org`), for a statement's `where` to compare. |
 
-Needs an unconditional `write` statement on `<db>/table/*` (the table is named in the body, so a statement on that one table does not cover it). `400 INVALID_REQUEST` for a missing field, `400 SCHEMA_UNKNOWN_MEMBER` for a security
+Needs an unconditional `write` statement on `<db>/table/*` (the table is named in the body, so a statement on that one table does not cover it). `400 INVALID_REQUEST` for a missing field, `400 REQUEST_MEMBER_UNKNOWN` for a security
 member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the name is taken.
 
 ```json
@@ -3574,7 +3623,7 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `rlsColumn` | string? | No | As for an edge table. |
 
 Needs an unconditional `write` statement on the table it creates. `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance` or
-`quantization`, `400 SCHEMA_UNKNOWN_MEMBER` for a security member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the table exists.
+`quantization`, `400 REQUEST_MEMBER_UNKNOWN` for a security member (**BL-1464, 0.16.0**; the code since **BL-1659, next train**); `409 TABLE_EXISTS` when the table exists.
 
 #### `POST /api/databases/{db}/tables/{name}/vectors/{column}`
 
@@ -4908,7 +4957,19 @@ Messages default to JSON encoding. MessagePack binary encoding can be negotiated
 
 ### Type Discriminator
 
-Every message is a JSON object (or MessagePack map) with a top-level `"type"` field. The receiver peeks `"type"` to dispatch to the correct deserializer. Unknown `type` values are silently discarded.
+Every message is a JSON object (or MessagePack map) with a top-level `"type"` field. The receiver peeks `"type"` to dispatch to the correct deserializer.
+
+**A client message is read strictly (**BL-1664, next train**).** The server answers a client message it cannot read with an `error`
+frame carrying the message's own `id` when the text has one: a member the message does not take — at any depth, a `conflate` object
+included — is `REQUEST_MEMBER_UNKNOWN`, and a member given twice, in a `filter` too, is `REQUEST_MEMBER_DUPLICATE`, each naming the
+member and its path. Nothing of the message is done: a `subscribe` refused this way delivers nothing. `UNKNOWN_MESSAGE_TYPE` is only for
+a `type` the server has no message of; a known type whose body does not read is `INVALID_MESSAGE`, naming the type. A first `auth` that
+does not read is answered `auth_error` with the same codes, not *First message must be auth*. On a long-poll `…/send` the refusal is the
+send's `400`, `{ "code", "message" }`. The retired second credential member is no member of `auth` or `re_auth` any more:
+`REQUEST_MEMBER_UNKNOWN`, its value never shown. Up to 0.17 an unknown member was dropped — `{"type": "subscribe", "filtre": …}`
+subscribed to **every row** — and a known type that did not read was answered *Unknown message type* with no `id`. Server messages
+stay lenient on the client side: an older SDK still reads a newer server's frames. An unknown member of a `filter` itself keeps
+`INVALID_SUBSCRIPTION_FILTER` (the shorthand form makes every name a column).
 
 ---
 
@@ -4921,7 +4982,7 @@ Authenticate the connection and optionally negotiate wire mode.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Always `"auth"` |
-| `token` | string | Yes | The caller's own credential: one key or one session token. A second credential field is `400 INVALID_REQUEST` and the value is not read. |
+| `token` | string | Yes | The caller's own credential: one key or one session token. A second credential field is `auth_error` `REQUEST_MEMBER_UNKNOWN` (**BL-1664, next train**; `INVALID_REQUEST` up to 0.17) and the value is not read. |
 | `database` | string | Yes | Database name this connection is scoped to. |
 | `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
 
