@@ -611,6 +611,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `CONNECTION_LIMIT_EXCEEDED` | WS `error` frame before auth / 429 | The server's global connection pool (`Aouda:WebSocket:MaxConnections`) is full. Retry later. |
 | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` | WS `auth_error` / 429 | (**BL-1383, 0.11.0**) The identity already holds `MaxConnectionsPerIdentity` (default 16) connections, WebSocket and long-poll together. Sent inside the handshake, after identity resolution and before `auth_ok`; long-poll `connect` answers 429. A client must not reconnect in a loop. |
 | `SUBSCRIBE_RATE_EXCEEDED` | WS error | (**BL-1383, 0.11.0**) The identity's subscribe token bucket is empty (an attempt refused for another reason still costs a token). The frame carries `retry_after_ms`; a long-poll `/send` also sets `Retry-After`. |
+| `MESSAGE_TOO_LARGE` | WS `auth_error` / WS `error` / 413 | (**BL-1938, next train**) A realtime client message larger than the server reads in one: **64 KiB before authentication** (the first message, `auth`; a long-poll `connect` body), **`Aouda:WebSocket:MaxMessageBytes` after** (default 4 MiB; a WebSocket message with all its fragments, a long-poll `…/send` body). It is refused as it arrives, never kept: before authentication `auth_error` and the socket closed `1009` (Message Too Big); after it an `error` frame with the message's own `id`, nothing of the message done, and the connection stays open (a write stream refused this way ends, and the frame after it is refused for its sequence); on long-poll `413` in `{ "code", "message" }`, before the body is read further. No retry can satisfy it: send fewer rows in one `stream_rows` frame, or have the operator raise the setting. Up to 0.17 a message of any size was read whole, the first one before authentication. |
 | `AUTH_GRANT_INVALID` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_GRANT_NOT_APPLICABLE` | 400 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
@@ -4981,6 +4982,21 @@ send's `400`, `{ "code", "message" }`. The retired second credential member is n
 subscribed to **every row** — and a known type that did not read was answered *Unknown message type* with no `id`. Server messages
 stay lenient on the client side: an older SDK still reads a newer server's frames. An unknown member of a `filter` itself keeps
 `INVALID_SUBSCRIPTION_FILTER` (the shorthand form makes every name a column).
+
+
+**A client message has a bound, and its memory is asked for before it is read (**BL-1938, next train**).** The first message — the
+`auth` — may be at most **64 KiB**; every message after authentication at most `Aouda:WebSocket:MaxMessageBytes` (default
+**4 MiB**: a `stream_rows` frame's `data` is at most `StreamingWrites:MaxBatchBytes`, 1 MiB, besides — raise both together). The
+server reads no further than the bound: a message past it is `MESSAGE_TOO_LARGE` — before authentication `auth_error` and the socket
+closed with status `1009` (Message Too Big); after it an `error` frame carrying the message's own `id` (read from its first bytes, so
+put `type` and `id` first, as both SDKs do), its remaining bytes read and dropped, and the connection stays open. Every fragment of one
+message must arrive within `Aouda:WebSocket:IdleTimeout` (5 minutes; the auth timeout, 10 s, for the first). A message larger than
+64 KiB is read under the database's memory budget, as an HTTP row body is: with too little memory now it is answered `error`
+`MEMORY_BUDGET_EXCEEDED`, *"… retry after N s"*, with its `id` and nothing of it done; one no idle server could take is
+`STATEMENT_TOO_LARGE` with the remedy. A message of at most 64 KiB is asked for nothing. The long-poll bodies are the same message:
+`connect` at most 64 KiB and `…/send` at most `MaxMessageBytes`, past it `413 MESSAGE_TOO_LARGE`, a memory refusal `503` +
+`Retry-After` (or `400 STATEMENT_TOO_LARGE`), each in `{ "code", "message" }` and before anything is handled. Up to 0.17 a message
+of any size was read whole — the first one before authentication — and nothing asked the memory budget for it.
 
 ---
 
