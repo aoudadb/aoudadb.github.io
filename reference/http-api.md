@@ -3230,7 +3230,7 @@ Each value in `setExpr` is an expression node:
 { "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> }, ... }, "column": "c" }
 ```
 
-(**BL-1675, next train**) A `conditional`'s `when` compares a `Timestamp` or `Date` column as a time, as the same predicate in a `where`
+(**next train**) A `conditional`'s `when` compares a `Timestamp` or `Date` column as a time, as the same predicate in a `where`
 does — in a `setExpr`, a `selectExpr`, a derived column, and a route's or a tee's `when`: the literal may be ISO-8601 text (an instant
 with any offset for a `Timestamp`, `yyyy-MM-dd` for a `Date`) or a number (100-ns ticks since 0001-01-01; days since 1970-01-01). A
 literal that is no time of the column's type (`"yesterday"`, `true`) is refused naming the column when the expression is evaluated
