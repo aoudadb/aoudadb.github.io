@@ -108,8 +108,9 @@ server on it with `aouda start --data-path <dir>`.
   train**). The server caches access decisions, keyed by each auth database's permission version; a restore puts another history under
   the name, whose version can equal the cached one. Up to 0.17.1 that cache could answer from the database the restore replaced: a
   principal whose role the restore took away was still admitted for up to 30 seconds, an OIDC trust of the restored auth database was
-  refused ("The token's issuer is not trusted.") until a permission change or a restart, and a realtime session open across the restore
-  was not re-keyed by a policy change until the restored version passed the old one. Every such cache now also holds the database it
+  refused ("The token's issuer is not trusted.") until a permission change or a restart, a realtime session open across the restore
+  was not re-keyed by a policy change until the restored version passed the old one, and a key revoked in the restored auth database
+  ended such a session only at its next periodic check, not at once. Every such cache now also holds the database it
   read from, so nothing decided under the replaced database is used again.
 
 **Point-in-time restore** — see §4.
