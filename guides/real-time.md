@@ -259,6 +259,10 @@ Documented intent that is not currently fully productized:
     unacknowledged **ends the stream** with an `AoudaWriteStreamError`, which the next `write()` and every `close()` reject with; no
     frame is sent again. With every frame acknowledged the stream re-opens on the new connection and goes on. See
     [write streams](../clients/typescript.md#write-streams).
+  - (**BL-1850, next train**) A frame the server wrote part of and could not finish is answered with an `error` frame
+    `WRITE_APPLIED_RESPONSE_FAILED`, never a capacity code with "retry after": a row refused for capacity after earlier rows of the
+    frame were written (a frame refused for row security is written one row at a time, so its other rows are stored), or an insert
+    transform's copy that failed after the frame's rows were committed. **Do not re-send the frame**: read the table to see what was written.
 - Transport strategy:
   - primary WebSocket, optional long-poll fallback for restricted environments. Over the fallback `@aouda/client` sends one stream's
     frames, and one subscription id's `subscribe` and `unsubscribe`, one after another in the order they were made, so they reach the
