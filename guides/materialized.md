@@ -617,6 +617,10 @@ column, and a column's new type, do the same: both rewrite stored values no chan
 create the query again by the new name. Before, the rename went through and rebuilt the result from the stored definition, which still
 named the old column: a filter on it answered an **empty** result reported current, and a query selecting it went to `Error`.
 
+(**BL-1929, next train**) Likewise, a query's **source table** is not renamed while the query exists, and neither is its **result
+table** (the query's name): the rename is `409 TABLE_RENAME_REFERENCED`, naming the query, and nothing changes. Drop the query, rename
+the table, and create the query again over the new name.
+
 A **primary-key change** of the source — a key cleared, changed or gained through a schema apply — marks every result of the table stale and rebuilds it too, because a result's identity follows its source's. A `filter` whose source loses its key rebuilds key-less (rows are then identified by their content), and a key column the result lacks is added. A change that would leave a `topNPerGroup` result without a source key is **refused** with `MATERIALIZED_QUERY_NEEDS_SOURCE_KEY` (a `Failed` entry in a schema apply, whose `reason` starts with the code; the code has no HTTP status of its own): no retry satisfies it — drop the `topNPerGroup` queries first, or keep a primary key.
 
 The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
