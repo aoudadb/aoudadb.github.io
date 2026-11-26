@@ -343,8 +343,9 @@ A realtime connection belongs to the principal that opened it: what is subscribe
 another's `re_auth`. In the TypeScript client (**BL-1854, next train**) a sign-in as another user, or a sign-out, therefore ends every subscription
 and write stream with `AUTH_SESSION_REPLACED`, and what is made after it is on a new connection; a new token of the same user re-authenticates
 the connection, on both transports (**BL-1858, next train**). See
-[When the user changes](../clients/typescript.md#with-authentication). The .NET client does not do this yet (**BL-1856**, open): when the user
-changes, dispose the `AoudaClient` and make a new one.
+[When the user changes](../clients/typescript.md#with-authentication). The .NET client does the same (**BL-1856, next train**): its
+subscriptions and write streams end with `AoudaSessionReplacedException` (`AUTH_SESSION_REPLACED`) — see
+[When the user changes](../clients/dotnet.md#when-the-user-changes-bl-1856-next-train).
 
 ### When the database is replaced (**BL-1818, next train**)
 

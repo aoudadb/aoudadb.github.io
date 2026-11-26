@@ -984,6 +984,59 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   as an `AoudaSubscriptionLimitException` (an `AoudaRequestException`, not a connection error) with the server's message, which names the cap
   and what raises it.
 
+### When the user changes (**BL-1856, next train**)
+
+A realtime connection belongs to the principal that opened it (the token's issuer and subject): what is subscribed on it was read as that
+principal. So when another principal's session replaces the one the client holds — `SignInAsync`, `SignUpAsync`, `ExchangeCodeAsync` or
+`SignInWithOidcAsync` as another user, or a sign-in on a client made with a key — or the session ends — `SignOutAsync` (local or global scope),
+a refresh the server refuses for good — everything realtime of the earlier session ends, at once and by name, on the WebSocket and on long-poll,
+whatever the connection is doing (open, connecting, falling back, waiting to reconnect):
+
+- Every subscription's enumerator (table, typed table, named query) throws `AoudaSessionReplacedException` with `ErrorCode`
+  `AUTH_SESSION_REPLACED`; its message says whether the session was replaced or ended. Events it had queued and you had not read are
+  **not** handed out, and it is not resumed.
+- A write stream's `WriteAsync` and `CloseAsync` throw the same exception; its `DisposeAsync` does not. Nothing more is sent for it.
+- A subscribe or an `OpenWriteStreamAsync` that was still connecting throws it too.
+- What you make from then on — in a `TokensChanged` handler, after `SignInAsync` returned — is on a new connection, as the user signed in
+  then, and shares nothing with what there was (a shared subscription of the same query is a new one). After a sign-out, with nobody signed
+  in, it is refused as any realtime call without a credential is.
+
+The same user's new token — a refresh, a repeat `SignInAsync` of the same user, an OIDC re-exchange — ends nothing: the connection is
+re-authenticated with it (`re_auth`), over long-poll too. The rows your code already took from an enumerator are yours to clear. The exception
+is not an authentication failure — nothing was refused — so do not answer it by signing the user out: subscribe again if somebody is signed
+in. When the server ends a session first (a sign-out elsewhere, a revoked key: it checks an open connection every heartbeat), the
+subscriptions end with its `AoudaAuthenticationException` (`AUTH_CREDENTIAL_REVOKED`) and the client does not reconnect them under another
+token: handle both.
+
+```csharp
+async Task BindAsync(CancellationToken ct)
+{
+    try
+    {
+        await foreach (var change in client.GetTable("orders").SubscribeAsync(ct))
+            Apply(change);
+    }
+    catch (AoudaSessionReplacedException)
+    {
+        ClearOrders();               // what the earlier user saw is not the next one's
+        if (signedIn)                // your application's own state: somebody is signed in now
+            _ = BindAsync(ct);       // a new subscription, on a new connection, as that user
+    }
+}
+```
+
+The same rule holds for what is not realtime. **A bulk load, a `BulkLoadJobsAsync` sequence and an `IBatchWriter` belong to the user they were
+made by** (a load: when it is called; a writer: when it is created; with nobody signed in then, the first user a request of it carries): none of
+their requests — a job's `:begin`, its `:append`s, its commit or abort, a writer's batch — goes out as another user. The load or the sequence
+throws `AoudaSessionReplacedException` (`AUTH_SESSION_REPLACED`), the jobs it already committed stay committed and their handles were
+yielded; the writer faults with it (inside `BatchWriterFaultedException`), counts its queued rows failed and accepts no more —
+`ContinueOnError` does not continue past it. A job the server has begun and that no request finishes is aborted by the server at its idle
+timeout. **A call is sent in the session it was made in** (**BL-1855, next train**): a call that waited for a token refresh while another user
+signed in, and a call the server refused `401` after the session was replaced, are not sent (again) with the new user's token — they throw
+`AoudaSessionReplacedException` with `ErrorCode` `AUTH_REFRESH_SUPERSEDED`, unsent; a retry (`RetryPolicy`) is not repeated once the session
+changed, and the call throws the failure its last attempt got. `SignOutAsync` signs out the session it was called in: it sends that session's
+token and clears only that session, so a sign-in that completed while it was under way stays signed in.
+
 ---
 
 ## 8b) Which databases a sign-in opens (**BL-1018, 0.9.0**)
