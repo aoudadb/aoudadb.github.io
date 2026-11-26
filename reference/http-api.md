@@ -2535,6 +2535,10 @@ name. Table names match exactly: a definition naming the table in another case n
 the query's maintenance and every named call kept the old name, and a statement granted the table under a name nothing had any more —
 and granted it again to a table created later under that name.
 
+A `newName` that is a table's, or a materialized query's — one being created included, before its result table exists — is
+`409 TABLE_EXISTS` (**BL-1929, next train**: the query's name was not checked, so a table renamed into a query's create was taken for
+the query's result).
+
 **Request:**
 
 ```json
