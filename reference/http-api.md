@@ -4983,7 +4983,6 @@ subscribed to **every row** — and a known type that did not read was answered 
 stay lenient on the client side: an older SDK still reads a newer server's frames. An unknown member of a `filter` itself keeps
 `INVALID_SUBSCRIPTION_FILTER` (the shorthand form makes every name a column).
 
-
 **A client message has a bound, and its memory is asked for before it is read (**BL-1938, next train**).** The first message — the
 `auth` — may be at most **64 KiB**; every message after authentication at most `Aouda:WebSocket:MaxMessageBytes` (default
 **4 MiB**: a `stream_rows` frame's `data` is at most `StreamingWrites:MaxBatchBytes`, 1 MiB, besides — raise both together). The
@@ -4995,7 +4994,9 @@ message must arrive within `Aouda:WebSocket:IdleTimeout` (5 minutes; the auth ti
 `MEMORY_BUDGET_EXCEEDED`, *"… retry after N s"*, with its `id` and nothing of it done; one no idle server could take is
 `STATEMENT_TOO_LARGE` with the remedy. A message of at most 64 KiB is asked for nothing. The long-poll bodies are the same message:
 `connect` at most 64 KiB and `…/send` at most `MaxMessageBytes`, past it `413 MESSAGE_TOO_LARGE`, a memory refusal `503` +
-`Retry-After` (or `400 STATEMENT_TOO_LARGE`), each in `{ "code", "message" }` and before anything is handled. Up to 0.17 a message
+`Retry-After` (or `400 STATEMENT_TOO_LARGE`), each in `{ "code", "message" }` and before anything is handled. A `…/send` whose
+session id names no long-poll session of the database is answered `404 SESSION_NOT_FOUND` (or `400 INVALID_SESSION_TYPE`) before a byte
+of its body is read: the session id is its only credential. Up to 0.17 a message
 of any size was read whole — the first one before authentication — and nothing asked the memory budget for it.
 
 ---

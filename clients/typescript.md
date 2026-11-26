@@ -724,9 +724,9 @@ statement. Before, a write this large waited and was refused `503 MEMORY_BUDGET_
 
 **A realtime message larger than the server reads in one is `MESSAGE_TOO_LARGE`** (**BL-1938, next train**): 64 KiB before
 authentication, `Aouda:WebSocket:MaxMessageBytes` (4 MiB by default) after. On a WebSocket a write stream whose frame is refused this
-way ends with `AoudaWriteStreamError` of that `code`, and the frame is not sent again; on long-poll the `/send` is `413` and rejects as a
-send that did nothing (`reachedServer: false`), so the write rejects alone. The code is exported (`MESSAGE_TOO_LARGE`) and typed
-`AoudaValidationError` on an HTTP answer, never retried. Send fewer rows in one frame.
+way ends with `AoudaWriteStreamError` of that `code`, and the frame is not sent again; on long-poll the `/send` is `413` and rejects
+with `AoudaValidationError` of that `code` (a send that did nothing, never retried), so the write rejects alone. The code is exported
+(`MESSAGE_TOO_LARGE`) and typed `AoudaValidationError` on an HTTP answer too. Send fewer rows in one frame.
 
 **`expiredRows`** (**Horizon, 0.5.0**): on a table with [retention](../guides/retention.md), a row whose time lies below the
 table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
