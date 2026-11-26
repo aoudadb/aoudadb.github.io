@@ -104,6 +104,13 @@ server on it with `aouda start --data-path <dir>`.
   succeeded, failed or cancelled: `SUBSCRIPTION_DATABASE_REPLACED` (subscribe again with no `resume_from`; both SDKs do), or
   `DATABASE_QUARANTINED` for a database that did not open. Up to 0.17.1 they stayed open and silent. See
   [When the database is replaced](real-time.md#when-the-database-is-replaced-bl-1818-next-train).
+- **After a restore, who may sign in and what they may do are the restored auth database's at once** (**BL-1819, BL-1820, next
+  train**). The server caches access decisions, keyed by each auth database's permission version; a restore puts another history under
+  the name, whose version can equal the cached one. Up to 0.17.1 that cache could answer from the database the restore replaced: a
+  principal whose role the restore took away was still admitted for up to 30 seconds, an OIDC trust of the restored auth database was
+  refused ("The token's issuer is not trusted.") until a permission change or a restart, and a realtime session open across the restore
+  was not re-keyed by a policy change until the restored version passed the old one. Every such cache now also holds the database it
+  read from, so nothing decided under the replaced database is used again.
 
 **Point-in-time restore** — see §4.
 
