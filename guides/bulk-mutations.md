@@ -224,7 +224,9 @@ When both `set` and `setExpr` target the same column, the literal `set` value wi
 
 - Division by zero in an expression returns `null` for that row's column value (no exception).
 - `$col` can only reference columns in the same row — no subqueries or cross-table references.
-- `LIMIT` on `UPDATE` is not supported in v1 (only `DELETE` supports `LIMIT`).
+- `LIMIT` on `UPDATE` is not supported (only `DELETE` supports `LIMIT` and `ORDER BY`). It is **refused**, not ignored: a .NET or
+  embedded `.Limit(n).UpdateAsync(…)` throws `InvalidOperationException`, and a batch update operation with `limit` or `orderBy` is
+  `400 INVALID_REQUEST` (**BL-1785, next train**; before, an embedded update and a batch update with a limit updated every match).
 
 ---
 
@@ -242,7 +244,8 @@ await client.table('auditLog').truncate();
 ```
 
 `truncate()` is the whole table: on a query with a condition, a `limit` or any other narrowing the TypeScript client refuses it, sending nothing
-(**BL-1788, next train**). Use `delete()` for some of the rows.
+(**BL-1788, next train**). The .NET client and the embedded package refuse it the same way (`InvalidOperationException`; embedded
+**BL-1785, next train** — before, an embedded `.Where(…).TruncateAsync()` emptied the table). Use `delete()` for some of the rows.
 
 ```csharp
 // .NET
@@ -637,6 +640,13 @@ Content-Type: application/json
   "executionMs": 18
 }
 ```
+
+**What an operation carries** (**BL-1785, BL-1665, next train**). A delete operation takes `where`, `limit` and `orderBy`; an update
+operation takes `where`, `set` and `setExpr`. An update operation with `limit` or a non-empty `orderBy` is refused with
+`400 INVALID_REQUEST` — *Operation[i] update operation cannot include limit/orderBy: they bound a delete.* — before any operation runs;
+before, the server ignored both and updated every row the `where` matched. A delete operation with `set` / `setExpr` is refused too. Both
+SDKs refuse either before sending; the embedded package refuses them with the same words and binds every operation's `where` against the
+table before the first runs.
 
 ### When to use batch vs multiple calls
 
