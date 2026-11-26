@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Backup and Restore
 
-Last updated: 2026-11-21 (Durability-1)
+Last updated: 2026-11-26 (Durability-1)
 
 A backup is a copy of every database of the server in a destination you choose — a directory or an S3 bucket. A restore puts the
 copy back, **exactly** as it was at the backup, or **to a point in time** after it by replaying the write-ahead log (WAL). This page
@@ -112,11 +112,12 @@ After a restore the server reconciles declared databases as it does at any start
 
 ## 4. What a point-in-time restore returns
 
-A point-in-time restore takes a backup, then replays the WAL to the **last transaction whose commit is at or before the target
+A point-in-time restore takes a backup, then replays the WAL to the **last commit at or before the target
 instant** (`targetTime`).
 
-- **Commit boundaries.** The log carries the time a transaction committed, nothing finer. A restore never lands in the middle of a
-  transaction.
+- **Commit boundaries.** The log carries the time each commit happened, nothing finer: a transaction, a bulk load, a schema change, or
+  an edge or vector write is each its own commit. A restore never lands in the middle of one, and a schema change is restored exactly
+  when it was acknowledged at or before the target (**Durability-1, next train**).
 - **Rows buffered at the backup come back** (§2), and so do the buffered rows of tables created after it.
 - **Tables created after the backup come back** through any route — REST, a table an insert inferred, an edge table or a vector column,
   schema apply, Embedded — with one row per key; a materialized query defined after the backup comes back, rebuilt. Before this release a
@@ -131,7 +132,24 @@ instant** (`targetTime`).
   merged after the backup. Past that instant the restore is refused with `PITR_KEYLESS_DELETE_UNRESOLVED`, naming the table and the instant, and
   the database stays quarantined until a new restore — to an earlier target or from a later backup. Give the table a primary key and every
   target is exact.
-- **Edge and vector writes** made after the target and before the next row commit are restored (a known limit, BL-1726).
+- **Edge and vector writes** made after the target are not restored: each carries its own commit time, and the replay stops at the first
+  one past the target (**BL-1726, next train**).
+- **A table that changed inside the window comes back as it was at the target** (**Durability-1, next train**): a column added or made
+  nullable, a primary-key change, a widened column type, a dropped column and a derived column each apply at their own place in the log,
+  as they did live. Before this release a restore across a column made nullable brought nulls back as zeros, one across a key change
+  (or a widened key column) brought deleted rows back, and a widened or dropped column refused the restore.
+  **Known limit (BL-1900):** a restore across a primary-key column widened from `Int32` to `Int64` is refused (`PITR_FAILED`, HTTP 500,
+  *Cannot convert '…' to Int32*) and the database is quarantined when a row written after the widening has a key that does not fit
+  `Int32`. A target before that row restores, and so does the exact restore of the backup (which loses the window); a crash recovery of
+  the same table is correct. A derived column whose expression was set and then cleared inside the window leaves the rows before it
+  unrewritten (BL-1895).
+- **A point-in-time restore that did not finish is resumed** (**Durability-1, next train**). The replay runs at the database's next
+  open. When that open is cut short — a crash, a kill, a flush that fails at its end — the next open continues from where the replay
+  stopped (it saves its progress with each schema change it applies), and nothing needs to be run again: the database stays out of
+  service until the replay is done. The one state it cannot resume is a table without a primary key whose rows an earlier, interrupted
+  open had already flushed while their deletes were still unread: the open is refused with *The point-in-time restore cannot be
+  resumed … Run the restore again; it starts from the backup.* A restore killed in its last steps is repeated exactly: its control
+  file (`PITR_TARGET`) is deleted durably, or the open is refused.
 - **A target at or before the backup** is refused (`BACKUP_TARGET_TIME_INVALID`, 400), naming both instants; so is a target in the future,
   and a set that is exact-restore-only (§4.1).
 - **Without a `backupId`** the newest complete set that lies wholly at or before the target is chosen; `404` when there is none. If that set
@@ -143,8 +161,13 @@ instant** (`targetTime`).
   exact-restore-only (`pitrEligible: false`). A backup of a database that has a WAL root is eligible even at WAL position 0.
 - **WAL that covers the window.** The local WAL since the backup — bounded by write volume, not by days (`MaxSlotWalKeepBytes`) — or,
   past that, the **WAL archive** (`Aouda:Archive`, §6). A restore whose archive does not reach back to the backup's replay position is
-  refused with `PITR_WINDOW_UNAVAILABLE` (409), never restored short. Every database's window is checked before
-  any engine stops or any file changes, so a refused window leaves every database as it was.
+  refused with `PITR_WINDOW_UNAVAILABLE` (409), never restored short. So is a restore whose archive holds a segment of the window that
+  is **not the whole segment** its manifest entry spans — cut short, damaged or longer (**Durability-1, next train**): the archive
+  worker proves a sealed segment whole before it uploads it and does not publish one that is not (nor anything after it, nor a record
+  of the log as quiet past it), and the restore proves every archived segment of the window again as it stages it, the last included.
+  Every database's window is checked before any engine stops or any file changes, so a refused window leaves every database as it
+  was — with one exception: a segment that can only be read when it is staged is found after that database's backup files were
+  restored, and the answer says so (§10).
 - **The WAL-root incarnation the backup was taken in.** An exact restore starts a new incarnation, so a PITR from a backup that
   predates it needs the archive, or a backup taken after the restore.
 - **The archive's RPO for a host loss** is `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (a minute):
@@ -321,6 +344,13 @@ Point-in-time restore is available over HTTP, the CLI and both SDKs.
   `slotMinPosition` is gone). `GET /api/admin/metrics/summary` has `lastBackupHoursAgo`.
 - **Health**: `GET /health/detailed` reports a backup component (stale if no recent success; `not_configured` before any backup) and an archive
   that is not advancing.
+- **A WAL segment that is not whole stops the archive in front of it** (**Durability-1, next train**). A sealed segment that is short,
+  damaged or longer than its manifest entry is not archived, and nothing after it is; each pass tries again and reports it in the server
+  log, in `archiveErrorsTotal` and in the archive slot's lag, which grows. The `archive` health component does **not** reliably show it
+  (BL-1896: it judges counters shared by every database, and another database's clean pass hides one that fails). The window then stops
+  growing for that database until the segment is whole again, or the log's slot limit drops the segment, or an exact restore starts a new
+  log (BL-1889). A target past the damage is refused (`PITR_WINDOW_UNAVAILABLE`), never restored short; a move to a level without a WAL
+  is refused while the archive holds a short copy of the log it would delete.
 
 ## 9. Encryption, and who can read a backup
 
@@ -345,7 +375,9 @@ refused key (401 / 403) has the authentication envelope instead, and a `507 DISK
 | Restore of a set one database failed | `BACKUP_SET_INCOMPLETE` 409 | Restore another set; a prune removes it |
 | A set record of another version | `BACKUP_SET_REFUSED` 400 | Restore with the build that took it |
 | A target at or before the backup, or in the future; or a PITR of an exact-restore-only set | `BACKUP_TARGET_TIME_INVALID` 400 | Pick a target after the set's last cut, or restore the set exactly |
-| The archive does not cover the window | `PITR_WINDOW_UNAVAILABLE` 409 | Nothing was changed: pick a target inside the window, restore exactly, or point `--archive` at the archive's destination |
+| The archive does not cover the window, or an archived segment of it is not the whole segment its entry spans (the message names the segment's seq and what was found) | `PITR_WINDOW_UNAVAILABLE` 409 | Pick a target before the segment, restore exactly, or point `--archive` at the archive's destination. Nothing was changed — unless the message ends *The database '…' refuses to open (RESTORE_INCOMPLETE) until a restore of it completes*: the staging found the segment after the database's backup files were restored. Restore it again (to an earlier target, exactly, or once the archive is whole) |
+| A point-in-time restore that cannot be resumed (a keyless table whose rows an interrupted open flushed before their deletes were read) | the open is refused: *The point-in-time restore cannot be resumed … Run the restore again; it starts from the backup.* | Run the restore again. Any other interrupted point-in-time restore is resumed by the next open, with no action |
+| A schema change that cannot fit in one WAL segment | no code of its own: the route's error, a table create `500`, with *A catalog change of N bytes (F frames) cannot fit in a B-byte segment: a change is logged in one, which holds M bytes of it. Nothing was changed.* | Nothing was changed: the table, column or rule was not saved and nothing was logged. No route can reach this limit with the default 64 MB segment |
 | A bulk load committed before the target is not in the store | `PITR_BULK_LOAD_UNAVAILABLE` 409 | Restore before the load's commit (the message names the job) or from a later backup |
 | A keyless delete the restore cannot apply | `PITR_KEYLESS_DELETE_UNRESOLVED` 409 | Restore to before the instant named, or from a later backup |
 | A damaged pending restore (`PITR_TARGET`) | `PITR_TARGET_REFUSED` | Run the restore again |
