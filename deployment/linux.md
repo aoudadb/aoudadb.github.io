@@ -357,6 +357,16 @@ aouda doctor --output json
 | `78` | (**BL-1461, BL-1463, 0.14.0**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)). See [When the start is refused](#when-the-start-is-refused) |
 
 These are the same on every platform and for every way of running the server (`aouda start`, the unit, the container).
+
+(**BL-1472, next train**) **`aouda start` ends with `0`, `1`, `64` or `78`, and nothing else of its own.** `0` is a stop that was asked for
+— a running server's SIGTERM, and a SIGTERM, SIGINT or `systemctl stop` that arrived before the server was ready, whatever the stop
+interrupted (the last line is then `START_STOPPED`). `1` is a start that failed for a reason a restart may clear, `78` a start refused for
+its configuration. Every failure ends with one line, the last on standard error, naming its code — `aouda start: START_ADDRESS_IN_USE:
+… (exit status 1)`; the codes are in the [CLI reference](../reference/cli.md#start). Three statuses come from elsewhere: `70` from a
+**running** server that the heap watchdog ended (`Aouda:Memory:TerminateOnHeapExhaustion`, its last log line says so); `143` (SIGTERM)
+and `130` (SIGINT) when the signal arrives in the first second, before the host is up, which is the signal's own status. **`134`
+(SIGABRT: an unhandled exception, a stack trace, a core dump) is a bug: report it.** Before this release most start failures ended
+`134`.
 (**BL-1463, 0.14.0**) [`aouda plan`](../guides/plan.md) exits `0` when the start would not refuse the declaration, `1` when it would
 (or when a file it names cannot be read), and `64` for misuse; against a running server (`--server`) also `2` (changes), `69` (the
 server cannot be reached or did not answer with a plan) and `77` (the key was refused). (**BL-1427, 0.14.0**)
@@ -399,8 +409,12 @@ mode instead, **BL-1462**); `DEV_ADMIN_REFUSED`; `CONFIGURATION_INVALID`; and
 
 The unit names `78` in `RestartPreventExitStatus=`, so a refused start goes to `failed` at once instead of being restarted five times;
 `journalctl -u aouda` shows the findings. Fix the setting, then `systemctl reset-failed aouda` and `systemctl start aouda`. Any other
-failed start (a port already bound, a file that cannot be read, a disk error) exits non-zero with something other than `78`, and the
-unit restarts it, up to five times in 300 s. A unit
+failed start (a port already bound, a file that cannot be read, a disk error) exits `1` with its coded line, and the unit restarts it, up
+to five times in 300 s: the holder of a port may exit, a volume may be mounted, a permission may be fixed (**BL-1472, next train**). A
+configuration the server cannot build with — a bind that is not an address, a port out of range, a `Logging:LogLevel` value that is not a
+level, a list where one value is expected, an OTLP endpoint that is not a URI — is a refusal (`78`) with the code `aouda plan` reports,
+and so is a `Server/databases.json` or `Server/pending_jobs.json` that is not what it is (`DATA_DIRECTORY_FILE_INVALID`, **BL-1548, next
+train**): a restart cannot clear either. A unit
 written by an earlier `aouda service install` lacks the line: re-run the install, or add `RestartPreventExitStatus=78` under
 `[Service]` and `systemctl daemon-reload`.
 

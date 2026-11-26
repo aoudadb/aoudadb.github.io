@@ -58,6 +58,14 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 own directory with `--state-dir <dir>` (or `AOUDA_STATE_DIR`; the flag wins) on **every** command that should see it, e.g.
 `aouda start --state-dir $dd/state ...` and `aouda stop --state-dir $dd/state` (**BL-1587, 0.16.0**).
 
+A start whose state file names a running server ends `aouda start: START_ALREADY_RUNNING: … (exit status 1)`; give it its own
+`--state-dir` rather than deleting another agent's file. A state file that names a process which has exited, a reused pid or a
+**zombie** (exited, not reaped by its parent — a test harness that never waits on its child) is not a running server: the start prints
+one line saying so and goes on, and `stop`, `status` and `doctor` read it the same way. A state directory that cannot be written is a
+warning, not a failed start; `aouda stop` then does not find that server by itself (**BL-1093, next train**). Every failed start ends
+with one coded line, the last on standard error ([codes](../reference/cli.md#start), **BL-1472, next train**): an agent can match
+`^aouda start: [A-Z_]+:` rather than read a stack trace.
+
 ## Do not (engine / CLI traps)
 
 | Action | What happens |

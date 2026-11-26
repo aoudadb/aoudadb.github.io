@@ -751,6 +751,7 @@ Lists databases visible to the caller.
 | `auth.enabled` | `boolean` | `true` when this database is linked to an auth database. Always present on list/get/create. |
 | `auth.database` | `string` \| `null` | Linked auth database name, or `null` when unlinked. |
 | `auth.keys` | omitted | Create, get and list omit `keys`. Linking a database mints no key (**BL-1464, 0.16.0**). A key is minted on a principal. |
+| `options.durability` | `string` | The level the database **runs at** while it is open, else the one it will open at (the registry's) (**BL-1745, next train**). A declared level is in force from the restart that reads it; before, the engine kept the last start's level for one more restart while this member already said the new one. |
 
 **Internal database definition:**
 
@@ -879,6 +880,12 @@ Sign-up is not a member of this body. Set it with `PUT /api/auth/{authDatabase}/
 
 **Success (201):** the same shape as GET. `auth` is `{ "enabled", "database" }` and has no `keys` member.
 
+**409 `DATABASE_EXISTS`:** a database of that name exists. Names compare **without case**: after a restart as before it, `Bond` beside
+a registered `bond` is this refusal, and `GET /api/databases/Bond` answers `bond` (**BL-1547, next train**: a create in another case after a
+restart replaced the registered database's entry, and its rows were served by nothing). It is also the answer when the name's directory
+under `Databases/` holds files no registered database owns — what an interrupted drop leaves; the message names the directory, and
+nothing is created or deleted (**BL-1829, next train**).
+
 ```json
 {
   "name": "myapp",
@@ -916,6 +923,10 @@ The endpoint performs a fast foreground switch, then returns `204`. All cleanup 
    - Phase 1: Engine `DropDisposeAsync` — drains WAL, disposes engine and branch engines; skips HRA snapshot (data is discarded, not persisted).
    - Phase 2: Directory delete — `Directory.Delete(path, recursive)` with exponential-backoff retry (1 s → 2 s → … → 30 s cap).
    - Phase 3: Registry completion — removes the database from `databases.json` entirely.
+
+   An entry leaves `databases.json` only when its directory is gone (**BL-1829, next train**). A directory that cannot be deleted —
+   by the job, or by a start that finds the database still `Dropping` — keeps the entry, the name stays taken (a create of it is `409
+   DATABASE_EXISTS`), the start's log says why, and the next start retries.
 
 **Crash safety:** the job record in `pending_jobs.json` is written before `204` is returned. On any restart, `PendingOpsWorker.StartAsync` loads all `Running`/`Interrupted` jobs and re-executes them. On the recovery path, engine dispose (Phase 1) is skipped because the engine is no longer in memory; the worker proceeds directly to directory delete and registry completion.
 

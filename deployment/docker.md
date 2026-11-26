@@ -335,6 +335,18 @@ docker compose logs --no-log-prefix aouda | grep -E '^error +[A-Z_]+' | tail -5 
 docker compose ps -a aouda                                                        # STATUS: Restarting (78) ...
 ```
 
+(**BL-1472, next train**) Every other start that fails — a port already bound, a bind address the container does not have, a data
+volume that is read-only or owned by another uid, a certificate that is not mounted — exits `1`, and its **last line** on standard error
+is the cause, with a code from [the CLI reference](../reference/cli.md#start):
+
+```bash
+docker compose logs --no-log-prefix aouda | grep -E '^aouda start: [A-Z_]+:' | tail -1   # e.g. aouda start: START_DATA_DIRECTORY_UNUSABLE: ...
+```
+
+A restart may clear those (the mount appears, the port is freed), so a restart policy is right for them. `docker stop` during a slow
+start (databases still opening) exits `0` with `START_STOPPED`, not a failure. An exit status of `134` (an unhandled exception) is a
+bug to report; before this release most start failures ended that way.
+
 Check the declaration before you deploy, in the container you deploy, with its environment, secrets and mounts:
 
 ```bash
@@ -348,8 +360,9 @@ when the start would refuse. See [Plan a declaration](../guides/plan.md).
 
 ## Logs
 
-The container logs to stdout, so `docker logs aouda` is all of it. (**BL-1461, 0.14.0**) The one exception is a refused start's two
-lines, which go to standard error; `docker logs` shows both streams.
+The container logs to stdout, so `docker logs aouda` is all of it. (**BL-1461, 0.14.0**) The one exception is a refused or failed
+start's own lines, which go to standard error (a failed start's last line is its `aouda start: <CODE>: …` line, **BL-1472, next
+train**); `docker logs` shows both streams.
 
 ⚠️ **The default log level is `Warning`** for every category except startup narration. If a line the documentation mentions is not appearing, that is usually why — see [Defaults reference](../guides/defaults-reference.md#logging-defaults).
 

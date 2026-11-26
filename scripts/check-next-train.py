@@ -69,6 +69,7 @@ _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+t
 # Clear an id in the same commit that removes its markers (dev/Release-And-Version-Bump.md section 2).
 _ALLOW = {
     "BL-332",   # Studio Backups page: point-in-time restore / retention / prune UI still pending
+    "BL-1472",  # 0.14.0 names it only as unfinished ("Any other failed start is unchanged (BL-1472)"); Operability S16 ships it
 }
 
 

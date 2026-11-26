@@ -140,7 +140,11 @@ empties it, the load's rows with it, although the load answered committed.
 
 ### Changing a level
 
-A database's level is read at **every open**. A declared database changes level at its restart.
+A database's level is read at **every open**. A declared database changes level at its restart: the declared level is written to the
+registry before the database opens, so the first restart after the change runs it (**BL-1745, next train**: before, that restart still
+opened at the old level and the declared one took a second restart, while `GET /api/databases/{db}` already reported it — a database
+declared `unlogged` then `strict` answered a write `200` and lost it to a crash). `options.durability` reports the level the database
+runs at while it is open.
 
 - **From `strict` or `os` to `unlogged` or `memory`.** The open at the new level replays the WAL it finds, flushes every row into segments, closes
   cleanly and **retires the WAL**; nothing the old level acknowledged is lost, and a later `strict` open does not replay it a second time. A

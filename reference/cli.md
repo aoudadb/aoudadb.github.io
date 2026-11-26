@@ -22,7 +22,31 @@ Exit `64` is misuse on every command (unknown command, unknown flag, a missing r
 | `--env` | Overlay `aouda.<env>.json`. Also `AOUDA_ENVIRONMENT`. |
 | `--dev-admin` | Development only. Prints one line, `AOUDA-DEV-ADMIN email=… password=… key=…`. |
 
-A start the declaration refuses exits `78`, or `1` when every error is a file that could not be read yet. A second start on a directory another process holds exits `1`.
+A start the declaration refuses exits `78`, or `1` when every error is a file that could not be read yet. Its lines are the plan's: each `error` names its code, and the last line names the status. A configuration the server cannot build with — a bind that is not an address, a port out of range, a `Logging:LogLevel` value that is not a level, a list where one value is expected, an OTLP endpoint that is not a URI — is that refusal too, with the code and the setting `aouda plan` reports (**BL-1472, next train**). A data directory whose `Server/databases.json` or `Server/pending_jobs.json` is not what it is refuses the start `DATA_DIRECTORY_FILE_INVALID` (78): the file is not repaired, moved or skipped (**BL-1548, next train**).
+
+<!-- start-codes:begin -->
+A start that fails ends with one line, the last on standard error, and the exit status of this table (**BL-1472, next train**):
+
+```
+aouda start: <CODE>: <the cause, one line> (exit status <n>)
+```
+
+| Code | When | Exit |
+|---|---|---|
+| `START_STOPPED` | A stop was asked for (SIGTERM, SIGINT, the service manager) before the server was ready. Whatever the stop interrupted is not reported as a failure. | **0** |
+| `START_ADDRESS_IN_USE` | The port or the address is taken. | **1** |
+| `START_ADDRESS_UNAVAILABLE` | The address is not one of this host's, or the port needs a right the user lacks (a port below 1024). | **1** |
+| `START_DATA_DIRECTORY_IN_USE` | Another Aouda process holds the data directory. The line names the directory and the remedy. | **1** |
+| `START_DATA_DIRECTORY_UNUSABLE` | The data directory, its `Server/` folder, its lock or a server file cannot be made, opened or read: the path is a file, a permission, a read-only or full volume. | **1** |
+| `START_FILE_UNREADABLE` | Another file the start needs cannot be found or read (a Kestrel certificate). | **1** |
+| `START_ALREADY_RUNNING` | The CLI's state file names a server that is running. Stop it with `aouda stop`, or give this server its own state directory (`--state-dir`, `AOUDA_STATE_DIR`). | **1** |
+| `START_FAILED` | Anything else before the server was ready. The exception is printed above the line when no log has it (a failure while the host is being built). | **1** |
+| `STOP_FAILED` | Anything thrown after the server was ready: a shutdown that failed. | **1** |
+<!-- start-codes:end -->
+
+No other status is a start failure. A server that receives SIGTERM before its host is up (the first second) ends with the signal's own status (143; 130 for SIGINT). Exit `134` (SIGABRT, an unhandled exception) is a bug to report.
+
+The CLI records the server it started in a state file (`server-state.json` in `--state-dir`, `AOUDA_STATE_DIR`, or the user's data folder) for `aouda stop` and `aouda status`. A file that names a process which has exited, a reused pid or a zombie (exited, not reaped) is not a running server: the start says so and goes on. A state file that cannot be written is a warning; the server starts, and `aouda stop` will not find it by itself (**BL-1093, next train**).
 
 ## `plan`
 
