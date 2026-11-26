@@ -100,6 +100,11 @@ server on it with `aouda start --data-path <dir>`.
   restore deletes first is **not** counted: a disk with less free space than the backup needs space freed first, or an offline restore
   onto another volume.
 
+- **A restore ends the live subscriptions of the databases it replaced** (**BL-1818, next train**), by name, once it has finished —
+  succeeded, failed or cancelled: `SUBSCRIPTION_DATABASE_REPLACED` (subscribe again with no `resume_from`; both SDKs do), or
+  `DATABASE_QUARANTINED` for a database that did not open. Up to 0.17.1 they stayed open and silent. See
+  [When the database is replaced](real-time.md#when-the-database-is-replaced-bl-1818-next-train).
+
 **Point-in-time restore** — see §4.
 
 ### 3.1 What a restore does not bring back

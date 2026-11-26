@@ -1622,6 +1622,17 @@ reconnect connects at once, and that connection is the reconnect (**BL-1849, nex
 opens is the reconnect's, and is polled from then on (**BL-1860, next train**; before, the call failed with `Long-poll session is not
 connected`).
 
+#### When the database is replaced (**BL-1818, next train**)
+
+When the server replaces a subscription's database under it — a set restore, a quarantine and unquarantine, a drop and create, a replica's
+checkpoint — it ends the subscription with `SUBSCRIPTION_DATABASE_REPLACED` (exported) on the open connection. The `Subscription`
+**subscribes again by itself**, fresh (no `resume_from`), and your `onSnapshot` receives the new engine's rows; its changes follow. The
+versions may be lower than before. It makes at most five attempts between two snapshots that land, after 0, 250, 500, 1000 and 2000 ms;
+past that the code goes to `onError` as an `AoudaSubscriptionServerError`. A consumer that joins the shared subscription meanwhile waits
+for the new snapshot and is never handed the replaced engine's rows. `DATABASE_QUARANTINED` and `DATABASE_NOT_FOUND` end the subscription
+(`onError`): the database has no engine any more. Up to 0.17.1 such a subscription went silent until the server restarted. See
+[When the database is replaced](../guides/real-time.md#when-the-database-is-replaced-bl-1818-next-train).
+
 ### Write streams
 
 ```typescript
