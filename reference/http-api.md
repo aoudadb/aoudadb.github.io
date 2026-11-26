@@ -485,6 +485,9 @@ refused before anything is read or written:
 - **A member given twice in one object is `400 REQUEST_MEMBER_DUPLICATE`** — also in another case (`"name"` and `"NAME"`: member
   names are read without case, so they are one member), inside a `set` or `args` map, and inside a cell's object value. `error`
   names it: *The request body gives 'and' twice, at $.where.and: each member once.*
+- **The routes that read their body by hand keep the case**: `POST …/rows`, a JSON `:append`, the branch routes (create, diff, merge, query, insert) and
+  `schema/seed` take their member names exactly as written — `"Columns"` is `REQUEST_MEMBER_UNKNOWN` there, and so is `"TABLE"` beside
+  `"table"`.
 - **Any other body that cannot be read is `400 INVALID_REQUEST`** with the path: not JSON, a value of the wrong type, an empty body,
   a query or route value that does not parse. No refusal shows a .NET type name, and the framework's validation body
   (`type`, `title`, `errors`, `traceId`) is never sent.
@@ -1119,7 +1122,7 @@ server could not read was not refused: it filtered less, or nothing.
   ```
 
   A list or a member given twice (`"and": [...], "and": [...]`) is `400 REQUEST_MEMBER_DUPLICATE` (**BL-1664, next train**): up to 0.17
-  the second list won, so a `DELETE` with two `and` lists deleted what the second alone selected. Up to 0.16.0 A condition at the top level left an empty where clause, and the read answered **every row**; a stray list
+  the second list won, so a `DELETE` with two `and` lists deleted what the second alone selected. Up to 0.16.0 a condition at the top level left an empty where clause, and the read answered **every row**; a stray list
   beside a valid one dropped those conditions, which widened what an update or a delete touched.
 - **A where clause with no condition is `400 INVALID_REQUEST`** — `{}`, `{"and": []}`, `{"or": []}`, `{"groups": []}`, and any group
   inside it or a join's `where` that holds none (`{"and": [{…}], "groups": [{}]}`). The `error` names where it is: *The where clause has
@@ -1792,7 +1795,7 @@ The body is empty (`{}`); the answer is structural.
 
 #### `POST /api/databases/{db}/branches/{name}/query`
 
-Query one table on a branch (**BL-1161, BL-1298, 0.9.0**). The body is `{ "table" }` only; any other property is `400 REQUEST_MEMBER_UNKNOWN` (**BL-1659, next train**; it was ignored), and the table name is case-sensitive.
+Query one table on a branch (**BL-1161, BL-1298, 0.9.0**). The body is `{ "table" }`, and optionally `database`, which must equal the path's database (`400 INVALID_REQUEST` otherwise); any other property is `400 REQUEST_MEMBER_UNKNOWN` (**BL-1659, next train**; it was ignored). The table name and the member names are case-sensitive.
 
 `200` is the same columnar body as [`POST …/query`](#post-apidatabasesdbquery): `columns`, `types`, `data`, `rowCount`, `stats`, `token`. The body has no `clrType`.
 
