@@ -3230,6 +3230,13 @@ Each value in `setExpr` is an expression node:
 { "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> }, ... }, "column": "c" }
 ```
 
+(**BL-1675, next train**) A `conditional`'s `when` compares a `Timestamp` or `Date` column as a time, as the same predicate in a `where`
+does — in a `setExpr`, a `selectExpr`, a derived column, and a route's or a tee's `when`: the literal may be ISO-8601 text (an instant
+with any offset for a `Timestamp`, `yyyy-MM-dd` for a `Date`) or a number (100-ns ticks since 0001-01-01; days since 1970-01-01). A
+literal that is no time of the column's type (`"yesterday"`, `true`) is refused naming the column when the expression is evaluated
+(*Column 'at' is Timestamp; 'yesterday' is not a Timestamp value*). Up to 0.17.1 a stored value was compared with an ISO literal as
+text, so the `when` took the wrong branch.
+
 (**ADR 0072, 0.14.0**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not; in a formula, a malformed one is `400 FORMULA_REFERENCE_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, 0.14.0**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
 **Extended response when `returning` is set:**
 
