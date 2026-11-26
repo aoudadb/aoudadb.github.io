@@ -603,7 +603,11 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
   array properties (BL-1213). Reading into a POCO with an array property works with `ToObjects<T>()`, `ToListAsync<T>()` or
   `GetTable<T>(tableName)`; `GetTable<T>()` without a name infers the type's schema and throws `NotSupportedException`.
 - **The write stream** (`stream_rows`) holds at most `Aouda:WebSocket:StreamingWrites:MaxBatchBytes` (1 MiB by default) of JSON a
-  message, so one large array row is refused there (`INVALID_STREAM_ROWS`); use an insert or a named mutation.
+  message, so one large array row is refused there (`INVALID_STREAM_ROWS`); use an insert or a named mutation. A whole message larger
+  than `Aouda:WebSocket:MaxMessageBytes` (4 MiB by default) is refused `MESSAGE_TOO_LARGE` before it is read (**BL-1938, next train**):
+  the stream ends, its `WriteAsync` and `CloseAsync` throw `AoudaRequestException` with that `ErrorCode`, and nothing of the frame is
+  written. Over long-poll the `…/send` is `413` and that `WriteAsync` throws `AoudaRequestException` (`StatusCode` 413) with the same
+  `ErrorCode`, not `AoudaConnectionException`: the same frame is refused the same way, so it is not retried.
 - **The C# named-client generator** (`aouda generate csharp`, [Build apps](../guides/build-apps.md)) writes `double[]`, `float[]`, `int[]`, `long[]`, `byte[]` and `string[]` for
   array columns and parameters (a non-optional property defaults to `System.Array.Empty<T>()`).
 

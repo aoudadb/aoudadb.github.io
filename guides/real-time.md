@@ -692,6 +692,7 @@ Primary proving tests:
 | `Aouda:WebSocket:StreamingWrites:SoftPendingBytes` | int | `4194304` | positive | server config | Soft byte backpressure threshold |
 | `Aouda:WebSocket:StreamingWrites:ResumePendingBytes` | int | `2097152` | positive | server config | Unpause byte threshold |
 | `Aouda:WebSocket:StreamingWrites:HardPendingBytes` | int | `8388608` | positive | server config | Hard byte close threshold |
+| `Aouda:WebSocket:MaxMessageBytes` | int | `4194304` | `>=65536` | server config | Max bytes of one client message after authentication (a WebSocket message, a long-poll `/send` body); past it `MESSAGE_TOO_LARGE`, never read. Before authentication the bound is 64 KiB, fixed. Raise it with `MaxBatchBytes` (**BL-1938, next train**) |
 | `Aouda:WebSocket:StreamingWrites:MaxBatchRows` | int | `1000` | positive | server config | Max rows per `stream_rows` |
 | `Aouda:WebSocket:StreamingWrites:MaxBatchBytes` | int | `1048576` | positive | server config | Max payload bytes per `stream_rows` |
 | `Aouda:WebSocket:StreamingWrites:AckInterval` | timespan | `00:00:00.500` | positive | server config | Ack interval |
