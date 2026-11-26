@@ -137,11 +137,10 @@ instant** (`targetTime`).
 - **A table that changed inside the window comes back as it was at the target** (**Durability-1, next train**): a column added or made
   nullable, a primary-key change, a widened column type, a dropped column and a derived column each apply at their own place in the log,
   as they did live. Before this release a restore across a column made nullable brought nulls back as zeros, one across a key change
-  (or a widened key column) brought deleted rows back, and a widened or dropped column refused the restore.
-  **Known limit (BL-1900):** a restore across a primary-key column widened from `Int32` to `Int64` is refused (`PITR_FAILED`, HTTP 500,
-  *Cannot convert '…' to Int32*) and the database is quarantined when a row written after the widening has a key that does not fit
-  `Int32`. A target before that row restores, and so does the exact restore of the backup (which loses the window); a crash recovery of
-  the same table is correct. A derived column whose expression was set and then cleared inside the window leaves the rows before it
+  (or a widened key column) brought deleted rows back, and a widened or dropped column refused the restore — a primary-key column
+  widened from `Int32` to `Int64` too, once a row after the widening had a key that did not fit `Int32` (`PITR_FAILED`, and the
+  database quarantined; BL-1900).
+  **Known limit:** a derived column whose expression was set and then cleared inside the window leaves the rows before it
   unrewritten (BL-1895).
 - **A point-in-time restore that did not finish is resumed** (**Durability-1, next train**). The replay runs at the database's next
   open. When that open is cut short — a crash, a kill, a flush that fails at its end — the next open continues from where the replay
