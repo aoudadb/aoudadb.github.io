@@ -245,7 +245,7 @@ await client.table('auditLog').truncate();
 
 `truncate()` is the whole table: on a query with a condition, a `limit` or any other narrowing the TypeScript client refuses it, sending nothing
 (**BL-1788, next train**). The .NET client and the embedded package refuse it the same way (`InvalidOperationException`; embedded
-**BL-1682, next train** — before, an embedded `.Where(…).TruncateAsync()` emptied the table). Use `delete()` for some of the rows.
+**BL-1785, next train** — before, an embedded `.Where(…).TruncateAsync()` emptied the table). Use `delete()` for some of the rows.
 
 ```csharp
 // .NET
