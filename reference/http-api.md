@@ -1132,8 +1132,9 @@ server could not read was not refused: it filtered less, or nothing.
   operand* for a member; *only in and nin take a list* for an array elsewhere). The same on every surface that takes a condition:
   `…/query`, `…/query/count`, each `joins[].where`, `PATCH`, `DELETE`, `…/rows/batch`, a nested group, a `setExpr` or `selectExpr`
   `conditional`'s `when` (the latter `400 SCHEMA_EXPR_UNKNOWN_FUNCTION`, the code of a bad operator there), and a subscription's
-  `filter` (`INVALID_SUBSCRIPTION_FILTER`, structured or shorthand, before a snapshot). A named query's or mutation's parameter given an
-  object is `400 NAMED_QUERY_BIND_FAILED` naming the parameter. **A definition is refused at apply or create**: `schema/apply` (a dry
+  `filter` (`INVALID_SUBSCRIPTION_FILTER`, structured or shorthand, before a snapshot). A named query's or mutation's parameter that a
+  condition reads, given an object, is `400 NAMED_QUERY_BIND_FAILED` naming the parameter; a named mutation's `values` / `set`
+  parameter for an `Expression` column is the formula, a JSON object, and is written as one. **A definition is refused at apply or create**: `schema/apply` (a dry
   run too) refuses one in a check, a derived column's `when`, a route's or a tee's `when`, a named query's or mutation's `where`, a
   `setExpr` / `selectExpr` `when` and a filter materialized query's `predicate`, and so does `POST …/materialized-queries`. Up to 0.17.1
   the object was compared as its JSON text: on a `String` column `ne` and `lt` matched every row, `eq` and `gt` none, and
