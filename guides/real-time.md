@@ -337,6 +337,35 @@ the connection, on both transports (**BL-1858, next train**). See
 [When the user changes](../clients/typescript.md#with-authentication). The .NET client does not do this yet (**BL-1856**, open): when the user
 changes, dispose the `AoudaClient` and make a new one.
 
+### When the database is replaced (**BL-1818, next train**)
+
+A subscription belongs to the database as it was when it subscribed. When the server replaces that database's engine while it runs, the
+subscription ends with an `error` frame naming it, on the open connection: the connection, its other subscriptions and its write streams
+stay open, and the subscription's slot under the connection and identity limits is free again. Over WebSocket and long-poll alike.
+
+| What happened to the database | The code | Sent |
+|---|---|---|
+| A set restore (`POST /admin/backup/restore/{id}`), and the database is open after it | `SUBSCRIPTION_DATABASE_REPLACED` | when the restore has finished — the databases reopened, the restored members registered, the declared access converged — so a subscribe sent at once is admitted. A restore that failed or was cancelled after it stopped the engines ends them too |
+| A restore after which the database did not open (it is quarantined) | `DATABASE_QUARANTINED` | when the restore has finished |
+| Quarantined (`POST /api/databases/{db}/quarantine`) | `DATABASE_QUARANTINED` | at the quarantine; an unquarantine does not bring the subscription back |
+| Dropped (and perhaps created again) | `DATABASE_NOT_FOUND` | at the drop |
+| A replica's checkpoint install | `SUBSCRIPTION_DATABASE_REPLACED` | when the database opens again; `DATABASE_NOT_FOUND` if it has not 60 seconds after it closed |
+
+- **Once per subscription, after the last snapshot page it was sent.** A subscription still receiving its snapshot gets the end instead
+  of `snapshot_complete`; one caught before it was registered gets it instead of its snapshot. Nothing of the replaced engine follows it.
+- **On `SUBSCRIPTION_DATABASE_REPLACED`, subscribe again with no `resume_from`**: a fresh snapshot of the new engine. Its versions may be
+  lower than the ones you held — a version belongs to one engine's stream — so do not drop a snapshot or a change for a lower version.
+  Both SDKs do this by themselves: [`@aouda/client`](../clients/typescript.md#when-the-database-is-replaced-bl-1818-next-train) and
+  [`Aouda.Client`](../clients/dotnet.md#limits-refusals-and-reconnects-bl-1383-0110).
+- **On `DATABASE_QUARANTINED` or `DATABASE_NOT_FOUND`** the database has no engine any more: whether and when it comes back is the
+  operator's. Both SDKs end the subscription with the code.
+- **A subscription opened after the replacement hears every change.** Up to 0.17.1 every subscription of a database whose engine was
+  replaced — and every one opened on it afterwards — got its snapshot and then no change until the server restarted, and one open across
+  the replacement stayed open and silent.
+- **A resume is not the way back.** A `resume_from` into a replaced engine, or into one reopened by a server restart, can be answered as
+  current or as an empty replay, so what the client missed is not delivered (**BL-1823**, open). After a server restart, subscribe fresh.
+- A table dropped and created again under a subscription is not covered here (**BL-1824**, open): the subscription is not ended.
+
 ### Horizons and range deletes
 
 (**Horizon, 0.5.0**) Some tables drop old rows without a row event per row: a **windowed materialized query's result**
@@ -991,7 +1020,11 @@ Recovery/restart expectations:
 
 - Active WS/long-poll sessions are runtime state and are not persisted across restart.
 - Clients should reconnect and re-subscribe after restart.
-- Resume behavior depends on post-restart change-buffer availability for each table.
+- A `resume_from` after a restart can be answered as current or as an empty replay — changes made while the client was away are not
+  delivered (**BL-1823**, open; [When the database is replaced](#when-the-database-is-replaced-bl-1818-next-train)). Subscribe fresh after
+  a restart.
+- A restore, a quarantine, a drop or a replica's checkpoint ends each subscription of the database by name, on the open connection
+  (**BL-1818, next train**): `SUBSCRIPTION_DATABASE_REPLACED` (subscribe again, fresh), `DATABASE_QUARANTINED` or `DATABASE_NOT_FOUND`.
 
 Suggested tuning sequence:
 
@@ -1013,6 +1046,7 @@ Suggested tuning sequence:
 | `AUTH_DATABASE_MISMATCH` on auth | Auth payload database does not match route DB | Align `auth.database` with `/api/databases/{db}/ws` |
 | Duplicate-looking changes after reconnect | At-least-once replay path | Deduplicate by event version in client reducer |
 | Resume returns fresh snapshot | Buffer replay expired for requested version | Accept snapshot fallback or increase practical reconnect cadence |
+| `SUBSCRIPTION_DATABASE_REPLACED` (**BL-1818, next train**) | The database was restored, unquarantined, dropped and created, or replaced by a replica's checkpoint | Subscribe again with no `resume_from`; the SDKs do it. See [When the database is replaced](#when-the-database-is-replaced-bl-1818-next-train) |
 | `INVALID_STREAM_SEQUENCE` during writes | Client sequence gap/out-of-order `stream_rows` frames | Ensure contiguous per-stream sequence numbers |
 | Stream closes with backpressure limit code | Pending rows/bytes exceeded hard limit | Reduce batch rate/size; tune streaming write thresholds |
 | Long-poll connect rejects `msgpack` | Long-poll supports JSON mode only | Use `wireMode: "json"` for long-poll |

@@ -963,6 +963,13 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   the SDK waits the server's `retry_after_ms` and sends it again, at most three times, then ends every consumer of that subscription with
   `AoudaSubscribeRateLimitException` (`RetryAfter` holds the last wait). A reconnect that resubscribes many shared subscriptions is
   spaced (the first 100 at once, then 28 a second).
+- **A subscription whose database is replaced subscribes again** (**BL-1818, next train**). When the server ends it with
+  `SUBSCRIPTION_DATABASE_REPLACED` — its database was restored, unquarantined, dropped and created, or replaced by a replica's
+  checkpoint — the enumerator subscribes again with no `resume_from` and without the consistency token it had stored, and yields the new
+  engine's rows as a snapshot event, then its changes, though their versions are lower. At most five attempts between two snapshots that
+  land (after 0, 250, 500, 1000 and 2000 ms), then the `AoudaRequestException` with the code ends it. A consumer that joins a shared
+  subscription meanwhile waits for the new snapshot. `DATABASE_QUARANTINED` and `DATABASE_NOT_FOUND` end it with their code. See
+  [When the database is replaced](../guides/real-time.md#when-the-database-is-replaced-bl-1818-next-train).
 - **`client.ServerLimits`** holds what the server sent in `auth_ok`: `MaxSubscriptionsPerConnection`, `MaxSubscriptionsPerIdentity`,
   `MaxConnectionsPerIdentity`, `SubscribeBurst`, `SubscribeRefillPerSecond`, `ProtocolVersion` and `Capabilities`. It is `null` before the
   first WebSocket connection, over long-poll, and against a server that does not send them. `SUBSCRIPTION_LIMIT_EXCEEDED` reaches you
