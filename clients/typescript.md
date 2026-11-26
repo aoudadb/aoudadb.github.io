@@ -1293,8 +1293,9 @@ An `onSnapshot` callback receives the initial consistent snapshot of existing ro
 as the async iterator's snapshot event carries them (**BL-1068, next train**); a callback of two or three parameters is unchanged.
 
 **Dates and timestamps in a subscription** (**BL-1391, 0.11.0**). A snapshot page names a `Timestamp` or `Date` column in
-`column_types`, and the SDK hands a JavaScript `Date` for both, in the snapshot and in every later change's `row` and `prev` (a change
-does not repeat the names). A `Timestamp` arrives on the wire as .NET ticks (UTC) and becomes its instant, rounded to the millisecond.
+`column_types`, and the SDK hands a JavaScript `Date` for both, in the snapshot and in every later change's `row` and `prev` — by the
+names each message carries (**BL-1866, next train**: a change names them too, and the SDK keeps nothing from a snapshot for later
+changes, so a resumed change is typed and a column made again as a number is a number). A `Timestamp` arrives on the wire as .NET ticks (UTC) and becomes its instant, rounded to the millisecond.
 A `Date` arrives as whole days since 1970-01-01 and becomes a `Date` at **00:00:00 UTC** of that day: read it with `getUTCFullYear()` /
 `getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. **Breaking for a caller that read the
 day number itself.** A change event's own `key` payload (a delete) stays the wire value. Query results are different: there a `Date`
@@ -1363,7 +1364,9 @@ shorthand column that is not exactly one operator with its value (use `{ and: [.
 mistake — an unknown member, an empty group — is the server's to refuse, `INVALID_SUBSCRIPTION_FILTER`, by name. The combination adds one
 `groups` level, and a filter nests at most five. Up to `@aouda/client` 0.17.0 the two were merged member by member: a structured
 `options.filter` **replaced** the query's lists of the same name, so the subscription saw rows its `where` excludes, and a shorthand one was
-refused. The server refuses a filter with no condition (`{}`) given alone: to subscribe to every row, give no filter.
+refused. The server refuses a filter with no condition (`{}`) given alone: to subscribe to every row, give no filter. (**BL-1853, next
+train**) Given as `options.filter` with nothing on the query, `{}` is its own subscription, refused by the server; it used to share the
+whole table's subscription and receive every row.
 
 **Which listener takes this.** `client.table(t).subscribe(...)` is a **table subscription** (a table and a filter). It works on the
 **admin** listener, for a principal with `read` on the table. The **data-plane** listener, the one browsers reach, refuses
@@ -1583,6 +1586,16 @@ their ratio is how much sharing the application gets.
 The transport owns reconnection. On a drop it reconnects with exponential backoff and jitter, then
 re-sends each live server subscription — **once per shared subscription**, whatever the number of consumers — with `resume_from` set to the last version it saw, so the server
 can replay from its buffer or fall back to a fresh snapshot. A `gap` is answered the same way.
+(**BL-1823, next train**) A version is a number of one change stream, which the server starts again at every open of the database's engine
+(a restart, a restore, an unquarantine, a drop and create, a replica's checkpoint): the SDK keeps the stream the last snapshot named and
+sends it as `resume_stream`, and resumes nothing when no stream is known. A resume of a stream the server no longer has is answered with a
+fresh snapshot, delivered to `onSnapshot` like any (its versions may be lower). Up to 0.17.0 a reconnect after a plain server restart was
+told it was current, and what it missed was lost.
+
+**Resuming a subscription you kept** (**BL-1823, next train**). `subscription.resumePoint` is `{ stream, version }` — the stream the
+snapshot event names (`snapshot.stream`) and the last version seen — or `undefined` before a stream is known. Pass it as `resumeFrom` to
+continue from there: `table.subscribe({ resumeFrom: saved })` (and `namedQueries.subscribe(name, args, { resumeFrom: saved })`). It used to be
+a number (`resumeFrom: 41`), which no longer compiles.
 Subscription ids are stable for the life of the `Subscription` object and are reused across
 reconnects, which is what the server expects — see [the `id`
 contract](../reference/http-api.md#subscribe).
@@ -2111,8 +2124,8 @@ try {
   `GET …/schema/typescript` generates for it is `Formula | null`. A live subscription's snapshot and change rows (`row`, `prev`) give the
   Expression column as a `Formula` too, `null` for an input row (**Operability S25b, next train**; before it they carried the formula's JSON object);
   `Formula.fromValue(cell)` reads a JSON object, the formula's text or `null` to the same `Formula`. A change message does not name the
-  column again: the subscription keeps the names its snapshot gave (so a subscription that `resumeFrom` resumed, with no snapshot, gives the JSON
-  object). An integer literal past 2^53 is exact in both. `formula.equals(other)` compares two by
+  column too (**BL-1866, next train**; it used to keep the names its snapshot gave, so a subscription that `resumeFrom` resumed, with no
+  snapshot, gave the JSON object): each message is read by its own names. An integer literal past 2^53 is exact in both. `formula.equals(other)` compares two by
   structure, property order aside (`1` and `1.0` are one number in JavaScript); `formula.toString()` is its JSON text.
 - **The driven column is an ordinary typed column** (a `Decimal` is a `number` in a query read). A formula whose value cannot be computed
   leaves the cell `null`, not `0`; `client.table(name).explain(key, column)` returns a `FormulaExplanation` — the row's `kind` and `formula`,
