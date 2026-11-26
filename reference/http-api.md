@@ -5706,6 +5706,13 @@ database's name:
   not show it. The one exception is a job the database's own records hold — one that **committed** before a reopen, or one a restore
   brought back with the backup: `GET {jobId}` answers it from those records (`completed`), as after a restart. Before **BL-1649**, the
   new database answered the old job: a `:begin` with its key resumed it, and its `:commit` failed `500 INTERNAL_ERROR`.
+- (**BL-1778, next train**) A job in flight **ends** when its database closes — dropped, restored in place, quarantined, or the server
+  stopped — before the close returns: a job short of its commit point is cancelled and **nothing of it is committed** (none of its files
+  are left), and a job past its commit point finishes first. A request waiting on such a job (a `:commit`, a body that commits, an
+  `:append`) answers `404 BULK_LOAD_JOB_NOT_FOUND`, as every later action of the job does; an accepted job is lost. Load it again,
+  from `:begin`, once the database is open. A `:begin` during the close is refused as the database's state says (a dropped database is
+  `404 DATABASE_NOT_FOUND`). Before **BL-1778**, the job lived on after its database: a later `:commit`, or the idle sweep's abort,
+  deleted or appended to the files of the database created in its place, and acknowledged rows of that database were lost.
 
 **Errors** (the key's; the options' are with each option above, and the policy's in the paragraph below):
 
@@ -5969,7 +5976,7 @@ Content-Type: application/json
 
 | Code | Status | When |
 |---|---|---|
-| `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired, or (**BL-1649, next train**) a job of the database as it was before a drop and create, a restore in place or a reopen — unless the database's own records hold it as committed ([idempotency keys](#idempotency-keys-bl-1649-next-train)). |
+| `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired, or (**BL-1778, next train**) the job ended because its database closed under this request (nothing committed; load it again), or (**BL-1649, next train**) a job of the database as it was before a drop and create, a restore in place or a reopen — unless the database's own records hold it as committed ([idempotency keys](#idempotency-keys-bl-1649-next-train)). |
 | `AUTHORIZATION_DENIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `BULK_LOAD_TABLE_LOCKED` | 409 | (**BL-1743, next train**) Another job holds one of the job's tables: at once under `conflictPolicy: "failFast"`, once the job has waited 30 s under `"block"`. `Retry-After` is set; a body that commits is answered the same. See [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). It was `BULK_LOAD_INVALID_STATE`. |
@@ -6074,6 +6081,7 @@ queries current, read with the commit's `token` (which waits for them, as for an
 
 | Code | Status | When |
 |---|---|---|
+| `BULK_LOAD_JOB_NOT_FOUND` | 404 | (**BL-1778, next train**) The job's database closed under this `:commit` — dropped, restored in place, quarantined, or the server stopped — before the job's commit point. Nothing of it was committed and none of its files are left: run the load again from `:begin` once the database is open. It was `500 INTERNAL_ERROR`. Also (**BL-1649, next train**) a job of the database as it was before a drop and create, a restore in place or a reopen ([idempotency keys](#idempotency-keys-bl-1649-next-train)), and a job that is not found or whose session expired. |
 | `BULK_LOAD_TABLE_LOCKED` | 409 | (**BL-1743, next train**) Another job holds one of the job's tables, as at `:append`; nothing was committed. `Retry-After` is set, and the same `:commit` again answers the same. See [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). It was `500 INTERNAL_ERROR`. |
 | `WRITE_CONFLICT` | 409 | (**BL-1743, next train**) A job whose keys are checked at its commit (`validation: "strict"`, or a table with an Expression column) waited 30 s for the writes in flight on its table and they had not finished. Nothing was committed: send the load again from `:begin`. It was `500 INTERNAL_ERROR`. |
 | `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | The job it follows (`afterJobId`) did not commit — (**BL-1743, next train**) or had not taken its tables within the 30 s this one waits for it (it was `500 INTERNAL_ERROR`). Nothing was committed. |
