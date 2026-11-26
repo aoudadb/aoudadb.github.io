@@ -239,6 +239,11 @@ Documented intent that is not currently fully productized:
   - Incremental event with operation (`insert`, `update`, `delete`, `upsert`) and monotonic version.
 - `resume_from`:
   - Client-provided last seen **change-event sequence** used to recover after reconnect. Unchanged by P38.
+- `stream` / `resume_stream` (**BL-1823, next train**):
+  - A version is a number of **one** change stream, which the server starts again at every open of the database's engine (a restart, a
+    restore, an unquarantine, a drop and create, a replica's checkpoint). `snapshot_complete.stream` names it (opaque); a resume sends it
+    back as `resume_stream` beside `resume_from`. A resume of another stream — or a `resume_from` with no `resume_stream` — is answered
+    with a fresh snapshot, never an error.
 - `token` (P38):
   - Optional 42-hex consistency token on `snapshot` / `snapshot_complete` / `change` / heartbeat, **alongside** `version`. Hand it to HTTP `?at_least=` or subscribe `at_least`. Heartbeat `version` is **not** a WAL sequence. See [Freshness](freshness.md).
 - `at-least-once`:
@@ -372,9 +377,15 @@ then. Handle all three codes at any point of a subscription's life.
 - **A subscription opened after the replacement hears every change.** Up to 0.17.1 every subscription of a database whose engine was
   replaced — and every one opened on it afterwards — got its snapshot and then no change until the server restarted, and one open across
   the replacement stayed open and silent.
-- **A resume is not the way back.** A `resume_from` into a replaced engine, or into one reopened by a server restart, can be answered as
-  current or as an empty replay, so what the client missed is not delivered (**BL-1823**, open). After a server restart, subscribe fresh.
-- A table dropped and created again under a subscription is not covered here (**BL-1824**, open): the subscription is not ended.
+- **A resume names its stream** (**BL-1823, next train**). A `resume_from` with the `resume_stream` of an engine closed since — a
+  replaced one, or one reopened by a server restart — is answered with a **fresh snapshot** of what the database holds now, under the new
+  stream; it is never told "current" any more. Up to 0.17.1 a bare `resume_from` into such an engine was answered as current or as an
+  empty replay, so what the client missed was lost and rows a restore removed were kept. Both SDKs keep and send the stream by themselves.
+- **A subscription ends with its table** (**BL-1824, next train**). A `DROP TABLE`, a rename (the old name) and a materialized query's
+  drop end every subscription of the name — the table's, a named query's on it, the result's — with `TABLE_NOT_FOUND`, once, after
+  the last snapshot page; the connection stays open. A table made again under the name is another table: subscribe to it again. A
+  materialized result's **publication** ends nothing. Up to 0.17.1 a subscription received the recreated table's rows (judged by the
+  dropped table's policy), and a renamed table's subscription went silent. `TRUNCATE` does not end a subscription (BL-1066).
 
 ### Horizons and range deletes
 
@@ -395,6 +406,7 @@ column lies below it or is null. Both fields are omitted for any other table.
   "id": "sub-candles",
   "version": 100040,
   "row_count": 2880,
+  "stream": "7d0c3f5e9a2b4c61b8e0f1a2d3c4b5a6",
   "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213",
   "horizon": "2026-10-09T00:00:00.0000000Z",
   "horizon_column": "Minute"
@@ -498,11 +510,13 @@ again.
 ### Timestamp columns in a subscription (**IR quote report, 0.10.0**)
 
 A `Timestamp` column arrives as a JSON **number**: .NET ticks since `0001-01-01T00:00:00Z`, UTC (`639298350326250000` is
-`2026-11-09T15:30:32.625Z`). The `snapshot` names the column in `column_types` (`{"DateTime":"Timestamp"}`), and a client keeps that
-for the `change` messages, which do not repeat it. `@aouda/client` hands a `Date`; elsewhere, Unix milliseconds are
+`2026-11-09T15:30:32.625Z`). The `snapshot` names the column in `column_types` (`{"DateTime":"Timestamp"}`), and so does every
+`change` that carries it (**BL-1866, next train**; up to 0.17.1 a change named its array columns only, and a client had to keep the
+snapshot's names — which a resume with no snapshot, or a column made again in another type, read wrongly). Read each message by its own
+`column_types`. `@aouda/client` hands a `Date`; elsewhere, Unix milliseconds are
 `(ticks − 621355968000000000) / 10000`. A column declared `String` is text. Details: [Timestamp semantics](../reference/http-api.md#timestamp-semantics).
 
-(**BL-1391, 0.11.0**) A `Date` column is a JSON number too, a count of days since the Unix epoch, and the `snapshot` now names it as `"Date"` in `column_types` (`{"day":"Date"}`), on every page, so a client can tell it from an `Int32`. The value on the wire is unchanged and a `change` does not repeat the name. `Aouda.Client` reads it: a `Date` cell is a UTC `DateTime` at midnight (as a query result's is) in the snapshot, in a change's `Row` and `PreviousRow` and in a delete's `Key`, and a typed `DateOnly`, `DateOnly?` or `DateTime` property gets the day; a day count a `DateTime` cannot hold ends the subscription naming the column. `@aouda/client` hands a JavaScript `Date` at **00:00:00 UTC** of that day for it, in the snapshot and in every later change's `row` and `prev` (**breaking** for a caller that read the day number itself): read the calendar date with `getUTCFullYear()` / `getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. A query result's `Date` column is unchanged, still the day number.
+(**BL-1391, 0.11.0**) A `Date` column is a JSON number too, a count of days since the Unix epoch, and the `snapshot` now names it as `"Date"` in `column_types` (`{"day":"Date"}`), on every page, so a client can tell it from an `Int32`. The value on the wire is unchanged; a `change` names it too (**BL-1866, next train**). `Aouda.Client` reads it: a `Date` cell is a UTC `DateTime` at midnight (as a query result's is) in the snapshot, in a change's `Row` and `PreviousRow` and in a delete's `Key`, and a typed `DateOnly`, `DateOnly?` or `DateTime` property gets the day; a day count a `DateTime` cannot hold ends the subscription naming the column. `@aouda/client` hands a JavaScript `Date` at **00:00:00 UTC** of that day for it, in the snapshot and in every later change's `row` and `prev` (**breaking** for a caller that read the day number itself): read the calendar date with `getUTCFullYear()` / `getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. A query result's `Date` column is unchanged, still the day number.
 
 (**BL-1381, 0.11.0**) The C# SDK (`Aouda.Client`) hands a `DateTime` of kind `Utc`, 100 ns tick kept, in the snapshot and in every
 change: `Row`, `PreviousRow` and a delete's `Key` (a `Timestamp` primary key) — also after a reconnect, a gap resume or a
@@ -581,9 +595,11 @@ Primary proving tests:
 
 ### Walk-through B: Resume from reconnect (`resume_from`)
 
-1. Re-subscribe includes `resume_from`.
+1. Re-subscribe includes `resume_from` and `resume_stream` (the `stream` of the last `snapshot_complete`).
 2. Handler re-reads the caller's statements if the permission version changed.
-3. Handler compares resume version with current sequence:
+3. (**BL-1823, next train**) A `resume_stream` that is not the engine's stream now, or none, is a fresh subscribe: the snapshot below.
+   So is a `resume_from` below the table's history floor — the stream's opening sequence, or where a drop of the name forgot its ring.
+4. Handler compares resume version with current sequence:
    - at-current -> attach to live only,
    - replay available -> deliver buffer events and continue live,
    - replay expired -> send fresh snapshot fallback.
@@ -592,7 +608,8 @@ Primary proving tests:
      rather than an empty replay (**ColumnarCore S09, 0.2.0**); on an embedded engine the same holds until an
      `OnTableChange` handler (or `NoteExternalChangeListener`) listens to the table. A single write larger than the replay buffer's
      capacity is not retained either: a `resume_from` from before its end gets the snapshot (**BL-723, 0.2.0**).
-4. Consumer continues with sequence gate to avoid duplicates across boundary.
+5. Consumer continues with sequence gate to avoid duplicates across boundary — within one stream: a fresh snapshot of another stream
+   has lower numbers, and is never dropped for them.
 
 Primary anchors:
 
@@ -817,10 +834,12 @@ socket ([Revocation](../auth/credentials.md#revocation)). The handshake proves w
 **Step 2 — subscribe (client → server):**
 
 ```json
-{"type":"subscribe","id":"sub-orders","target":"orders","resume_from":123}
+{"type":"subscribe","id":"sub-orders","target":"orders","resume_from":123,"resume_stream":"7d0c3f5e9a2b4c61b8e0f1a2d3c4b5a6"}
 ```
 
-`resume_from` is optional. Omit it on a fresh subscription; include the last seen version on reconnect.
+`resume_from` is optional. Omit it on a fresh subscription; include the last seen version on reconnect, with `resume_stream`, the
+`stream` of the last `snapshot_complete` (**BL-1823, next train**). Without `resume_stream`, or with another stream's, the server answers
+a fresh snapshot.
 
 **`cross_partition_access`** (optional boolean, sent only when `true`) (**BL-1227, 0.9.0**) waives the partition-filter guard
 for a subscription that names no partition: a table `subscribe`, or a named-query `subscribe` (`name`, `args`) whose query binds no
@@ -989,8 +1008,9 @@ Steps:
 4. Let client reconnect and observe resume behavior.
 
 Expected result checks:
-- Reconnect path uses `resume_from`.
-- Either missed buffered changes replay or fresh snapshot fallback occurs.
+- Reconnect path uses `resume_from` with `resume_stream`.
+- Either missed buffered changes replay or fresh snapshot fallback occurs; after a server restart it is always the snapshot (a new
+  stream, **BL-1823, next train**).
 - Client reducer remains consistent via version-based dedup.
 
 ### Scenario 3: WebSocket-restricted environment fallback
