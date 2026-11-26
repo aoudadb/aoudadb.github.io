@@ -313,6 +313,16 @@ var rows = await db.GetTable("orders")
 // When db is disposed, the temp directory is deleted
 ```
 
+**A `Where` means the same rows embedded and remote** (**BL-1781, BL-1785, next train**). The embedded database reads a condition with
+the server's own rules: an operand is read by its column's type, as the remote client's JSON would be (`100` on a `Double` column is
+`100.0`, a `DateTime` on a `Timestamp` column is that instant, a `Guid` or its text on a `Guid` column is that Guid), and what the column
+cannot hold is refused with the server's text (`ArgumentException`) — a fractional value on an integer column, a number on a `String`
+column, a `like` on a non-`String` column; an unknown column is a `KeyNotFoundException`. Before, an embedded `decimal` or `float` range
+operand was rounded to an integer (`Where("price", "gte", 1.4m)` matched `1.0`) and a `DateTime`, a `Guid` or a `JsonElement` operand
+threw. A mutation carries what the query says or refuses it, as the remote client does: an update and a delete carry the `Where`, a
+delete its `OrderBy` and `Limit` too; `Skip`, an update's `Limit` and a truncate of a narrowed query are refused
+(`InvalidOperationException`) — see [the .NET client](../clients/dotnet.md).
+
 ### Creating a Persistent Database
 
 A persistent database writes to a specific directory. Data survives process restarts. The WAL (write-ahead log) ensures crash safety.
