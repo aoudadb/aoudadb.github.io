@@ -49,7 +49,11 @@ The environment that selects a schema file's overlay is no longer a member of th
 
 The declaration owns the **operational fields** of a database it declares: `maxMemoryShareBytes`, `memoryWeight`,
 `defaultTemperature`, `durability`, `replicationMode`, `writeConcern`, `writeConcernTimeoutMs` and `onWriteConcernTimeout`. They are
-re-applied at every start, so a change in the file wins over a change made through the API. (**BL-1427, 0.14.0**) A reload does
+re-applied at every start, so a change in the file wins over a change made through the API. They are applied **before the database
+opens**, so the start that reads a change runs it — the level, the memory share and weight, the replication mode — and a restored
+database reopens at its declared level the same way (**BL-1745, next train**; before, each lagged one restart). A declaration with a
+state error (a kind or a link that conflicts with the catalog) changes nothing and refuses the start, as before. A declared name matches
+a registered database without case: `Bond` in the file is the registered `bond` (**BL-1547, next train**). (**BL-1427, 0.14.0**) A reload does
 not re-apply them: a change to an operational field of a database that exists takes a restart (`aouda reload` lists it under
 `restartRequired`). The catalog owns **everything else**,
 including a database's signup settings (which are not declarable: a change made through `signup-settings` survives every
