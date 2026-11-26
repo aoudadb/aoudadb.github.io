@@ -795,6 +795,7 @@ await client.table('trades').insert(batch);       // one insert; frames once the
 | Factory | Values | Kind on the wire |
 |---|---|---|
 | `column.int64(name, values)` | `BigInt64Array`, a `Float64Array` of safe integers, or numbers / bigints | Int64 |
+| `column.uint64(name, values)` (**BL-1775, next train**) | `BigUint64Array`, or non-negative safe integers and bigints up to 18446744073709551615 | Int64, flagged unsigned (a `UInt64` column stores each value exactly; an unflagged negative is refused there) |
 | `column.double(name, values)` | `Float64Array` or numbers (NaN and the infinities are carried) | Double |
 | `column.bool(name, values)` | `Uint8Array` of 0 / 1, or booleans | Bool |
 | `column.string(name, values)` | strings | String (a dictionary of the values each frame's rows use) |
