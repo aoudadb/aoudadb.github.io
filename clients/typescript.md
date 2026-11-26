@@ -716,6 +716,12 @@ until this train one with a `Retry-After` was; a proxy may answer it after forwa
 diffs sent as a `POST` — are re-sent after any transient failure, as before; a bulk load's `:append` is never re-sent by the retry
 policy — the bulk loader recovers it itself, after asking the server where the job is (below).
 
+**A request no idle server could serve is `400 STATEMENT_TOO_LARGE`**, thrown as `AoudaValidationError` (**BL-1706, next train**; it
+was a plain `AoudaApiError`) and never re-sent: the same request is refused the same way. `details` says what to do — a write: send
+fewer rows in one request, or have the operator raise the database's memory share or the server's memory budget; a read: narrow the
+statement. Before, a write this large waited and was refused `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After`, every time, and a
+`retryPolicy` re-sent it to its bound. See the [error codes](../reference/http-api.md#request-validation-errors-4xx).
+
 **`expiredRows`** (**Horizon, 0.5.0**): on a table with [retention](../guides/retention.md), a row whose time lies below the
 table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
 counts it (a row that omits the column is stored, hidden and dropped by the next flush, and not counted). It is absent when 0, always
