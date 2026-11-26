@@ -2691,6 +2691,19 @@ until the server restarted: an update or upsert of those rows stored `0` (or `nu
 filtered on the new name matched none of them, a `unique` column admitted a duplicate of one, and change events carried the old name.
 On 0.17.x and earlier, restart the server after a rename, before writing to the table.
 
+(**BL-1808, BL-1809, next train**) A rename changes every place the table's definition names the column, in the same change: a
+derived column's expression, the table's `checks`, its transforms' `when`, an edge table's `srcColumn`, `dstColumn` and `edgeLabel` column, and
+every column's `references` (in any table, this one included) whose `targetTable` is this table's exact name. A name there is renamed when it reads the
+renamed column — the exact spelling, or else the one column whose name matches it without regard to case. Still refused: renaming a
+column a formula reads (`409 FORMULA_TABLE_REFERENCED`). Not rewritten: a materialized query's or a named query's definition — a
+materialized query on the old name goes to state `Error` naming the column (recreate it on the new name) — and a policy
+statement's `where` in the auth database, which then admits no row of the table by that condition until it is edited to the new name.
+Before, the rename changed the one column: a derived column computed from a missing value (a `case when` on it took its `else`), a
+check on it passed every row, a transform's `when` on it matched none, a foreign key to it refused every child row and no longer
+refused deleting a parent row a child named, and an edge table whose endpoint or label column was renamed refused every edge insert
+and, after a crash, read its buffered edges' endpoint as `0`. On 0.17.x and earlier, do not rename such a column; if you did, check
+the rows written since.
+
 **Request:**
 
 ```json
