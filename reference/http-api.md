@@ -3489,6 +3489,12 @@ retry from the failed operation. What each answer means for what was applied:
 - **`400 INVALID_REQUEST` for the request's shape** (see Errors below), a policy `403`, a scope that admits nothing, and a row-condition
   refusal of operation 0 (`403 AUTH_ROW_DENIED`): nothing was applied. Those checks run before the first operation
   commits. (**BL-1303, 0.9.0**)
+  So does the check of every operation against the table's schema (**BL-1937, next train**): an update's `set` column the table does
+  not have, a `set` value its column refuses (`"many"` into an `Int32`, 40000 into an `Int16`) or a `null` for a column that is not
+  nullable, and a delete's `orderBy` column the table does not have are `400 INVALID_REQUEST` *Operation[i] …*, nothing applied. They were
+  refused while operation `i` ran, after operations `0` to `i − 1` were applied. A delete's `orderBy` column is matched without case, as
+  every column a write names (`id` for `Id`; it was refused as an unknown column). A column found missing while an operation runs (the
+  table changed under the batch) is `400 COLUMN_NOT_FOUND` with the `failedOperation` line (it was `404 TABLE_NOT_FOUND`).
 - **`403 BATCH_ROW_DENIED_PREFIX_APPLIED`**, no `Retry-After`: the row condition refused operation `k` ≥ 1. Operations `0` to `k − 1`
   were applied, operation `k` and the later ones were not, and the row that check refused was not written. `details` names
   `appliedOperations` and `totalOperations` (and `refusalCode=AUTH_ROW_DENIED`). **Do not re-send the batch as-is.**
