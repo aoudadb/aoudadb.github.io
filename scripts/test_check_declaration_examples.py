@@ -81,19 +81,25 @@ _BARE_WHERE = _BAD_ACTION.replace('"admin"', '"read"').replace(
 
 
 class DeclarationExampleTests(unittest.TestCase):
-    def test_a_where_that_is_a_bare_condition_is_refused_and_a_list_of_one_passes(self) -> None:
-        bare = cde.main(["--root", _repo(_BARE_WHERE)])
-        self.assertEqual(bare, 1)
-        findings = cde.check_file("a.md", _BARE_WHERE, cde.Draft202012Validator({}))
+    def test_a_where_that_is_a_bare_condition_is_refused_by_the_schema_and_a_list_of_one_passes(self) -> None:
+        # aouda BL-1869: the refusal is the published schema's, not a rule of this script.
+        root = _repo(_BARE_WHERE)
+        self.assertEqual(cde.main(["--root", root]), 1)
+        with open(os.path.join(root, "schemas", "aouda-declaration.v1.json"), encoding="utf-8") as handle:
+            validator = cde.Draft202012Validator(json.load(handle))
+        findings = cde.check_file("a.md", _BARE_WHERE, validator)
         self.assertEqual(len(findings), 1)
-        self.assertIn("/statements/0/where is not a row condition", findings[0])
+        self.assertIn("/where", findings[0])
         listed = _BARE_WHERE.replace('{ "column": "source", "op": "eq", "value": "x" }', '{ "and": [ { "column": "source", "op": "eq", "value": "x" } ] }')
         self.assertEqual(cde.main(["--root", _repo(listed)]), 0)
 
-    def test_a_where_is_read_to_its_conditions(self) -> None:
+    def test_a_where_is_read_to_its_conditions_by_the_schema(self) -> None:
+        with open(_SCHEMA, encoding="utf-8") as handle:
+            validator = cde.Draft202012Validator(json.load(handle))
+
         def found(row_condition: str) -> list[str]:
             page = _BARE_WHERE.replace('{ "column": "source", "op": "eq", "value": "x" }', row_condition)
-            return cde.check_file("a.md", page, cde.Draft202012Validator({}))
+            return cde.check_file("a.md", page, validator)
 
         one = '{ "column": "source", "op": "eq", "value": "x" }'
         self.assertEqual(found(f'{{ "groups": [ {{ "and": [ {one} ] }}, {{ "or": [ {one}, {one} ] }} ] }}'), [])
@@ -101,7 +107,6 @@ class DeclarationExampleTests(unittest.TestCase):
             f'{{ "and": {one} }}',  # not a list
             '{ "and": [] }',
             f'{{ "groups": [ {one} ] }}',  # a group is a row condition, not a condition
-            f'{{ "and": [ {{ "or": [ {one} ] }} ] }}',  # a nested one is in groups
             '{}',
             '"source"',
         ):
