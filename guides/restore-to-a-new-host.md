@@ -50,8 +50,10 @@ What you need:
 
    The server stops its engines for the restore and restarts them; a point-in-time restore replays the log at the restore.
    **The restore replaces the new server's own auth database** with the restored one: the operator key the new server started with
-   (a `--dev-admin` key, a bootstrap key) stops working, and the keys and principals of the lost host work. Keep an operator key of the lost
-   host ready, or the declaration that creates one.
+   (a `--dev-admin` key, a bootstrap key) stops working, and the keys and principals of the lost host work. Keep a **live** operator key of
+   the lost host ready — not revoked, not expired since the backup — or the declaration that creates one. A set in which nobody can sign in
+   and operate the server is refused `RESTORE_LEAVES_NO_OPERATOR` with nothing changed, and the new server's own key keeps working
+   (**BL-1711, next train**): declare an operator in `server.principals` of the new server and restart it, then restore again.
 
 ## Path B — offline, into a directory, with no server running
 
@@ -83,6 +85,10 @@ aouda db inspect --name shop
 The first open after an **exact** restore flushes the restored write buffers, so it takes longer than a normal start; a crash during it
 loses nothing and the next start does it again. A restored database keeps the durability level it had.
 Principals and keys of the auth database come back with it (they are the lost host's, not the new server's own); the declaration file you carried is read at start.
+An offline restore judges nobody: the **first start** does. A directory whose server auth database has no enabled principal that holds
+`manage` on `server` refuses to start (`SERVER_HAS_NO_OPERATOR`) unless the declaration declares an operator in `server.principals`; one
+whose operators hold `manage` but none of them a credential that signs in by itself (a key revoked, or expired since the backup) starts,
+and logs a warning saying so (**BL-1711, next train**) — declare an operator and restart.
 
 ## When it refuses
 
@@ -94,6 +100,7 @@ Principals and keys of the auth database come back with it (they are the lost ho
 | `PITR_BULK_LOAD_UNAVAILABLE` | A bulk load committed before the target has no files in the store or the archive | Restore to before the load's commit (the message names the job), or from a later backup |
 | `BACKUP_TARGET_TIME_INVALID` | The target is at or before the backup, or in the future; or the set is exact-restore-only (a database without a WAL) | Pick a target after the set's cut, or restore exactly |
 | exit 78 | The `--to` directory is not empty | Use an empty one |
+| `RESTORE_LEAVES_NO_OPERATOR` (Path A, **BL-1711, next train**) | The set's server auth database holds nobody who can sign in and operate the server (no enabled principal with `manage` on `server`, or none with a live key, a password or an OIDC trust). Nothing was changed; the new server's key still signs in | Declare an operator in the new server's `server.principals` and restart, then restore again; or restore another set; or use Path B and start the directory with that declaration |
 | `BACKUP_BLOB_DAMAGED` | A blob of the set or the WAL archive does not match its key (the message names the file and the set); nothing was written under its name, and the database the restore stopped in, if the restore had started writing it, refuses to open (`RESTORE_INCOMPLETE`; the message says so) | Delete the directory and restore another set |
 
 Over HTTP each refusal carries a one-line `remedy` field beside the message; the CLI prints it after the message. A directory a failed offline restore left behind holds a partial
