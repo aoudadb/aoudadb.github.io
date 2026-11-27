@@ -2658,6 +2658,8 @@ each, rename the column, then re-create them by the new name. Before, the rename
 answered an **empty** result and reported itself current, a query selecting it (or holding the whole row) went to `Error`, every call of
 a named query or mutation naming it failed `COLUMN_NOT_FOUND`, and a statement on it granted no row of the table.
 
+(**Durability-1, next train**) A `type` change that converts values (a Tier 2 change, such as `String` to `Int32`) is refused before anything changes when a **live** value does not convert, or a null sits in a `NOT NULL` column — *Column 'w' on table 't' cannot change from String to Int32: the value 'xyz' (hot segment 3, row 2) does not convert. Every live value converts or the change is refused; nothing was changed.* A deleted row's old value does not count. While a coalesce or a tier move of the table runs past 60 s the change is refused `409 WRITE_CONFLICT` and can be sent again. See [Schema: column type changes](../guides/schema.md#schemadiffresultwarnings--unsupported-modifications).
+
 **Request:**
 
 ```json
