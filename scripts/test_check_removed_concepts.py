@@ -71,6 +71,15 @@ class RemovedConceptsTests(unittest.TestCase):
         )
         self.assertEqual(crc.main(["--root", root]), 0)
 
+    def test_the_request_members_s20_deleted_are_hits(self) -> None:
+        # Operability S20 (aouda BL-1832): a guide that still teaches pinAllInMemory or pkUniquenessOverride is refused, in any case;
+        # the live `pkUniqueness` and `hotOnlyBackstop` are not.
+        page = "Set `pinAllInMemory: true`.\nThe options' `PkUniquenessOverride`.\n`pkUniqueness: Strict` stays. `hotOnlyBackstop` stays.\n"
+        findings = crc.scan_text("guides/hot-cold.md", page, vocabulary=True)
+        self.assertEqual(2, len(findings), findings)
+        self.assertTrue(any("pinAllInMemory" in f and "storageTemperature" in f for f in findings), findings)
+        self.assertTrue(any("pkUniquenessOverride" in f for f in findings), findings)
+
     def test_word_anchors(self) -> None:
         page = "numk_ stays. aouda_exampleexampleex_mk_notakey stays.\n`mk_` goes.\nmk_svc_abc goes.\n"
         root = _repo({"guides/real-time.md": page})

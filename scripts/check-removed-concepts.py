@@ -82,6 +82,9 @@ REMOVED: list[tuple[str, str, str]] = [
     (r"api-key-prefix", "api-key-prefix", "the one key format"),
     (r"regenerate-keys", "regenerate-keys", "mint a new key, then delete the old one"),
     (r"configured-keys", "configured-keys", "the principal's credentials"),
+    # Operability S20 (aouda BL-1832): request members kept only to be refused, deleted; the server refuses them as members nobody has.
+    (r"pinAllInMemory", "pinAllInMemory", "`storageTemperature: HotOnly`"),
+    (r"pkUniquenessOverride", "pkUniquenessOverride", "a bulk load's `validation`"),
 ]
 
 # Old words for a kind. "API key" is included: a provider credential is called a provider key.

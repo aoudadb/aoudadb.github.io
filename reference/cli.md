@@ -226,7 +226,8 @@ Every verb takes `-s, --server <url>` (default `AOUDA_SERVER` / `AOUDA_URL`), `-
 `--s3-endpoint <url>` (an S3-compatible endpoint, path-style) and `--s3-region <region>`.
 
 A restore checks every blob against its key as it reads it: a blob that does not match refuses it with `BACKUP_BLOB_DAMAGED` (exit 1),
-naming the file and the set, and `verified yes` on a restore that completed means every blob matched. With
+naming the file and the set: a restore that completes (exit 0) matched every blob, and its output says nothing more about it
+(**BL-1748, next train**: the `verified yes` line and `--json`'s `integrityVerified` are gone). With
 `--target-time`, every database's archive window is checked before anything is written: `PITR_WINDOW_UNAVAILABLE` leaves `--to` as it was. A restore that stops part-way leaves the database it stopped in refusing to open (`RESTORE_INCOMPLETE`) — delete
 the directory and restore again.
 
@@ -238,7 +239,6 @@ backup-2026-11-21-150851-4bccdc05  2026-11-21T15:08:51.8031954+00:00  yes       
 $ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z
 restored backup set backup-2026-11-21-150851-4bccdc05 to 2026-11-21T15:09:01+00:00
 files        53 (87867 bytes read)
-verified     yes
 pitr         _serverauth: 11 transactions, 13 rows replayed, last commit 2026-11-21T15:08:46.8577356+00:00
 pitr         _settings: 0 transactions, 0 rows replayed
 pitr         shop: 3 transactions, 3 rows replayed, last commit 2026-11-21T15:08:52.6389213+00:00
@@ -246,7 +246,6 @@ pitr         shop: 3 transactions, 3 rows replayed, last commit 2026-11-21T15:08
 $ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z --to /srv/aouda-data --from /backups/aouda
 restored backup set backup-2026-11-21-150851-4bccdc05 into /srv/aouda-data, staged to 2026-11-21T15:09:01.0000000+00:00 (replayed when the directory is first started)
 files        53 (87867 bytes read)
-verified     yes
 database     _serverauth (Strict, auth)
 database     _settings (Strict)
 database     shop (Strict)

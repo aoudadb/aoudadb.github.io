@@ -61,7 +61,6 @@ What you need:
 aouda backup restore backup-2026-11-21-150851-4bccdc05 --to /srv/aouda-new --from /mnt/backups/aouda --target-time 2026-11-21T15:09:01Z
 # restored backup set backup-2026-11-21-150851-4bccdc05 into /srv/aouda-new, staged to 2026-11-21T15:09:01.0000000+00:00 (replayed when the directory is first started)
 # files        53 (87867 bytes read)
-# verified     yes
 # database     shop (Strict)
 # start it with: aouda start --data-path /srv/aouda-new
 aouda start --data-path /srv/aouda-new

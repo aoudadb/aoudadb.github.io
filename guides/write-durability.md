@@ -199,7 +199,7 @@ There is no alias and no shim; each old name is refused where it would have been
 
 | Old | Where | Now |
 |---|---|---|
-| `enableWal`, `dataDurability` | `POST /api/databases` body | **400** `INVALID_REQUEST` naming `durability` |
+| `enableWal`, `dataDurability` | `POST /api/databases` body | **400** `REQUEST_MEMBER_UNKNOWN` naming the member; the `remedy` lists the body's members, `durability` among them (**BL-1832, next train**; it was `400 INVALID_REQUEST`) |
 | An unknown level — including `"Strict"` (capitalised), `"MemoryOnly"`, `"everysec"` | `POST /api/databases` `durability` | **400** naming the four levels |
 | `EnableWal`, `DataDurability` | `Aouda:Databases:<db>` server config | Startup is refused (`SETTING_REMOVED`), naming `databases.<db>.durability` of `aouda.json` (**BL-1463, 0.16.0**; before, startup validation failed naming `Durability`) |
 | `EnableWal` (in code, or config `Aouda:EnableWal`) | Embedded | The open throws, naming `Durability` |
@@ -683,9 +683,10 @@ Operational guidance:
 - "A database refused to open after I set `unlogged` or `memory`" (`WAL_RETIREMENT_REFUSED`)
   - The open retires the WAL it finds, and refused: its flush could not finish in 5 minutes, an `os` load is not promoted yet, or the database
     requires its WAL archived before deletion. The WAL is kept; fix the cause and open again, or open it at `strict` or `os` ([Changing a level](#changing-a-level)).
-- "`400 INVALID_REQUEST` naming `durability` on database create"
-  - The body sends `enableWal` or `dataDurability`, or a level spelled differently from `strict` / `os` / `unlogged` / `memory`
-    (lower case).
+- "`400 REQUEST_MEMBER_UNKNOWN` naming `enableWal` or `dataDurability` on database create"
+  - The body sends a member it does not have; the level is `durability` (**BL-1832, next train**).
+- "`400 INVALID_REQUEST` naming the four levels on database create"
+  - The body's `durability` is spelled differently from `strict` / `os` / `unlogged` / `memory` (lower case).
 
 ## 2.18 Known gaps and undone work
 
