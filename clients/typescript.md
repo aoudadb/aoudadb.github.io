@@ -1571,10 +1571,21 @@ per-subscription `consumerQueueCapacity` on `subscribe` (table and named query) 
 driven by callbacks that is never iterated is not "behind": past that many unread events it stops
 queuing, and iterating it afterwards throws.)
 
+**The protocol version** (**BL-1830, next train**). The client speaks protocol version `3` (`PROTOCOL_VERSION`, exported with
+`PROTOCOL_VERSION_HEADER` and `PROTOCOL_VERSION_UNSUPPORTED`) and names it on every request — data, auth and long poll, set last so a
+`defaultHeaders` entry cannot override it — and in the realtime `auth` (`protocol_version`). `localNetworkFetch`, which an application
+may use for any URL, stamps nothing. A server of another version is refused by name: **`AoudaProtocolVersionError`** (an
+`AoudaApiError`, code `PROTOCOL_VERSION_UNSUPPORTED`, with `serverVersion` — `null` when it named none — and `clientVersion`), from an
+HTTP call, an auth call, the WebSocket handshake and long poll. It is **terminal**: not retried, not counted by the circuit breaker or
+`authFailurePolicy`, no reconnect and no fallback to long poll, and every subscription and write stream ends with it. The client also
+refuses a server whose `auth_ok` names another version, or has no `protocol` block: the connect rejects with the same error. Use the
+client release published with the server ([compatibility](compatibility.md#the-protocol-version-one-rule-bl-1830-next-train)); before
+this train the client sent `"1"` and the refusal was an `AoudaValidationError` coded `UNSUPPORTED_VERSION`.
+
 **Server limits and refusals** (**BL-1383, 0.11.0**). `client.serverLimits` holds what the server sent in `auth_ok` —
 `limits` (`maxSubscriptionsPerConnection`, `maxSubscriptionsPerIdentity`, `maxConnectionsPerIdentity`, `subscribeBurst`,
 `subscribeRefillPerSecond`) and `protocol` (`version`, `capabilities`) — so an application can size itself instead of meeting a hard
-error first. It is `undefined` before the streaming connection is open, from an older server, and over the long-poll fallback (its
+error first. It is `undefined` before the streaming connection is open and over the long-poll fallback (its
 handshake carries none). Three refusals have typed errors, all `AoudaApiError`s (status 429) and **not** `AoudaConnectionError`s, so a
 catch for connection failures does not swallow a cap:
 

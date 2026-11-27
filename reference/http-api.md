@@ -4,7 +4,7 @@ nav_order: 1
 parent: "Reference"
 ---
 
-# Aouda Wire Protocol v2
+# Aouda Wire Protocol — protocol version 3
 
 > **Canonical location.** This file is the public wire / HTTP API reference (formerly multi-repo `WIRE-PROTOCOL.md`). Prefer the client SDKs (`Aouda.Client`, `@aouda/client`) for application code; use this document for endpoint shapes and protocol details. Do not recreate `WIRE-PROTOCOL.md` copies in other Aouda repos.
 
@@ -19,39 +19,71 @@ This document specifies the JSON-based wire protocol for Aouda client-server com
 
 ## Protocol Version
 
+The protocol version is **one number, `3`** (**BL-1830, next train**), for every transport: the `X-Aouda-Protocol-Version` header on
+HTTP and long poll, the realtime `auth` message's `protocol_version` member, and `auth_ok.protocol.version`. It moves by one for every
+release whose wire contract changed since the last, additive or not. **There is no window and no negotiation**: a server speaks one
+version, and a request naming another is refused. The client SDKs send it on every request; use the SDK release published with the
+server.
+
 ### Request Header
 ```
-X-Aouda-Protocol-Version: 2
+X-Aouda-Protocol-Version: 3
 ```
 
 ### Response Header
-All responses include:
+All responses, refusals included, carry the server's version (a browser may read it: it is a CORS-exposed header):
 ```
-X-Aouda-Protocol-Version: 2
+X-Aouda-Protocol-Version: 3
 ```
 
-The server echoes the version it used. If the client sends an unsupported version, the server returns `400 Bad Request` with error code `UNSUPPORTED_VERSION`.
+### What the server does with it
 
-### Version Negotiation
+| The request names | Server behavior |
+|---|---|
+| Nothing (no header) | Served. `curl`, probes, a browser's OIDC redirect, the CLI and a replica join name none. |
+| `3` exactly | Served. |
+| Anything else — another number (`1`, `2`, `4`), an empty value, `+3`, `03`, `3.0`, text, two values (`3, 3`) or two header lines | `400 Bad Request`, code `PROTOCOL_VERSION_UNSUPPORTED`, no `Retry-After`: no retry can succeed. |
 
-| Client Sends | Server Behavior |
-|--------------|-----------------|
-| No header | Uses latest version (v2), echoes v2 |
-| `1` | Uses v1, echoes v2 (v2 server); request bodies must still include `database` for database-scoped endpoints |
-| `2` | Uses v2, echoes v2 |
-| `99` (unsupported) | Returns 400 with `UNSUPPORTED_VERSION` |
-| `abc` (invalid) | Returns 400 with `UNSUPPORTED_VERSION` |
+The refusal is checked on every route (data, auth, admin, long poll, `/health`, `/ready`, an unknown path) on both listeners, before
+setup mode, the WebSocket upgrade, authentication and the controllers: a refused request reads and writes nothing. On the data-plane
+listener a route that listener does not serve keeps its own `404`. It is checked **after** CORS, so a cross-origin caller (Studio, a
+browser app) reads the refusal; before this change a browser saw a network error. A preflight names no version and is answered as before.
 
-### Database context (v2)
+The body is the protocol error envelope with a `remedy` and the request's id (the caller's `X-Request-Id`, else the correlation id);
+the server's log has one warning line with the code and that id:
 
-**Protocol v2** requires a **`database`** field in all request bodies that target a database (query, insert, update, delete, create table, and table/schema operations). The field must be a non-empty string and must match the database name in the URL path (e.g. `POST /api/databases/{db}/query` → body must include `"database": "{db}"`). Matching is **case-sensitive** (ordinal string comparison). Missing or empty `database` returns `400 Bad Request` with code `MISSING_DATABASE`. If `database` does not match the path, the server returns `400` with `INVALID_REQUEST` and may include `details` with `pathDatabase` and `bodyDatabase` for debugging.
+```json
+{
+  "error": "This server speaks protocol version 3; the request names 2.",
+  "code": "PROTOCOL_VERSION_UNSUPPORTED",
+  "requestId": "6f1c0a2b9d3e4f50",
+  "remedy": "Use a client of protocol version 3 — the SDK release published with this server — or send X-Aouda-Protocol-Version: 3."
+}
+```
+
+A value that is not a plain integer of at most nine digits is never named back, in the body or in a log line ("the request names a
+value that is not a version"): it is a caller-chosen string.
+
+### On the realtime connection
+
+A browser cannot set a header on a WebSocket upgrade, so the version also travels in the [`auth` message](#websocket-auth):
+`"protocol_version": 3`. Absent, the handshake goes on (as a request with no header is served); `3` (the JSON integer) is served;
+anything else — `2`, `4`, `"3"`, `null`, `3.0`, a MessagePack float — is answered `auth_error` with code `PROTOCOL_VERSION_UNSUPPORTED`
+and the server's `protocol_version`, then the close (`1008`), before the database, the wire mode or the credential are looked at (no
+failed key is counted for it). The check reads the raw message, so an `auth` that also has a member the server does not take is told
+its version first. `auth_ok.protocol.version` is the same number; an SDK refuses a server whose `auth_ok` names another, or none. Long
+poll is HTTP and carries the header.
+
+### Database context
+
+The protocol requires a **`database`** field in all request bodies that target a database (query, insert, update, delete, create table, and table/schema operations). The field must be a non-empty string and must match the database name in the URL path (e.g. `POST /api/databases/{db}/query` → body must include `"database": "{db}"`). Matching is **case-sensitive** (ordinal string comparison). Missing or empty `database` returns `400 Bad Request` with code `MISSING_DATABASE`. If `database` does not match the path, the server returns `400` with `INVALID_REQUEST` and may include `details` with `pathDatabase` and `bodyDatabase` for debugging.
 
 ## Standard Request Headers
 
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Content-Type` | Yes (for POST/PUT) | Must be `application/json` |
-| `X-Aouda-Protocol-Version` | No | Protocol version (default: latest) |
+| `X-Aouda-Protocol-Version` | No | The protocol version the client speaks: `3`. None named is served; any other value is `400 PROTOCOL_VERSION_UNSUPPORTED` ([Protocol Version](#protocol-version)). (**BL-1830, next train**) |
 | `X-Request-Id` | No | Correlation ID (echoed in response) |
 | `X-Read-Preference` | No | Read preference for query routing |
 | `X-Aouda-Token` | No | Consistency token (`AtLeast`). 42-character lowercase hex. Query `at_least` **wins** when both are sent. Empty value is `TOKEN_MALFORMED`. **Not** the fencing header `X-Aouda-Current-Token`. |
@@ -65,7 +97,7 @@ All API responses include:
 
 | Header | Description |
 |--------|-------------|
-| `X-Aouda-Protocol-Version` | Protocol version used |
+| `X-Aouda-Protocol-Version` | The server's protocol version (`3`), on every response, refusals included |
 | `X-Served-By` | Address of the server that handled the request |
 | `X-Server-Role` | Current role (Primary, Secondary, Hidden, Standalone) |
 | `X-Request-Id` | Echoed from request if provided |
@@ -747,7 +779,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `UNSUPPORTED_VERSION` | 400 | Unsupported protocol version |
+| `PROTOCOL_VERSION_UNSUPPORTED` | 400 | The request named another protocol version than the server's, or named one badly (empty, repeated, not a plain integer). No `Retry-After`; terminal for both SDKs. Was `UNSUPPORTED_VERSION` (**BL-1830, next train**) |
 | `MALFORMED_REQUEST` | 400 | Request is malformed at the protocol level |
 
 ---
@@ -5140,7 +5172,7 @@ of any size was read whole — the first one before authentication — and nothi
 
 ### Client → Server Messages
 
-#### `auth`
+#### `auth` {#websocket-auth}
 
 Authenticate the connection and optionally negotiate wire mode.
 
@@ -5150,6 +5182,7 @@ Authenticate the connection and optionally negotiate wire mode.
 | `token` | string | Yes | The caller's own credential: one key or one session token. A second credential field is `auth_error` `REQUEST_MEMBER_UNKNOWN` (**BL-1664, next train**; `INVALID_REQUEST` up to 0.17) and the value is not read. |
 | `database` | string | Yes | Database name this connection is scoped to. |
 | `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
+| `protocol_version` | number? | No | The protocol version the client speaks: the integer `3`. Any other value (`2`, `"3"`, `null`, `3.0`) is `auth_error` `PROTOCOL_VERSION_UNSUPPORTED` before anything else of the message is looked at; omitted, the handshake goes on. Both SDKs send it. (**BL-1830, next train**) |
 
 **Example:**
 ```json
@@ -5157,7 +5190,8 @@ Authenticate the connection and optionally negotiate wire mode.
   "type": "auth",
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "database": "my_db",
-  "wire_mode": "json"
+  "wire_mode": "json",
+  "protocol_version": 3
 }
 ```
 
@@ -5421,6 +5455,8 @@ Successful authentication acknowledgement.
 | `user_id` | string? | Authenticated user ID. Null for keys or unauthenticated connections. |
 | `expires_at` | string? | ISO 8601 UTC token expiry. Null if the token does not expire. |
 | `wire_mode` | string? | Negotiated wire mode: `"json"` or `"msgpack"`. Null means `"json"`. |
+| `limits` | object | The limits that apply to this connection's identity: `max_subscriptions_per_connection`, `max_subscriptions_per_identity`, `max_connections_per_identity`, `subscribe_burst`, `subscribe_refill_per_second`. `0` means that limit does not apply to this connection (a database with no auth has no per-identity limit). |
+| `protocol` | object | `version` — the server's protocol version, `3`, the same number as the HTTP header's (**BL-1830, next train**; it was a separate streaming number, `1`, that nothing refused on) — and `capabilities`, the optional message types the server takes (none yet). **An SDK refuses an `auth_ok` whose `protocol.version` is another, or that has no `protocol`**, and ends the connect with its protocol-version error. |
 
 **Example:**
 ```json
@@ -5428,7 +5464,15 @@ Successful authentication acknowledgement.
   "type": "auth_ok",
   "user_id": "usr_abc123",
   "expires_at": "2026-05-23T11:00:00Z",
-  "wire_mode": "json"
+  "wire_mode": "json",
+  "limits": {
+    "max_subscriptions_per_connection": 1024,
+    "max_subscriptions_per_identity": 2048,
+    "max_connections_per_identity": 8,
+    "subscribe_burst": 512,
+    "subscribe_refill_per_second": 32
+  },
+  "protocol": { "version": 3, "capabilities": [] }
 }
 ```
 
@@ -5443,6 +5487,8 @@ Authentication failure. The server closes the connection after sending this mess
 | `type` | string | Always `"auth_error"` |
 | `code` | string | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `message` | string | Human-readable error description. |
+| `remedy` | object? | The one thing to do about a credential refusal ([the auth error envelope](#auth-error-envelope)); omitted for an unauthenticated data-plane caller. |
+| `protocol_version` | number? | The server's protocol version, with `PROTOCOL_VERSION_UNSUPPORTED` only (**BL-1830, next train**). |
 
 **Example:**
 ```json
@@ -5450,6 +5496,17 @@ Authentication failure. The server closes the connection after sending this mess
   "type": "auth_error",
   "code": "AUTH_TOKEN_EXPIRED",
   "message": "Token has expired"
+}
+```
+
+The protocol-version refusal (**BL-1830, next train**), then the close (`1008`). Terminal for both SDKs: no reconnect, no fallback to long poll.
+
+```json
+{
+  "type": "auth_error",
+  "code": "PROTOCOL_VERSION_UNSUPPORTED",
+  "message": "This server speaks protocol version 3; the auth message names 2. Use a client of protocol version 3 — the SDK release published with this server — or send \"protocol_version\": 3 in auth.",
+  "protocol_version": 3
 }
 ```
 
@@ -6488,6 +6545,10 @@ Operator abort of an in-flight session. The beginning principal, or one that hol
 
 ## Version History
 
+The numbers in this table are **this document's revisions**, not the protocol version: the protocol version is the
+`X-Aouda-Protocol-Version` header's number ([Protocol Version](#protocol-version)), `3` since the row marked **BL-1830**. A row that says
+the header "stays `2`" was a wire change the old header did not move for — which is what BL-1830 ended.
+
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01-11 | Initial release |
@@ -6515,4 +6576,5 @@ Operator abort of an in-flight session. The beginning principal, or one that hol
 | 2.17 | 0.9.0 (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal and vector search on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused the same way (**BL-1161, BL-1298, 0.9.0**). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/`whoami`` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
 | 2.18 | 0.9.0 (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |
 | 2.19 | 0.14.0 (ADR 0072) | **Formulas (additive on the wire):** the column type `Expression` with `drives` (create table, add column, the column listing, `…/schema`, schema documents); a formula is the column's value, a JSON object in JSON rows (the canonical text in column-batch frames); the `cellRef` expression node (valid only in a formula, with its shorthands) and thirteen new functions; [`POST …/tables/{table}/explain`](#explain-a-formula-cell); a token read of a table with an `Expression` column judged by the formula maintainer's progress; new codes `FORMULA_COLUMN_INVALID`, `FORMULA_INVALID`, `FORMULA_REFERENCE_INVALID`, `FORMULA_REFERENCE_NOT_PRIMARY_KEY`, `FORMULA_CYCLE`, `FORMULA_DEPTH_EXCEEDED`, `FORMULA_LIMIT_EXCEEDED` (400), `FORMULA_REFERENCE_NOT_READABLE` (403), `FORMULA_VALUE_WRITE_REFUSED`, `FORMULA_TABLE_REFERENCED` (409), `FORMULA_TOKEN_REQUIRES_PRIMARY` (421), `FORMULA_NOT_MAINTAINED` (503), `EXPR_CELLREF_NOT_ALLOWED`, `EXPR_CELLREF_INVALID`. `X-Aouda-Protocol-Version` stays `2`. A server of an earlier train refuses the `Expression` type and has no `explain` route (`404`). |
+| 2.20 | next train (Operability S19, **BL-1830**) | **The protocol version means something (breaking on the wire):** one number, `3`, for every transport — the `X-Aouda-Protocol-Version` header and the realtime `auth` message's new `protocol_version`, echoed in `auth_ok.protocol.version` (which was a separate streaming `1`). There is no window: a request naming another version, or naming one badly (empty, repeated, `+3`, `03`, `3.0`, text), is `400 PROTOCOL_VERSION_UNSUPPORTED` with a `remedy` and no `Retry-After` on every route, readable by a cross-origin caller; on the socket `auth_error` with that code and the server's `protocol_version`, before the credential is looked at. A request that names no version is served. `UNSUPPORTED_VERSION` and the range check (1–2) are gone. Both SDKs send it on every request, treat the refusal as terminal, and refuse an `auth_ok` of another version. **An old client** (`Aouda.Client` ≤ 0.17.1 sends `2`, `@aouda/client` ≤ 0.17.0 and Studio ≤ 0.16.0 send `1`) **is refused on every data call**. |
 

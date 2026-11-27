@@ -723,6 +723,7 @@ Configuration precedence and operational notes:
   - Per-subscription user filter and resume values are dynamic request-level values.
 - Safety-gated:
   - Unsupported wire modes are rejected at auth handshake.
+  - Another protocol version is rejected first, before the credential (`PROTOCOL_VERSION_UNSUPPORTED`, **BL-1830, next train**).
   - Batch size/bytes and sequence continuity are validated per frame.
 - Deprecated/reserved:
   - None flagged as deprecated in current code for streaming options.
@@ -808,16 +809,25 @@ Sec-WebSocket-Key: <key>
 **Step 1 — authenticate (client → server):**
 
 ```json
-{"type":"auth","token":"<key-or-session-token>","database":"appdb","wire_mode":"json"}
+{"type":"auth","token":"<key-or-session-token>","database":"appdb","wire_mode":"json","protocol_version":3}
 ```
 
 **Step 1 response — `auth_ok` (server → client on success):**
 
 ```json
-{"type":"auth_ok","user_id":"user-123","expires_at":"2026-06-01T00:00:00Z","wire_mode":"json"}
+{"type":"auth_ok","user_id":"user-123","expires_at":"2026-06-01T00:00:00Z","wire_mode":"json",
+ "limits":{"max_subscriptions_per_connection":1024,"max_subscriptions_per_identity":2048,"max_connections_per_identity":16,"subscribe_burst":512,"subscribe_refill_per_second":32},
+ "protocol":{"version":3,"capabilities":[]}}
 ```
 
-Fields: `user_id` (null for a key), `expires_at` (null when no expiry), `wire_mode` (the negotiated wire mode).
+Fields: `user_id` (null for a key), `expires_at` (null when no expiry), `wire_mode` (the negotiated wire mode), `limits`, and
+`protocol.version` — the server's protocol version, the same number as the HTTP header's.
+
+**The protocol version** (**BL-1830, next train**). `protocol_version` in `auth` names the version the client speaks, `3`. A server of
+another version answers `auth_error` `PROTOCOL_VERSION_UNSUPPORTED` with its own `protocol_version`, then closes the socket — before it
+looks at the database, the wire mode or the credential. Omitted, the handshake goes on. Both SDKs send it, end for good on that refusal
+(no reconnect, no fallback to long poll: long poll is the same server and carries the version in its header), and refuse an `auth_ok`
+whose `protocol.version` is another, or missing. See [HTTP API: Protocol Version](../reference/http-api.md#protocol-version).
 
 **Which credentials the socket accepts** (**BL-1464, 0.16.0**). The ones an HTTP request to that database accepts: a key or a session of
 a principal of the auth database that governs the database, or of `_serverauth`. A credential resolves by itself to one principal (a key by

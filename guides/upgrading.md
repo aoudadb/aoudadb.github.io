@@ -193,10 +193,29 @@ What an old client now gets from a server of the next train. Upgrade the clients
 | A body that does not bind (**BL-1659, next train**) | the framework's validation body (`errors`, `traceId`, no `code`) outside the auth routes | `400 INVALID_REQUEST` with the path, in the route's own envelope | a reader of `errors` finds `error` and `code` instead |
 | A realtime client message with a member it does not take, or one given twice (**BL-1664, next train**) | dropped (`filtre` subscribed to every row) | an `error` frame (or `auth_error`, or a long-poll `400`) `REQUEST_MEMBER_UNKNOWN` / `REQUEST_MEMBER_DUPLICATE` with the message's `id`; the retired second credential member of `auth` / `re_auth` is one | the subscribe or the stream is refused by name |
 | A WAL archive destination an earlier build archived to (**BL-1672, next train**) | one archive manifest for every WAL root (format 2 in 0.17.1) | one record per WAL root (`wal-archive/<walRootId>.json`, format 4) | every reader refuses the destination: `FILE_FORMAT_REFUSED: kind=wal-archive-manifest found=2 expected=4 path=<destination>:<key>` — the archive worker archives nothing (the local WAL is kept, the disk grows), a point-in-time restore from it is refused. Point the server at a **new** archive destination or key prefix and take a new backup there |
+| The protocol version (**BL-1830, next train**) | `X-Aouda-Protocol-Version: 2`, accepting `1`–`2`, and nothing moved it on a wire change; the socket named none (its `auth_ok` said a separate `1`) | one number, `3`, on HTTP, long poll and in `auth` (`protocol_version`) and `auth_ok.protocol.version`; another value, or one named badly (empty, repeated, `+3`, `03`, `3.0`), is `400 PROTOCOL_VERSION_UNSUPPORTED` (on the socket `auth_error`), with a remedy and no `Retry-After`; no header is served | **An old client is refused on every data call**: `Aouda.Client` ≤ 0.17.1 sends `2`, `@aouda/client` ≤ 0.17.0 and Studio ≤ 0.16.0 send `1`. Upgrade the server, both SDKs and Studio's `@aouda/client` pin together. A new SDK on an old server gets `400 UNSUPPORTED_VERSION` on HTTP and ends its socket (the old `auth_ok` says `1`). `curl`, probes and the CLI, which name none, are unaffected — see [Protocol version](#protocol-version) |
 | A known realtime message type that does not read (**BL-1664, next train**) | `UNKNOWN_MESSAGE_TYPE`, no `id` | `INVALID_MESSAGE`, with the `id` | a client keyed on the old code sees the new one |
 
 A node joining across versions (`--join`) is unaffected: it reads the members' addresses and the set's name. No data-directory, WAL or
 backup format changes with these rows.
+
+## Protocol version
+
+From the next train the protocol version is one number, `3` (**BL-1830**), and **an SDK and a server of different numbers do not
+talk**: there is no window. A server refuses a request that names another version (`400 PROTOCOL_VERSION_UNSUPPORTED`, or the realtime
+`auth_error` of that code) and both SDKs end for good on it — `AoudaProtocolVersionException` in C#, `AoudaProtocolVersionError` in
+TypeScript: no retry, no reconnect, no fallback. So an upgrade moves together:
+
+1. the server;
+2. `Aouda.Client` and `@aouda/client`, the releases published with it;
+3. Studio, whose `@aouda/client` pin moves with them (a hosted Studio that still pins an older client cannot use the new server).
+
+What an old client gets from the new server: `400 PROTOCOL_VERSION_UNSUPPORTED` on every HTTP call, with the server's version in the
+message and the response header; its socket opens only when it names no version in `auth` (no SDK before this train does), and its
+data calls are refused anyway. What a new client gets from an old server: `400 UNSUPPORTED_VERSION` ("Supported versions: 1-2") on
+HTTP, and its socket is ended by the client because the old `auth_ok` names `1`. A caller that names no version — `curl`, a probe, the
+CLI, Hub, a replica join — is served by both. The protocol moves by one for every release whose wire contract changed since the last;
+[compatibility](../clients/compatibility.md#the-protocol-version-one-rule-bl-1830-next-train) has the table of releases.
 
 ## What every release's notes carry
 

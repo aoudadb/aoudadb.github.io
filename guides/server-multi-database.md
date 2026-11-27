@@ -310,12 +310,15 @@ Process start
         → starts background processing loop (Channel-based)
   → Kestrel begins accepting requests
   → Middleware pipeline:
-      ProtocolVersionMiddleware
+      ProtocolVersionMiddleware (stamps X-Aouda-Protocol-Version on every response; refuses nothing)
       CorrelationIdMiddleware
       LogContextEnricherMiddleware
       RequestLoggingMiddleware
+      CORS, data-plane route allow-list
       RateLimiter (concurrency 50 / queue 100)
       RequestTimeouts (30 s)
+      ProtocolVersionCheckMiddleware (400 PROTOCOL_VERSION_UNSUPPORTED for another version — BL-1830, next train)
+      setup mode, WebSocket upgrade, authentication
       Controllers (database-aware routing)
   → StopAsync
       PendingOpsWorker.StopAsync
@@ -360,10 +363,11 @@ Process start
 
 ```
 POST /api/databases
-  → ProtocolVersionMiddleware (echo/set headers)
+  → ProtocolVersionMiddleware (sets the response headers)
   → CorrelationIdMiddleware (X-Correlation-ID)
   → RateLimiter (concurrency check)
   → RequestTimeouts (start 30 s clock)
+  → ProtocolVersionCheckMiddleware (a request naming another version: 400, nothing read)
   → DatabasesController.CreateDatabase(request, ct)
       → validate request.Name is not empty → 400 if empty
       → DatabaseManager.CreateDatabaseAsync(name, options)
