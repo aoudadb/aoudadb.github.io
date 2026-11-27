@@ -2275,6 +2275,13 @@ A result read as JSON (an older server) has no `typedColumns`, so its keys past 
 A `Timestamp` read through JSON could come back one millisecond early, because a JavaScript number cannot hold its
 .NET ticks exactly. It now reads as the millisecond the ticks round to, on both paths.
 
+(**BL-1887, next train**) `result.typedColumns[i].exact(r)` of a `Timestamp` column read from frames is a `bigint`: the stored
+.NET ticks, to the tick (a tick is 100 ns), where the cell itself is the millisecond. For an instant after 1970 the millisecond it
+falls in is `new Date(Number((ticks - 621355968000000000n) / 10000n))` (divide the `bigint`: a tick count since 1970 of any date after 1998 is past 2^53, and
+`Number(…)` of it before dividing can land a millisecond late). The ticks themselves are what to keep when a key must name the row
+exactly (a `Timestamp` primary key with sub-millisecond ticks, which the millisecond cell cannot). A result read as JSON has no
+`typedColumns`, so no exact `Timestamp`.
+
 ---
 
 ## 15) Phase Coverage Matrix

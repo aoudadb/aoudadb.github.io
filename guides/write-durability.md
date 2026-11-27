@@ -633,15 +633,13 @@ Expected result:
 
 Primary operational surfaces:
 - Health:
-  - `WalHealthCheck` evaluates queue pressure against configured thresholds.
+  - `WalHealthCheck` reports each database whose log stopped after a failed write or sync (**BL-1843, next train**; it read queue counters nothing wrote).
   - `HealthController` exposes summary/details.
 - Metrics:
   - `MetricsController` exposes snapshots from `MetricsCollector`.
   - Raw counters come from `Perf`.
 
 Durability-related counters available in `Perf` include:
-- WAL queue and batching:
-  - `WalQueueDepth`, `WalQueueHighWater`, `WalBatchCount`, `WalBatchRecords`, `WalBatchBytes`, `WalBatchFlushMs`
 - Table/database filtering:
   - `WalWritesSkippedTableDisabled`, `ReplicationFramesFilteredTable`, `ReplicationFramesFilteredDatabase`, `ReplicationFramesBroadcastedPerDb`
 - Write concern behavior:

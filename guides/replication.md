@@ -149,8 +149,8 @@ If you do nothing:
 | `Databases:{db}:WriteConcernTimeoutMs` | `5000` | Timeout used when concern > `One` |
 | `Databases:{db}:OnWriteConcernTimeout` | `DegradeAndLog` | Timeout degrades by default when concern > `One` |
 | Query read preference | `Primary` | Query parameter/header defaults to primary semantics |
-| Health threshold `ReplicationLagDegradedSeconds` | `10` | Degraded health threshold for replication lag |
-| Health threshold `ReplicationLagUnhealthySeconds` | `60` | Unhealthy health threshold for replication lag |
+| Health threshold `ReplicationLagDegradedBytes` | `10000000` | Degraded health threshold for a database's replication lag, in bytes of the log (**BL-1843, next train**) |
+| Health threshold `ReplicationLagUnhealthyBytes` | `60000000` | Unhealthy health threshold for a database's replication lag, in bytes (**BL-1843, next train**) |
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -427,8 +427,8 @@ Key implementation anchors:
 | `databases.<db>.writeConcern` | string | `One` | `One`, `Majority`, `All` | `aouda.json` (**BL-1463, 0.16.0**) | DB write concern default |
 | `databases.<db>.writeConcernTimeoutMs` | int | `5000` | `>=100` | `aouda.json` (**BL-1463, 0.16.0**) | Used for concern > `One` |
 | `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | `aouda.json` (**BL-1463, 0.16.0**) | Timeout behavior |
-| `Aouda:Health:Thresholds:ReplicationLagDegradedSeconds` | int | `10` | positive | appsettings/env | Health degraded threshold |
-| `Aouda:Health:Thresholds:ReplicationLagUnhealthySeconds` | int | `60` | positive | appsettings/env | Health unhealthy threshold |
+| `Aouda:Health:Thresholds:ReplicationLagDegradedBytes` | long | `10000000` | positive | appsettings/env | Health degraded threshold: bytes a database may be behind the primary (**BL-1843, next train**; it was `…DegradedSeconds`, `10`, which compared the bytes at an assumed 1 MB/s) |
+| `Aouda:Health:Thresholds:ReplicationLagUnhealthyBytes` | long | `60000000` | positive | appsettings/env | Health unhealthy threshold, in bytes (**BL-1843, next train**; it was `…UnhealthySeconds`, `60`) |
 | Query parameter `readPreference` | string | `Primary` behavior | `Primary`, `PrimaryPreferred`, `Secondary`, `SecondaryPreferred`, `Nearest`, `Hidden`, `SecondaryWithMaxLag` (case-insensitive; unknown values silently default to `Primary`) | per request | Overrides header when both set |
 | Header `X-Read-Preference` | string | unset | same values as `readPreference` query parameter | per request | Used when query param absent |
 | Header `X-Aouda-Fencing-Token` | int string | unset | integer token | per request | Validated on write endpoints |
