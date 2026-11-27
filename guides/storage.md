@@ -95,7 +95,7 @@ Aouda is in-memory-first at execution time, but production use requires durable 
   - `src/Aouda.Engine.Storage/WalIntegration/WalReplayDriver.cs`
   - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
   - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
-  - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupSetRetention.cs`
   - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
   - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
   - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
@@ -116,7 +116,7 @@ Aouda is in-memory-first at execution time, but production use requires durable 
   - `tests/Aouda.Engine.Storage.Tests/WalRetentionTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Backup/BackupEngineIntegrationTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Backup/RestoreIntegrationTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/Backup/LifecycleIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/Durability1S12RetentionTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Backup/PitrFromArchivedWalTests.cs`
   - `tests/Aouda.Server.Tests/ConfigurationIntegrationTests.cs`
   - `../aouda-client-ts/tests/databases.test.ts`
@@ -176,7 +176,7 @@ If you run server defaults and do not set per-database overrides:
     is configured — see `2.8.1` Walk-through D and
     [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
 - Backup/restore engines:
-  - `BackupEngine`, `RestoreEngine`, and `BackupLifecycleManager` implemented and tested, for **exact** restore and **PITR**.
+  - `BackupEngine` and `RestoreEngine` implemented and tested, for **exact** restore and **PITR**; retention is the server's (`BackupSetPruner`, `/admin/backup/retention`).
   - **Point-in-time recovery (PITR) is implemented.** Replay is the crash-recovery path, at
     transaction-commit granularity, reachable over HTTP and both SDKs. The local window is a
     write-volume bound (`MaxSlotWalKeepBytes`), not a duration. See
@@ -219,7 +219,7 @@ If you run server defaults and do not set per-database overrides:
 | Backup manifest + incremental dedup engine | Yes | No | No | P4 EpicD Task1/3 reports, backup engine tests | Engine-level implementation complete |
 | Restore engine, exact restore | Yes | No | No | `RestoreEngine.cs`, restore tests; BL-186 S03 | Re-bases WAL root and catalog directory |
 | PITR replay (local WAL + archive) | Yes | No | No | BL-186 S06/S07; recovery-path replay, HTTP `targetTime` | Transaction-commit granularity; local window is write volume |
-| Backup lifecycle retention and blob GC | Yes | No | No | Task D5 report, `BackupLifecycleManager.cs` | Dry-run default safety model |
+| Backup retention and blob GC | Yes | No | No | `BackupSetPruner` (`BackupSetRetention.cs`), `/admin/backup/retention`, `/admin/backup/prune` | A set is kept or deleted whole; dry run unless `execute`; the blob GC never collects archived WAL a record names (the archive's own `Aouda:Archive:WalRetentionDays` bounds it) |
 | HRA snapshot (`.hra`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Closes Gap C — rows written since last shutdown are now backed up |
 | Mutable keyed tier (`.mkt`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Cache/UPSERT tier rows covered in backup and restore |
 | Public REST backup/restore operations | Yes | No | No | P16 SA4, `/admin/backup/*`, both SDKs | Exact restore + PITR `targetTime` (BL-186 S07). Studio UI is exact-restore-only |
@@ -371,7 +371,7 @@ Key implementation anchors:
 - Backup/archive/restore:
   - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
   - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
-  - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupSetRetention.cs`
   - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
 - Server wiring:
   - `src/Aouda.Server/Startup/AoudaHostedService.cs`
@@ -664,7 +664,7 @@ Common mistake: using the `aouda.backup.*` metrics of `GET /api/admin/metrics` a
 | Per-table durability overrides | `CreateTableAsync(... durability)` / `AlterTableDurabilityAsync` | Schema document `durability.level` | Declarative schema `durability.level`; table GET reports `durability` (**Lead S26, 0.6.0**) | Partial | The level is surfaced; replication / write concern overrides are engine-only |
 | Replication persistence status | `ReplicationState`/host services | `client.admin.replication.status/topology/coverage` | `/admin/replication/*` | Implemented | Monitoring and topology surface available |
 | Backup metrics visibility | `BackupRunStatus` (kept over a restart) | `client.admin.metrics.snapshot()` | `GET /api/admin/metrics` (`aouda.backup.*`, **BL-851, next train**) | Implemented | Observability only |
-| Execute backup/restore lifecycle | `BackupEngine`, `RestoreEngine`, `BackupLifecycleManager` | `client.admin.backup.*` | `/admin/backup/*` | Implemented | P16 SA4; PITR via `targetTime` (BL-186 S07) |
+| Execute backup/restore lifecycle | `BackupEngine`, `RestoreEngine`, `BackupSetPruner` (retention) | `client.admin.backup.*` | `/admin/backup/*` | Implemented | P16 SA4; PITR via `targetTime` (BL-186 S07) |
 | Archive worker lifecycle controls | `WalArchiveWorker` (started with the engine) | Not exposed | No explicit archive admin routes | Partial | Worker runs when configured; no start/stop HTTP API. Health check covers "configured but not cycling." |
 
 ### B) Missing API matrix
@@ -822,7 +822,7 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
 | Per-table durability control | `TableDurabilityTests.cs`, `TableDurabilityPersistenceTests.cs` | Pass | Strong | Override + inheritance + persistence |
 | Backup engine | `BackupEngineTests.cs`, `BackupEngineParallelTests.cs`, `BackupEngineIntegrationTests.cs`, `BackupEngineSlotTests.cs` | Pass | Strong | Full/incremental/slot semantics |
 | Restore + PITR | `RestoreIntegrationTests.cs`, `Bl186S06PitrRecoveryPathTests.cs`, `Bl186S07PitrHttpTests.cs` | Pass | Strong | Exact restore + recovery-path PITR over HTTP |
-| Backup lifecycle retention/GC | `LifecycleIntegrationTests.cs`, `BackupLifecycleManagerTests.cs` | Pass | Strong | Chain-preservation and dry-run safety |
+| Backup retention/GC | `Durability1S12RetentionTests.cs` | Pass | Strong | Whole-set keep/delete, incremental bases kept, dry-run safety, archived WAL and a blob younger than the cutoff never collected |
 | Server persistence config path | `ConfigurationIntegrationTests.cs` | Pass | Medium | Validation and startup config behavior |
 | TS persistence-adjacent API contracts | `../aouda-client-ts/tests/databases.test.ts`, `../aouda-client-ts/tests/admin.test.ts` | Pass | Medium | Client HTTP contract coverage |
 
@@ -876,7 +876,7 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
   - `src/Aouda.Engine.Storage/Bootstrap/StorageBootstrap.cs`
   - `src/Aouda.Engine.Storage/Backup/BackupEngine.cs`
   - `src/Aouda.Engine.Storage/Backup/RestoreEngine.cs`
-  - `src/Aouda.Engine.Storage/Backup/BackupLifecycleManager.cs`
+  - `src/Aouda.Engine.Storage/Backup/BackupSetRetention.cs`
   - `src/Aouda.Engine.Storage/WalIntegration/Archive/WalArchiveWorker.cs`
   - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
   - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
@@ -893,7 +893,7 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
   - `tests/Aouda.Engine.Storage.Tests/WalCheckpointIntegrationTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Backup/BackupEngineIntegrationTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Backup/RestoreIntegrationTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/Backup/LifecycleIntegrationTests.cs`
+  - `tests/Aouda.Engine.Storage.Tests/Backup/Durability1S12RetentionTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Backup/PitrFromArchivedWalTests.cs`
   - `tests/Aouda.Server.Tests/ConfigurationIntegrationTests.cs`
   - `../aouda-client-ts/tests/databases.test.ts`
