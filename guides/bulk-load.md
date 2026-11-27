@@ -475,6 +475,21 @@ const batch = ColumnBatch.of(
 ).validate();
 ```
 
+### Vector values (**BL-1817, next train**) {#vector-values}
+
+A [vector column](graph-vector.md)'s value is one JSON array of numbers per row in a JSON body (a null row holds no vector). **A vector
+the column cannot hold is refused at `:append`**, `400 INVALID_REQUEST`, naming the table, column, frame and row, as an
+[invalid array value](#array-columns) is: a component that is `NaN` or an infinity (a JSON number beyond the 32-bit float range), a null
+or non-numeric component, or a vector of another length than the column's dimensions. None of that frame's rows is applied, the frames
+before it stay, and the job stays open. An embedded `BulkLoadAsync` refuses the same rows before anything is written. Before, a
+non-finite component and a wrong length failed the job at `:commit` with `500 INTERNAL_ERROR`, and a null component was stored as `0`.
+
+```text
+400 INVALID_REQUEST
+Column 'Embed' of table 'docs', row 2 of frame 0: component 1 of the vector is +Infinity (a number beyond the float range); a vector's
+components are finite numbers. None of the frame's rows was applied.
+```
+
 ### Column batches (C#) (**Lead S13, 0.6.0**)
 
 When the data is already columnar (Parquet or Arrow row groups, a data frame, another database's export), `Aouda.Client` loads

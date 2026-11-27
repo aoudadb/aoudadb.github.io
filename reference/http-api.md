@@ -833,6 +833,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
+| `VECTOR_COLUMN_UNSUPPORTED` | 400 | (**BL-1696, BL-1816, next train**) A `Vector` or `MdVector` column is declared where no vector call could use it: on an edge table (an edge-table create, or `POST …/tables/{name}/columns` on one — once an edge was buffered, every read of such a table failed), by `POST …/tables/{name}/columns` on any table (no add-column carries a vector configuration), or by `POST …/tables` (whose request carries none either). The `error` starts with the code and names the table and the column. Nothing is changed. Create a vector column with its table and its configuration: [`POST …/tables/{name}:create-vector-column`](#post-apidatabasesdbtablesnamecreate-vector-column), or a schema document's `vector` / `mdVector`. Before, each was accepted and made a column that could hold no vector. |
 | `TABLE_NOT_FOUND` | 404 | The specified table does not exist — a join's table included (**BL-1937, next train**). Also a read whose table was dropped after its name was resolved and before it was read, on every read route — `/query`, `/query/count`, a named query, the graph and vector routes, `POST …/materialized-queries/{name}/query` and a subscribe's snapshot (an `error` message with this code) — with `details` "The table was dropped while this read was starting; nothing was read." (**BL-1936, next train**). A read that had already started reads the table to its end: a `DROP TABLE` keeps the files a running read holds until it is done, on the primary and on a replica that replays the drop (**BL-1933, next train**) |
 | `COLUMN_NOT_FOUND` | 404 / 400 | The specified column does not exist: `404` on a column route (`PATCH` / `DELETE …/tables/{name}/columns/{column}`), `400` when a read (`/query`, a join's key, a named query's column — execute, batch and a batch slot alike) or a `rows/batch` operation names a column the table does not have (**BL-1937, next train**: a column found missing while a batch operation runs, with the `failedOperation` line) |
 | `FILE_FORMAT_REFUSED` | 503 | (**BL-1744, next train**) A table cannot be read or written because one of its files is of another version or is damaged: the answer names the file (`Table <id> cannot be read: FILE_FORMAT_REFUSED: found=<n> expected=<m> file=<name>.`; the path is not shown), is `503` with **no `Retry-After`** (a retry meets the same file), and stays until the directory is restored from a backup or opened by the build that wrote it ([Upgrading](../guides/upgrading.md#other-refusals)). The server has not changed anything. Before, such a table answered `500 INTERNAL_ERROR` with the refusal in `details` |
@@ -2982,6 +2983,10 @@ into its result as a plain `String` column (a result is an ordinary table, never
 (lowest `clusterOrder`) must be a `Timestamp` or `Date`; it may be nullable. A refused declaration — no such column, a `keep` that is
 not a duration, an edge table, a table with a vector column — is `400` naming its reason. The response's `policy` carries `retention` and `horizon`.
 
+(**BL-1816, next train**) A `Vector` or `MdVector` column is refused `400 VECTOR_COLUMN_UNSUPPORTED`, nothing created: this request carries
+no vector configuration, and such a column could hold no vector. Make a vector table with `POST …/tables/{name}:create-vector-column`, or a
+schema document's `vector` / `mdVector`.
+
 **A table carries no security (**BL-1464, 0.16.0**).** `POST …/tables`, `PUT …/tables/{name}/options`, edge-table create, vector-column create and materialized-query create refuse a body that sends a security member with `400 REQUEST_MEMBER_UNKNOWN` (**BL-1659, next train**; `SCHEMA_UNKNOWN_MEMBER` up to 0.17), naming the member and what replaces it, whatever its value. `PUT …/options` sets `culture` only. Who may read or write the table is a statement. See [Policy](../auth/authorization.md).
 
 ```json
@@ -3018,6 +3023,11 @@ rename, the graph and vector creates and the schema apply accepted any name.
 Delete a table. A `__mqbuild_*` name is `404 TABLE_NOT_FOUND` (**BL-1468, 0.14.0**): a materialized query's build table is not
 addressable. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
 table, remove it from the schema file and apply with `allowDestructive: true`. Needs `manage` on the database.
+
+(**BL-1814, next train**) The table's edges and vectors still in their write buffers go with it. Before, they stayed: every flush of them
+failed, so every [backup](../guides/backup.md) was refused `BACKUP_BUFFERS_UNSEALED` naming the dropped table, the WAL could not be
+checkpointed past their frames, and the close wrote no clean-shutdown marker — until the server restarted. An edge or vector insert that
+was under way when the table was dropped is answered `404 TABLE_NOT_FOUND`.
 
 **Response:** `204 No Content`
 
@@ -3138,6 +3148,11 @@ its upstream queries' sources included) is
 `409 FORMULA_TABLE_REFERENCED`, naming those formula cells: a formula may not read a query over a formula table (the dependency cannot be
 followed through the query), so the table may not become one under such a reader. The same holds for a schema document's added Expression
 column (a failed entry) and a branch merge.
+
+(**BL-1696, next train**) A `Vector` or `MdVector` column is refused `400 VECTOR_COLUMN_UNSUPPORTED` on every table, nothing changed: no
+add-column carries a vector configuration, so the column could hold no vector (and on an edge table every read of a buffered edge failed).
+A vector column is declared with its table (`POST …/tables/{name}:create-vector-column`, or a schema document, whose add-column of a vector
+column is a failed entry). Before, it was added.
 
 **Response:** `201 Created` with column detail
 
@@ -4091,7 +4106,10 @@ Needs an unconditional `write` statement on the table it creates. `400 INVALID_R
 Insert vectors for row keys. `vectorData` is **row-major**: the vectors one after another, `rowKeys.length × dimensions` numbers.
 `embeddingModelVersion` records which model made them; `partitionKey` places them in a partition (the default
 partition when omitted or null; an empty string names a partition of its own, **BL-1184, 0.9.0**). The vectors must satisfy the `where` of the caller's
-`write` statements, checked on the stored image (its first partition column holds `partitionKey`): else `403 AUTH_ROW_DENIED`, and none is written (**BL-1204, 0.9.0; BL-1464, 0.16.0**). Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
+`write` statements, checked on the stored image (its first partition column holds `partitionKey`): else `403 AUTH_ROW_DENIED`, and none is written (**BL-1204, 0.9.0; BL-1464, 0.16.0**). Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`. So is a component that is not a
+finite number — a number beyond the 32-bit float range, read as an infinity — naming the vector and the component; nothing is written
+(**BL-1817, next train**; before, it was stored, and a `NaN` vector ranked nearest to every query). A [bulk load](../guides/bulk-load.md#vector-values)
+refuses one the same way, at `:append` (as it does a vector of another length or with a null component).
 
 ```json
 { "rowKeys": [1, 2], "vectorData": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], "embeddingModelVersion": "v1" }
