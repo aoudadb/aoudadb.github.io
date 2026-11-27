@@ -1929,7 +1929,9 @@ new TableOptions
 
 ## 12. Branches
 
-Create lightweight branches for testing or migrations:
+Create lightweight branches for testing or migrations. A new branch holds every row the database had acknowledged when it was
+created, rows still in the write buffer included (**BL-1760, next train**), except a `memory` table's (empty in a branch) and an
+edge table's buffered edges:
 
 ```typescript
 // Create a branch (`from` is its parent; `main` when left out)
