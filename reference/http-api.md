@@ -1861,10 +1861,16 @@ snapshot alone and lacked every buffered row, both versions of a flushed row who
 already deleted (BL-1713). A create is therefore the catalog plus a copy of the database's buffered rows, not metadata only; the copy
 is written into the branch's own directory and moved into its own segments when the branch is first used.
 
-Two kinds of table are not copied whole:
+One kind of table is not copied: a table at durability `memory` is **empty** in the branch, as after a restore (its rows end with the
+process). An **edge table** is copied whole — its buffered edges and its buffered ordinary rows — and so are buffered vectors
+(**BL-1760, next train**): the create seals the database's edge and vector buffers into segments, as a backup does, so the branch
+inherits them (an earlier draft of this release left an edge table's buffered edges and rows out).
 
-- a table at durability `memory` is **empty** in the branch, as after a restore (its rows end with the process);
-- an **edge table**'s buffered edges and rows are not in the branch (it reads the edges already in segments) until a later release.
+**A branch writes over what it inherited** (**BL-1954, next train**). An `UPDATE`, a `DELETE`, an insert of a keyed table and
+an edge delete on a branch apply to the rows the branch inherited from the database, in a cold segment too; the database's rows are
+not changed (copy on write). Before, every such write over a row the branch inherited in a cold segment — an edge table's sealed
+edges included — failed with `500`. A branch's vector search finds the vectors the database had at the create (**BL-1799, next
+train**; it found none of the sealed ones).
 
 **A failed create leaves nothing** (**BL-1798, next train**). The branch is listed only once its files are whole: a create that fails,
 or a server that crashes inside one, leaves no branch of that name, and a create of the name succeeds afterwards. A leftover
@@ -1874,7 +1880,7 @@ that opened with no tables and could be neither deleted nor created again.
 | Status | Code | When |
 |--------|------|------|
 | `409` | `BRANCH_EXISTS` | The name is taken (without regard to case), being deleted, or being created by another request |
-| `409` | `BRANCH_BUSY` | The create could not take its cut now: a backup is capturing the branch set; or (**BL-1760, next train**) a flush still running in the database, an open write, the cut past the few seconds the commit fence may stay closed, or segment retirements that kept moving. The message names which, and the `remedy` names a backup only when one held it. Nothing was changed; no `Retry-After` — retry the create |
+| `409` | `BRANCH_BUSY` | The create could not take its cut now: a backup is capturing the branch set; or (**BL-1760, next train**) a flush still running in the database (an edge or vector flush included), an edge or vector buffer that could not be sealed (the message names the table, and the `remedy` says that a flush which keeps failing is settled only by a restart of the database), an open write, the cut past the few seconds the commit fence may stay closed, or segment retirements that kept moving. The message names which, and the `remedy` names a backup only when one held it. Nothing was changed; no `Retry-After` — retry the create |
 | `500` | `BRANCH_SET_DAMAGED` | (**BL-1712, next train**) The database's branch list or branch segment references file is damaged; the message names it. No retry helps: restore the file from a backup or repair it. Every branch route answers the same |
 
 #### `POST /api/databases/{db}/branches/{name}/diff`
@@ -1904,6 +1910,8 @@ Insert rows into a table on a branch; they are written to the branch's own segme
 ```
 
 **Response:** `200` `{ "table": "orders", "rowsInserted": 2 }`. A body without `table` or without a row is `400 INVALID_REQUEST`.
+A key the branch already holds — one it inherited from the database included — is `409 DUPLICATE_PRIMARY_KEY`, as on
+`POST …/tables/{name}/rows`, nothing written (**BL-1760, next train**; it was `500 INTERNAL_ERROR`).
 
 ---
 
