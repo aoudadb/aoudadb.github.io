@@ -183,13 +183,19 @@ Invariants:
 - A key names one logical row on a `Strict` table only (**BL-791, 0.3.0**). On `Recent` and `BestEffort` a table can hold
   two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
   `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
-  every copy of a matched key held in a segment.) On a `Strict` table a key is meant to have one live copy, and an insert or upsert keeps it so. A table **switched to
-  `Strict` while it holds a key twice keeps both copies** until a keyed DELETE or UPDATE collapses them: the next DELETE or UPDATE
-  of that key removes **every** live copy that existed when it committed, live and after a crash or a point-in-time restore
-  (before, a `DELETE … WHERE Id = 4` answered success and the row stayed readable). Two shapes are
-  still collapsed only by a crash's replay, not by the live write (**BL-1668**, open): a duplicate that sits only in segments because the
-  table was flushed and reopened after the ALTER, and a `MergeAsync` over a duplicated buffer, which replaces one copy and leaves the
-  other. The ALTER does not refuse a table that holds duplicates (BL-1674). Under `BestEffort` an UPDATE or DELETE applies to **every** live copy its `where` matches — a
+  every copy of a matched key held in a segment.) On a `Strict` table a key is meant to have one live copy, and an insert or upsert keeps it so. **A change of the
+  mode to `Strict` over a table that holds a key twice is refused** (**BL-1674, next train**): the change waits for the table's writes
+  and bulk loads in flight (up to 60 s), checks every live key in every tier — the buffer, hot and cold segments; a copy already deleted
+  does not count — and, finding one twice, changes nothing and fails with `SCHEMA_PK_DUPLICATES` naming the table and one repeated key
+  (in a schema apply, the change's entry is `Failed` with a reason that begins with the code; a declared schema refuses the start with
+  `SCHEMA_CHANGE_REFUSED` naming it). Remedy: delete or update all but one row of each repeated key, then apply again. A write that read
+  the old mode while the change waited is answered `409 WRITE_CONFLICT` ("… read its key mode as 'BestEffort' …"; nothing applied;
+  retry), and writes, loads and the check itself are bounded the same way: a change whose writes or loads do not finish in time is a
+  retryable conflict, and a check whose keys do not fit the read budget is refused as a read that does not fit it is, with nothing
+  changed (the keys are held in memory for the check, about 56 bytes each). (Before, the change kept both copies, and two shapes of that state —
+  a duplicate only in segments after a restart, and a `MergeAsync` over a duplicated buffer — were collapsed only by a crash's replay,
+  BL-1668.) A data directory an earlier release switched this way can still hold such a table: there the next DELETE or UPDATE of that
+  key removes **every** live copy that existed when it committed, live and after a crash or a point-in-time restore. Under `BestEffort` an UPDATE or DELETE applies to **every** live copy its `where` matches — a
   `where` on the key alone matches all of them — in every tier, and a crash replays exactly that (**BL-557**, proved by
   `Durability1S09BestEffortEveryCopyTests`; the rule above is unchanged).
 - **Changing a table's mode away from `Strict` is safe under writes**: the ALTER waits for the table's writes in

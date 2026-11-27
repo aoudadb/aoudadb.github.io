@@ -382,9 +382,12 @@ store, or use a new client.
 
 ## 8. Operations
 
-- **Metrics**: `GET /api/admin/metrics` carries backup counters, the `wal` block (`archiveSegmentsArchivedTotal`, `archiveErrorsTotal`,
-  `pitrFromArchiveTotal`, and per database `wal.databases[]` with `slotMinPosition` and `slotMaxLagBytes`; the process-wide
-  `slotMinPosition` is gone). `GET /api/admin/metrics/summary` has `lastBackupHoursAgo`.
+- **Metrics** (**BL-851, next train**): `GET /api/admin/metrics` has `aouda.backup.last_success_age_ms` — the last backup set that succeeded on
+  this server, by hand or by the schedule, **kept over a restart**, and no point when none is known — `last_failure_age_ms`,
+  `last_duration_ms`, `runs_total` (`succeeded`, `failed`, `skipped`), `restores_total`, `uploaded_bytes_total`, and the log's
+  `aouda.wal.archived_bytes_total`, `archive_errors_total` and, per database, `aouda.wal.slots_count` and `slot_lag_bytes` (the log's
+  position minus its lowest slot). Alert on `last_success_age_ms`. `lastBackupHoursAgo` is gone with `GET /api/admin/metrics/summary`: it
+  was always `-1` (BL-1841).
 - **Health**: `GET /health/detailed` reports a backup component (stale if no recent success; `not_configured` before any backup) and an archive
   that is not advancing.
 - **A WAL segment that is not whole stops the archive in front of it** (**Durability-1, next train**). A sealed segment that is short,

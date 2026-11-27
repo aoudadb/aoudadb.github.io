@@ -4211,6 +4211,245 @@ those details with the resource mode.
 
 ---
 
+### Admin metrics (**BL-851, next train**)
+
+The metrics contract Studio and monitoring read (server ADR 0073). Two routes, on the **admin listener** only (the data-plane listener
+answers both `404` with no body), under `manage` on `server`, on the control-plane admission lane — a server that sheds its data plane
+still answers them.
+
+| Route | What |
+|---|---|
+| `GET /api/admin/metrics` | every metric, in one answer |
+| `GET /api/admin/metrics/history?minutes=&interval=` | a closed set of series for charts |
+
+Refusals: `401 AUTH_CREDENTIAL_MISSING` (and the other credential refusals), `403 AUTH_POLICY_DENIED`, `429 SERVER_AT_CAPACITY`,
+`503 SERVER_STARTING` before the databases are open, `503 SETUP_REQUIRED` in setup mode, `400 INVALID_REQUEST` for a history range out of
+bounds. `GET /api/admin/metrics/summary`, `GET /api/admin/metrics/{subsystem}`, `GET /api/server/metrics` and
+`GET /api/server/databases/{db}/metrics` are gone: they answer `404`. `GET /api/server/memory` stays, a diagnostic (its `walBytesOnDisk`
+is the open databases' own logs, summed).
+
+#### The answer
+
+```json
+{
+  "timestamp": "2026-11-24T22:40:00.123Z",
+  "server": {
+    "version": "0.18.0",
+    "commit": null,
+    "protocolVersion": 3,
+    "dataDirectoryFormat": 23,
+    "runtime": ".NET 10.0.1",
+    "os": "Linux 7.0.0",
+    "architecture": "x64",
+    "startedAt": "2026-11-24T08:00:00.000Z"
+  },
+  "metrics": {
+    "aouda.wal.size_bytes": {
+      "type": "gauge",
+      "unit": "bytes",
+      "points": [ { "labels": { "database": "app" }, "value": 67108864 } ]
+    },
+    "aouda.backup.last_success_age_ms": { "type": "gauge", "unit": "ms", "points": [] },
+    "aouda.http.request_duration_ms": {
+      "type": "histogram",
+      "unit": "ms",
+      "bounds": [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
+      "points": [
+        {
+          "labels": { "group": "query", "result": "ok" },
+          "count": 3,
+          "sum": 41.7,
+          "buckets": [0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        }
+      ]
+    }
+  }
+}
+```
+
+What a reader can rely on:
+
+- **Every metric the server serves is in every answer**, keyed by its name, with an empty `points` when it has none. A name a reader does
+  not know is to be ignored: adding a metric is not a break.
+- **Unknown is not zero.** A value the server does not know has **no point** (no backup yet, no checkpoint yet, no archive destination,
+  no heap limit, no replication). A `0` was measured. A counter whose labels are a closed set sends every combination, zero included,
+  unless the table says *sparse*; in a sparse metric an absent combination is zero.
+- A point's `labels` has exactly the keys the table names, every value a string; a metric with no labels has one point with `{}`. Values
+  are JSON numbers: counts and bytes whole, milliseconds may carry a fraction. A counter can pass 2^53 in a process's life; the server
+  writes the exact integer and a JavaScript reader holds it to within a few units.
+- `buckets` has one more entry than `bounds`; entry *i* counts the observations in `(bounds[i-1], bounds[i]]`, the last those above the
+  last bound. They are **not** cumulative. A quantile is read from the difference of two answers' buckets.
+- **The labels are a closed set**, bounded at 287 points plus 59 per listed database. `database` is a database the registry lists now,
+  in the registry's spelling, **at most the first 100 by ordinal name** (`aouda.metrics.databases_omitted_count` says how many were left
+  out); a dropped database's points are gone with it. `group` is `query`, `write`, `bulk_load`, `graph_vector`, `schema`,
+  `materialized`, `realtime`, `auth`, `admin`, `health` or `other`; an HTTP `result` is `ok` (below 400), `refused` (another 4xx),
+  `unavailable` (429, 503, 507), `timeout` (408, 504), `error` (another 5xx) or `cancelled` (the client went away, or the response
+  broke off after it started; a frame response whose end frame carries an error counts by that frame's status).
+- A database that is not open has only its `aouda.database.lifecycle_state` and `aouda.database.open_state` (`0`) points.
+- **Resets.** A counter starts at `0` when the process starts and only rises; a different `server.startedAt` means it was reset, and a
+  reader takes the new value as the increase. `aouda.wal.appended_bytes_total` is the log's position, which a restart keeps. The *since
+  open* counters (the scrubber's, the stall's) start over when their database opens again: a lower value is a reset.
+- **Polling.** The server builds the answer at most once a second and gives every poll within that second the same body. Studio polls
+  every 10 s while a monitoring view is open, never faster than 5 s. No rate, ratio or percentile is computed by the server: a rate is
+  `(v2 − v1) / (t2 − t1)` over two answers with the same `startedAt`.
+- The answer is not a health verdict: that is `GET /health/detailed`.
+
+#### The metrics
+
+| Name | Type | Labels | What it says |
+|---|---|---|---|
+| `aouda.process.uptime_ms` | gauge | — | since `startedAt` |
+| `aouda.process.cpu_ms_total` | counter | — | user and system time |
+| `aouda.process.open_files_count` | gauge | — | open handles |
+| `aouda.process.open_files_limit_count` | gauge | — | the soft limit; no point where the platform has none |
+| `aouda.process.thread_pool_threads_count` | gauge | — | thread-pool threads |
+| `aouda.process.thread_pool_queue_count` | gauge | — | work items waiting for a thread |
+| `aouda.process.gc_collections_total` | counter | `generation` | collections; a generation counts those of the higher ones, as the runtime does |
+| `aouda.process.gc_pause_ms_total` | counter | — | time paused for collections |
+| `aouda.process.allocated_bytes_total` | counter | — | managed bytes allocated |
+| `aouda.http.requests_total` | counter | `group`, `result` | requests answered, once each, by their final result. *Sparse* |
+| `aouda.http.request_duration_ms` | histogram | `group`, `result` | from the first middleware to the end of the response. *Sparse*; never `group=realtime` (a connection's or a parked poll's length is not a latency) |
+| `aouda.http.in_flight_count` | gauge | `work_class` | units of foreground work running now: HTTP requests (a WebSocket upgrade not), and for `streaming` also a subscription's dispatch burst, as the foreground monitor counts them |
+| `aouda.http.shed_total` | counter | `lane` | refused at the door, `SERVER_AT_CAPACITY` |
+| `aouda.auth.rejected_keys_total` | counter | `transport`, `reason` | credentials refused; `reason` is `credential`, `malformed` or `retired_format` |
+| `aouda.realtime.connections_count` | gauge | `transport` | open sessions; `websocket` or `longpoll` only. An abandoned long-poll session counts until BL-1842 is fixed |
+| `aouda.realtime.subscriptions_count` | gauge | `database` | live subscriptions |
+| `aouda.realtime.slow_consumer_disconnects_total` | counter | — | sessions ended because the client did not keep up |
+| `aouda.realtime.events_dropped_total` | counter | — | change events not delivered (the client is told by a gap) |
+| `aouda.realtime.gaps_sent_total` | counter | — | gap messages sent |
+| `aouda.query.rows_scanned_total` | counter | `tier` | rows the scans looked at after pruning |
+| `aouda.query.row_groups_read_total` | counter | — | row groups read |
+| `aouda.query.row_groups_pruned_total` | counter | — | row groups skipped by their statistics |
+| `aouda.query.segments_pruned_total` | counter | `reason` | segments skipped whole; `statistics` or `partition` |
+| `aouda.query.parallel_scans_total` | counter | — | scans that took more than one thread |
+| `aouda.query.materialized_routes_total` | counter | `result` | queries the router looked at; `routed` to a result or `missed` |
+| `aouda.write.transactions_total` | counter | `result` | `committed` or `aborted`. Counts the transactions a log replay settles when a database opens |
+| `aouda.write.transactions_open_count` | gauge | — | begun and not settled |
+| `aouda.write.rows_committed_total` | counter | — | rows inserted or updated by committed transactions; not deletes, not bulk loads |
+| `aouda.bulk_load.jobs_open_count` | gauge | `database`, `state` | jobs not ended; `acquired`, `appending`, `committing` or `deferred` |
+| `aouda.bulk_load.jobs_total` | counter | `result` | HTTP jobs (`:begin`) ended, once each: `committed`, `failed` or `aborted`. A replayed `:begin` of a committed job is not a job |
+| `aouda.bulk_load.rows_committed_total` | counter | — | rows a committed load put in segments (embedded and over HTTP) |
+| `aouda.bulk_load.appended_bytes_total` | counter | — | decoded bytes accepted from `:append` |
+| `aouda.wal.appended_bytes_total` | counter | `database` | the log's position: bytes ever appended (kept over a restart); no `wal` point for a database without a log |
+| `aouda.wal.frames_total` | counter | — | frames appended |
+| `aouda.wal.group_writes_total` | counter | — | contiguous writes; frames ÷ writes is the group-commit size |
+| `aouda.wal.fsyncs_total` | counter | `database` | times the log was made durable: a sync, or a write-through write. Since open *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.fsync_ms_total` | counter | `database` | time in those. Since open *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.size_bytes` | gauge | `database` | bytes of segment files on disk (preallocated ones included; without durable branches) |
+| `aouda.wal.segments_count` | gauge | `database` | segment files *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.reclaimable_bytes` | gauge | `database` | bytes below every slot and the redo floor at the last retention run *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.fail_stopped_state` | gauge | `database` | `1` when a write or sync failed and the log refuses appends until the database is reopened |
+| `aouda.wal.refusals_total` | counter | `reason` | writes refused: `capacity` (`WAL_CAPACITY_EXCEEDED`, one per write) or `disk_full` (one per group write, whatever the number of commits in it) |
+| `aouda.wal.corrupt_frames_total` | counter | — | frames a reader stopped at |
+| `aouda.wal.slots_count` | gauge | `database` | slots that hold log |
+| `aouda.wal.slot_lag_bytes` | gauge | `database` | the log's position minus its lowest slot; no point without slots |
+| `aouda.wal.slots_invalidated_total` | counter | — | slots dropped because they held too much log |
+| `aouda.wal.archive_lag_bytes` | gauge | `database` | the log's position minus the archived prefix; no point without an archive destination. The unsealed segment always counts |
+| `aouda.wal.archive_lag_ms` | gauge | `database` | age of the oldest sealed segment not archived; `0` when none *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.archive_last_error_age_ms` | gauge | `database` | since the last failed archive step; no point when none since open *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.archived_bytes_total` | counter | — | bytes uploaded |
+| `aouda.wal.archive_errors_total` | counter | — | failed archive steps |
+| `aouda.checkpoint.age_ms` | gauge | `database` | since the last durable checkpoint; **no point before the first** (the coordinator's own clock starts at open and would read as fresh) |
+| `aouda.checkpoint.writes_total` | counter | — | checkpoints written |
+| `aouda.checkpoint.failures_total` | counter | — | background and shutdown checkpoints that failed |
+| `aouda.backup.last_success_age_ms` | gauge | — | since the last backup set that succeeded on this server, by hand or by the schedule; **kept over a restart**; no point when none is known |
+| `aouda.backup.last_failure_age_ms` | gauge | — | since the last one that failed; kept over a restart; no point when none |
+| `aouda.backup.last_duration_ms` | gauge | — | how long the last set that succeeded took; kept over a restart |
+| `aouda.backup.runs_total` | counter | `result` | sets: `succeeded`, `failed` (one that threw included) or `skipped` (another ran, or the server was not ready) |
+| `aouda.backup.uploaded_bytes_total` | counter | — | bytes written to destinations |
+| `aouda.backup.restores_total` | counter | `result` | restores: `succeeded` or `failed` |
+| `aouda.storage.hot_bytes` | gauge | `database` | resident hot segments |
+| `aouda.storage.pinned_hot_bytes` | gauge | `database` | the part a pin keeps resident |
+| `aouda.storage.cold_bytes` | gauge | `database` | on-disk bytes of the cold segments registered now (a table whose metadata is not resident is not in it) |
+| `aouda.storage.cold_segments_count` | gauge | `database` | those segments |
+| `aouda.storage.page_cache_hits_total` | counter | — | pages found |
+| `aouda.storage.page_cache_misses_total` | counter | — | pages read |
+| `aouda.storage.page_cache_evictions_total` | counter | — | pages dropped |
+| `aouda.storage.page_reads_total` | counter | — | pages read from disk |
+| `aouda.storage.page_read_bytes_total` | counter | — | bytes of them |
+| `aouda.storage.key_filter_probes_total` | counter | `result` | key-filter lookups: `hit` (may hold the key) or `miss` |
+| `aouda.storage.demotions_total` | counter | — | segments moved to cold |
+| `aouda.storage.promotions_total` | counter | — | segments moved to hot |
+| `aouda.storage.disk_free_bytes` | gauge | — | free bytes on the volume the data directory is on; no point when it cannot be read |
+| `aouda.maintenance.jobs_running_count` | gauge | `job_class` | background runs now |
+| `aouda.maintenance.jobs_queued_count` | gauge | `job_class` | waiting for a slot |
+| `aouda.maintenance.jobs_finished_total` | counter | `job_class` | runs that ended, failed ones included (a failure most jobs catch themselves, so there is no `failed` here) |
+| `aouda.maintenance.retries_total` | counter | — | flushes and demotions put off after a failure |
+| `aouda.maintenance.cold_merge_failures_total` | counter | — | merge cohorts that failed |
+| `aouda.memory.rss_bytes` | gauge | — | the process, or its cgroup where there is one |
+| `aouda.memory.managed_heap_bytes` | gauge | — | the managed heap |
+| `aouda.memory.heap_limit_bytes` | gauge | — | its hard limit; no point when none |
+| `aouda.memory.governed_budget_bytes` | gauge | — | the governor's ceiling in force |
+| `aouda.memory.ledger_bytes` | gauge | — | leases plus charges: the occupancy |
+| `aouda.memory.releasable_bytes` | gauge | — | the part that can be given up |
+| `aouda.memory.reserved_bytes` | gauge | `work_class` | leases by who holds them |
+| `aouda.memory.charged_bytes` | gauge | `consumer` | charges by what holds them |
+| `aouda.memory.untracked_bytes` | gauge | — | what the runtime holds that the ledger does not know |
+| `aouda.memory.host_available_bytes` | gauge | — | free on the host; no point before the first sample |
+| `aouda.memory.heap_degraded_state` | gauge | — | `1` while the heap has been near its limit for the watchdog's window |
+| `aouda.memory.grants_waiting_count` | gauge | `work_class` | requests in the grant queue |
+| `aouda.memory.grants_total` | counter | `result` | grant-queue events, not one outcome per request: `served` (from the queue; a grant made on arrival is not counted), `timed_out` (refused after its wait), `revoked` (a grant the broker took back, which was counted when it was made) |
+| `aouda.memory.refusals_total` | counter | `work_class` | memory refusals answered `MEMORY_BUDGET_EXCEEDED`, once each, by the class that asked. Not a statement no retry can satisfy (`STATEMENT_TOO_LARGE`, a `400`) |
+| `aouda.memory.database_ledger_bytes` | gauge | `database` | a database's part of the ledger |
+| `aouda.memory.database_budget_bytes` | gauge | `database` | its ceiling; no point without one |
+| `aouda.memory.ingest_stall_state` | gauge | `database` | `1` while writes are being slowed |
+| `aouda.memory.ingest_stall_ms_total` | counter | `database` | the waits it decided for writes. Since open |
+| `aouda.materialized.queries_count` | gauge | `database`, `state` | `building`, `ready`, `rebuilding` or `error` |
+| `aouda.materialized.stale_count` | gauge | `database` | queries whose status is `isStale` |
+| `aouda.materialized.lag_ms` | gauge | `database` | **the largest `currentLagMs`** of its queries, the number `S22` puts on their status; `0` when none is behind (on a query's status `0` is "behind for under a millisecond": `stale_count` tells the two apart); no point with no query |
+| `aouda.materialized.staleness_ms` | gauge | `database` | the largest `stalenessMs`: the age of the oldest change a result lacks |
+| `aouda.materialized.queued_updates_count` | gauge | `database` | incremental updates not applied |
+| `aouda.materialized.pending_jobs_count` | gauge | `database` | bulk loads a pass owes |
+| `aouda.materialized.spill_bytes` | gauge | `database` | build spill on disk |
+| `aouda.materialized.spill_ceiling_bytes` | gauge | `database` | its ceiling |
+| `aouda.materialized.updates_dropped_total` | counter | — | updates lost (the query is marked stale) |
+| `aouda.materialized.update_errors_total` | counter | — | updates that failed |
+| `aouda.materialized.rebuilds_total` | counter | `result` | builds and rebuilds that ended: `completed` or `failed` |
+| `aouda.replication.role_state` | gauge | `role` | `1` for this node's role, `0` for the others |
+| `aouda.replication.lag_bytes` | gauge | `database` | how far this node is behind the primary it hears; only on a node that is not `primary` or `standalone`; **no point when the primary's position is not known** (`S22`'s rule: unknown is not zero) |
+| `aouda.replication.connected_secondaries_count` | gauge | — | streams open; only on a primary |
+| `aouda.scrubber.passes_total` | counter | `database` | passes completed since open |
+| `aouda.scrubber.checked_bytes_total` | counter | `database` | bytes whose checksum was checked, since open |
+| `aouda.scrubber.checked_frames_total` | counter | `database` | frames checked, since open |
+| `aouda.scrubber.corrupt_frames_count` | gauge | `database` | bad frames found since open, each once; not capped at the 1,024 findings kept |
+| `aouda.scrubber.last_pass_age_ms` | gauge | `database` | since the last pass ended; no point before the first (15 min after open) |
+| `aouda.scrubber.failed_passes_total` | counter | `database` | passes abandoned, since open |
+| `aouda.database.lifecycle_state` | gauge | `database`, `state` | **one point per listed database**, value `1`, its `state`: `creating`, `active`, `dropping` or `quarantined` |
+| `aouda.database.open_state` | gauge | `database` | `1` when its engine is open |
+| `aouda.database.tables_count` | gauge | `database` | tables in its catalog |
+| `aouda.database.requests_total` | counter | `database`, `group` | requests under `/api/databases/{db}/…` by group: `query`, `write`, `bulk_load`, `graph_vector`, `schema` or `materialized`. *Sparse* |
+| `aouda.database.request_ms_total` | counter | `database`, `group` | their time. *Sparse* |
+| `aouda.database.open_failures_total` | counter | — | opens that failed |
+| `aouda.metrics.databases_omitted_count` | gauge | — | databases over D-4's 100 |
+
+#### History
+
+`GET /api/admin/metrics/history` gives a chart its first paint. The server samples every 10 s from the start of the process into a ring of
+24 hours, in memory only (a restart empties it). `minutes` is 1–1440 (default 60), `interval` 10–3600 seconds (default 60); a value out of
+range is `400 INVALID_REQUEST` naming the parameter and its range. A point of an interval is the **last sample in it**; a counter stays
+cumulative.
+
+```json
+{
+  "startedAt": "2026-11-24T08:00:00.000Z",
+  "sampleIntervalMs": 10000,
+  "retentionMs": 86400000,
+  "timestamps": ["2026-11-24T22:39:50.000Z", "2026-11-24T22:40:00.000Z"],
+  "series": [
+    { "name": "aouda.http.requests_total", "labels": { "group": "query" }, "values": [1200, 1260] }
+  ]
+}
+```
+
+The series, always: `aouda.http.requests_total` summed over `result` for `group` `query`, `write` and `bulk_load`;
+`aouda.query.rows_scanned_total` summed over `tier`; `aouda.storage.page_cache_hits_total`; `aouda.storage.page_cache_misses_total`;
+`aouda.memory.rss_bytes`; `aouda.memory.managed_heap_bytes`; `aouda.memory.ledger_bytes`.
+
+In `@aouda/client`: `client.admin.metrics.snapshot()` and `.history(options)`, the catalogue `METRICS` (each metric's type, unit, labels
+and sentence), `MetricName`, and the helpers `metricValue`, `metricIncrease` and `metricQuantile`. `Aouda.Client` (C#) has no metrics API.
+
+---
+
 ### Backup and restore admin routes
 
 All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).

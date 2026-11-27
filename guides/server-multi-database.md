@@ -135,7 +135,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **Multi-database mode (P6)** — One `AoudaEngine` per database, `DatabaseManager`, `databases.json` registry, `/api/databases/{db}/…` routing.
 - **Database CRUD** — `POST/GET/DELETE /api/databases` and `GET /api/databases/{db}`.
 - **Database-scoped data API** — Query, insert, schema, materialized queries, streaming, branches all under `/api/databases/{db}/…`.
-- **Server-level observability** — `/api/server/memory`, `/api/server/metrics`, `/api/server/databases/{db}/metrics`, `/api/admin/metrics`, `/health`, `/ready`, `/health/detailed`.
+- **Server-level observability** — `/api/server/memory`, `/api/admin/metrics` and its `history` (the [admin metrics contract](../reference/http-api.md#admin-metrics-bl-851-next-train), **BL-851, next train**: `/api/server/metrics` and `/api/server/databases/{db}/metrics` are gone), `/health`, `/ready`, `/health/detailed`.
 - **Graceful shutdown** — `POST /api/server/shutdown` (loopback-only).
 - **Row count** — `POST /api/databases/{db}/query/count`.
 - **Connection lifecycle middleware** — request timeout (504), concurrency limit (503), correlation ID propagation, request logging.
@@ -153,8 +153,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **TypeScript client `client.Databases.get(name)` and `drop(name)`** — HTTP `GET /api/databases/{db}` and `DELETE /api/databases/{db}` exist on the server; the TypeScript client wraps are tracked as a follow-on item.
 - **`client.Databases.DropAsync()` in .NET client** — `AoudaDatabasesApi` currently exposes only `ListAsync` and `CreateAsync`; `GET /api/databases/{db}` and `DELETE /api/databases/{db}` are server-implemented but not wrapped. Backlog item.
 - **Per-database Prometheus scrape** — Current metrics API emits JSON; Prometheus format is explicitly deferred.
-- **`ActiveConnections` counter in `MetricsSummary`** — Returns 0; HTTP connection tracking wiring is not yet complete.
-- **Historical per-database metrics series** — Point-in-time snapshots only; no time-series store for per-db metrics.
+- **Historical per-database metrics series** — `GET /api/admin/metrics/history` keeps 24 h of a closed set of process-wide series; no `database`-labelled series is kept (**BL-851, next train**).
 
 ### Reserved / Not Yet Wired
 
@@ -189,11 +188,9 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Startup reconcile of the declared `databases` | ✅ | | | P6 §2 #7 | |
 | Database lifecycle state machine (Creating/Active/Dropping/Dropped) | ✅ | | | `src/Aouda.Engine.Storage/Registry/DatabaseState.cs` | |
 | Per-database memory governance | ✅ | | | `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs`, P6 §2 #14 | |
-| Per-database metrics tracking | ✅ | | | `src/Aouda.Server/Metrics/DatabaseMetricsTracker.cs`, P6 §2 #15 | |
+| Per-database request counts (`aouda.database.requests_total`) | ✅ | | | `src/Aouda.Server/Middleware/HttpMetricsMiddleware.cs` (**BL-851, next train**) | |
 | `GET /api/server/memory` | ✅ | | | `src/Aouda.Server/Controllers/ServerController.cs` line 44 | |
-| `GET /api/server/metrics` | ✅ | | | `src/Aouda.Server/Controllers/ServerController.cs` line 81 | |
-| `GET /api/server/databases/{db}/metrics` | ✅ | | | `src/Aouda.Server/Controllers/ServerController.cs` line 122 | |
-| `/api/admin/metrics` subsystem metrics | ✅ | | | `src/Aouda.Server/Controllers/MetricsController.cs`, P4 §2 #15 | |
+| `/api/admin/metrics` (ADR 0073) | ✅ | | | `src/Aouda.Server/Controllers/MetricsController.cs`, `src/Aouda.Server/Metrics/MetricsReader.cs` (**BL-851, next train**) | |
 | `/health`, `/ready`, `/health/detailed` | ✅ | | | `src/Aouda.Server/Controllers/HealthController.cs`, P4 §2 #18 | |
 | Per-database health check | ✅ | | | `src/Aouda.Server/Health/DatabaseHealthCheck.cs`, P6 §2 #15 | |
 | `POST /api/server/shutdown` (loopback only) | ✅ | | | `src/Aouda.Server/Controllers/ServerController.cs` line 162, P7 §2 #11 | |
@@ -209,7 +206,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Admin management API under `/admin/*` (P16) | ✅ | | | `src/Aouda.Server/Controllers/Cluster|Backup|Config|Node|CapabilitiesController.cs`, P16 §5.3 | |
 | Runtime config persistence (`cluster-state.json`; the backup schedule is in the `_settings` database) | ✅ | | | P16 §3.2, §5.6 | |
 | Prometheus scrape format | | | ❌ | P4 §10 (deferred); P6 §10 | See §2.18 |
-| `ActiveConnections` counter | | ❌ | | `MetricsSummary` returns 0; P4 §10 | See §2.18 |
+| Open connections and requests in flight (`aouda.realtime.connections_count`, `aouda.http.in_flight_count`) | ✅ | | | ADR 0073 (**BL-851, next train**); `MetricsSummary` and its constant `ActiveConnections` are gone | |
 | `aouda dev` as distinct ephemeral mode | | ❌ | | ADR 0026; P16 SA6 not evidenced; `aouda start` is the shipped entry point | See §2.18 |
 
 ---
@@ -250,8 +247,8 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
 |---|---|---|
 | `/api/databases` | Server-level database management (no db context required) | `GET /api/databases`, `POST /api/databases` |
 | `/api/databases/{db}/…` | Per-database data plane | `/api/databases/{db}/query`, `/api/databases/{db}/tables/*` |
-| `/api/server/…` | Server-level observability | `/api/server/memory`, `/api/server/metrics`, `/api/server/shutdown` |
-| `/api/admin/metrics` | Global Perf-counter metrics (P4) | `/api/admin/metrics/query` |
+| `/api/server/…` | Server-level diagnostics | `/api/server/memory`, `/api/server/shutdown` |
+| `/api/admin/metrics` | The admin metrics contract (ADR 0073, **BL-851, next train**) | `/api/admin/metrics`, `/api/admin/metrics/history` |
 | `/admin/…` | Management-plane admin (P16, requires server-auth scope) | `/admin/cluster/*`, `/admin/backup/*`, `/admin/config`, `/admin/node`, `/admin/capabilities` |
 | `/health`, `/ready`, `/health/detailed` | Kubernetes / load-balancer probes | |
 | `/api/auth/…` | Authentication and setup | `/api/auth/setup/status` |
@@ -340,11 +337,11 @@ Process start
 | `DatabaseRegistry` | `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs` | In-memory registry state with read-lock |
 | `DatabaseRegistryStore` | `src/Aouda.Engine.Storage/Registry/DatabaseRegistryStore.cs` | Serializes registry to/from `databases.json` with atomic writes |
 | `ServerMemoryBudgetManager` | `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs` | Coordinates per-engine budgets; exposes `GetServerUsage()` |
-| `DatabaseMetricsTracker` | `src/Aouda.Server/Metrics/DatabaseMetricsTracker.cs` | Records per-db query/insert ops; snapshots for `GET /api/server/metrics` |
+| `HttpMetrics` | `src/Aouda.Server/Metrics/HttpMetrics.cs` | Every answer, once, by route group and result, per database too (**BL-851, next train**) |
 | `DatabaseHealthCheck` | `src/Aouda.Server/Health/DatabaseHealthCheck.cs` | Non-critical health check; queries engine reachability |
-| `ServerController` | `src/Aouda.Server/Controllers/ServerController.cs` | `GET /api/server/memory`, `/api/server/metrics`, `/api/server/databases/{db}/metrics`, `POST /api/server/shutdown` |
+| `ServerController` | `src/Aouda.Server/Controllers/ServerController.cs` | `GET /api/server/memory`, `POST /api/server/shutdown` |
 | `DatabasesController` | `src/Aouda.Server/Controllers/DatabasesController.cs` | `GET/POST /api/databases`, `GET/DELETE /api/databases/{db}` |
-| `MetricsCollector` | `src/Aouda.Server/Metrics/MetricsCollector.cs` | Samples 250+ Perf counters; 1 h circular buffer; `/api/admin/metrics` |
+| `MetricsReader` | `src/Aouda.Server/Metrics/MetricsReader.cs` | Builds `/api/admin/metrics` from each number's one source, at most once a second; `MetricsHistoryRing` keeps 24 h of 10 s samples (**BL-851, next train**) |
 | `HealthAggregator` | `src/Aouda.Server/Health/HealthAggregator.cs` | Aggregates six component checks; `/health/detailed` |
 
 ### Critical P6 invariants
@@ -595,9 +592,7 @@ Nested sections use `__` separator in env vars: `AOUDA_MEMORY__MAXTOTALRAMBYTES`
 | Insert rows | `client.Table(t).InsertAsync(rows)` | `POST /api/databases/{db}/tables/{t}/rows` | ✅ | |
 | Schema DDL | `client.Schema.*` | `GET/POST/DELETE/PATCH /api/databases/{db}/tables/*` | ✅ | |
 | Server memory | — | `GET /api/server/memory` | ✅ | Operator/monitoring use |
-| Server metrics | — | `GET /api/server/metrics` | ✅ | Operator/monitoring use |
-| Per-db metrics | — | `GET /api/server/databases/{db}/metrics` | ✅ | Operator/monitoring use |
-| Global Perf metrics | — | `GET /api/admin/metrics[/{subsystem}]` | ✅ | 12 subsystems, 1 h history |
+| Admin metrics | `client.admin.metrics.snapshot()` (TypeScript) | `GET /api/admin/metrics`, `…/history` | ✅ | ADR 0073; 24 h history (**BL-851, next train**) |
 | Health liveness | `client.GetHealthAsync()` | `GET /health` | ✅ | Always 200 if process alive |
 | Health readiness | — | `GET /ready` | ✅ | 503 if critical component unhealthy |
 | Health detailed | — | `GET /health/detailed` | ✅ | All 6 component checks |
@@ -803,9 +798,9 @@ curl -s http://localhost:5000/api/server/memory
 ```bash
 # 1. Stop accepting new requests (set at load-balancer level, out-of-scope)
 
-# 2. Verify no in-flight requests via metrics
-curl -s http://localhost:5000/api/server/metrics
-# Inspect queryCount and insertCount trends
+# 2. Verify no in-flight requests via metrics (aouda.http.in_flight_count, by work class)
+curl -s -H "Authorization: Bearer $AOUDA_KEY" http://localhost:5000/api/admin/metrics
+# Inspect aouda.http.in_flight_count and the aouda.http.requests_total trend
 
 # 3. Trigger graceful shutdown from the same host
 curl -s -X POST http://localhost:5000/api/server/shutdown
@@ -840,8 +835,8 @@ curl -s http://localhost:5000/api/databases
 | Is the server ready for traffic? | `GET /ready` | 503 if catalog or WAL check fails. Does not fail for one DB `Dropping`. |
 | Is this database serving? | `GET /api/databases/{name}` | 200 + `state=Active` before schema apply. 404 if missing or `Dropping`. |
 | Which databases are under memory pressure? | `GET /api/server/memory` | Check `pressure` field per database |
-| What is query throughput and latency per database? | `GET /api/server/metrics` | `queryCount`, `queryMs`, `rowsReturned` per db |
-| Global Perf counters (query, storage, WAL, bloom) | `GET /api/admin/metrics` | 12 subsystems; sparkline via `history` |
+| What is query throughput and latency per database? | `GET /api/admin/metrics` | `aouda.database.requests_total` and `request_ms_total` by `database` and `group`; a rate is two answers apart (**BL-851, next train**) |
+| The process's numbers (requests, storage, WAL, memory, backups) | `GET /api/admin/metrics` | an object keyed by metric name; charts via `history` (**BL-851, next train**) |
 | Which database is consuming the most memory? | `GET /api/server/memory` | `perDatabaseUsage[{name}].totalBytes` |
 | Node role, version, uptime | `GET /admin/node` | P16 admin endpoint |
 | Recent server log events | `GET /admin/node/logs` | Buffered recent log entries |
@@ -951,7 +946,6 @@ curl -s http://localhost:5000/api/databases
 | Startup reconcile for the declared `databases` | Declarative provisioning on startup is described in P6 but no dedicated test confirmed | Add scenario: `aouda.json` declares two databases → server starts → both are Active without manual POST | High |
 | `Creating` state recovery after crash | Partial directory scaffold on aborted create; behavior on retry not covered | Add `DatabaseManagerTests` case: simulate crash after directory creation but before `Active` write; verify retry creates successfully | Medium |
 | Non-loopback caller rejection on shutdown | Unit test for `IsShutdownCallerLoopback` is in `CountIntegrationTests.cs` but path coverage of `RemoteIpAddress == null` fallback is unclear | Add unit test with null `RemoteIpAddress` and loopback `LocalIpAddress` | Low |
-| `ActiveConnections` counter wiring | Returns 0 always; when connection tracking is added, test should verify accurate reporting | Add integration test: open N concurrent connections, read `MetricsSummary.ActiveConnections` | Low (deferred) |
 
 ---
 
@@ -963,13 +957,11 @@ curl -s http://localhost:5000/api/databases
 
 - **`aouda dev` as a distinct command** — ADR 0026 mentions `aouda dev` as an ephemeral development server entry point. P16 SA6 shipped `aouda start` as the unified entry point; no `aouda dev` command is evidenced in `src/Aouda.Cli/` source materials in this repository. The `dev`-like behavior (ephemeral in-memory data path) is achievable with `aouda start --data-dir /tmp/aouda-dev`. This is a documentation drift between ADR 0026 intent and shipped P16 behavior.
 
-- **`ActiveConnections` in `MetricsSummary`** — Returns 0 until HTTP connection tracking is wired. Noted in `P4-Server-And-Clients-COMPLETION.md` §10.
-
 - **Prometheus scrape format** — JSON metrics API exists; Prometheus `/metrics` endpoint is explicitly deferred (P4 §10, P6 §10). No backlog ID confirmed.
 
 - **Dynamic table-subscription reconfig** — Changing per-table replication subscriptions (`TableFilter`) requires secondary reconnect. Dynamic hot-reconfiguration is deferred. See `docs/tasks/P6-COMPLETION.md` §10.
 
-- **Per-database historical metrics series** — `GET /api/server/databases/{db}/metrics` returns point-in-time snapshots. Time-series store for per-db metrics is deferred. See P6 §10.
+- **Per-database historical metrics series** — the `database`-labelled metrics of `GET /api/admin/metrics` are point-in-time; its `history` keeps process-wide series only (**BL-851, next train**: `GET /api/server/databases/{db}/metrics` is gone). See P6 §10.
 
 - **`aouda dev` ephemeral mode** — See drift note above. Operators who need ephemeral dev databases use `aouda start` with a temp data path.
 

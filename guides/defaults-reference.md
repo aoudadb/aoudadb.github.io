@@ -377,8 +377,8 @@ A first admin by password seed, and a key-only operator whose key root comes fro
 ```
 
 Not settings, and unchanged: (**BL-1427, 0.14.0**) a reload is limited to one per 5 s and a dry run to one per 1 s, with a 120 s
-deadline; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind, over HTTP, WebSocket and long-poll, with
-`rejectedApiKeysByTransport` and `rejectedApiKeysByReason` (**BL-1428, BL-1430, 0.12.0**;
+deadline; `aouda.auth.rejected_keys_total` on `GET /api/admin/metrics` counts refused keys by transport and reason (**BL-851, next train**; it was
+`rejectedApiKeysByTransport` and `rejectedApiKeysByReason` on `GET /api/server/metrics`, gone; **BL-1428, BL-1430, 0.12.0**;
 [counting refused keys](keys-that-survive-a-wipe.md#counting-refused-keys)).
 
 ## First admin (**BL-1423, 0.12.0**)
