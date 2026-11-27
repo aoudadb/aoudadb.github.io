@@ -252,8 +252,7 @@ only subscribes makes no call that would refresh the token first. The client now
 token's own expiry says it is still valid: the server's clock decides), and what was open resumes. A credential that cannot renew — a key past its
 expiry, a refresh the server refuses, an OIDC session (no refresh token) — is refused at that reconnect and ends every subscription and stream by
 name, once. A revoke, a sign-out elsewhere or a disabled user still ends everything at once. Before, every subscription and write stream ended
-with `AUTH_CREDENTIAL_EXPIRED` at the access token's lifetime (15 minutes by default). The C# client has done this since the last train's fix
-(S25e).
+with `AUTH_CREDENTIAL_EXPIRED` at the access token's lifetime (15 minutes by default). The C# client renews it too (**next train**).
 
 Before this, an open connection was neither replaced by a sign-in nor closed by `signOut()`: the earlier user's subscriptions, and new ones
 made after the next sign-in, delivered the earlier user's rows and their streams wrote as that user, until the connection was lost; then the
