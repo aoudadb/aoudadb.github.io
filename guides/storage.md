@@ -264,7 +264,8 @@ If you run server defaults and do not set per-database overrides:
   - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
     catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, 0.3.0**).
 - **Upgrading from 0.2.x: export and reload** (**architecture review, 0.3.0**)
-  - The catalog format is **6** (**RR-A2-4, 0.3.0**; 5 before WorkloadCore added segment fields, 4 in 0.2.x). A data
+  - Which format a build reads now is in [Upgrading and the data-directory format](upgrading.md), which lists every bump; the bullets below are what each bump changed, as it was written then.
+  - The catalog format became **6** (**RR-A2-4, 0.3.0**; 5 before WorkloadCore added segment fields, 4 in 0.2.x). A data
     directory in any other catalog format — 0.2.x's 4, a development build's 5, a newer build's — is **refused at open**
     with `CatalogFormatException` naming the version found and version 6; there is no migration from any older format,
     the flat format-1 `catalog.json` included. For 0.2.x: export the data with the 0.2.x build that wrote it and load it into a fresh
@@ -279,18 +280,18 @@ If you run server defaults and do not set per-database overrides:
   - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
     taken with the older build is what carries them over.
   - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
-  - (**Horizon, 0.5.0**) The catalog format is **10** (8: a windowed result's horizon; 9: a table's row-id floor, kept when
+  - (**Horizon, 0.5.0**) The catalog format became **10** (8: a windowed result's horizon; 9: a table's row-id floor, kept when
     whole segments are retired; 10: a table's retention), and a materialized-query definition file is version **2**. A directory
     written by 0.4.0 (catalog format 7), or by any other format, is refused at open naming the version found and the version
     expected; there is no migration. The WAL gains a `RangeDelete` frame (tag 73), which an older build does not know.
-  - (**Lead S20a, 0.6.0**) The catalog format is **11**: a bulk load's commit record (a catalog journal record) carries the
+  - (**Lead S20a, 0.6.0**) The catalog format became **11**: a bulk load's commit record (a catalog journal record) carries the
     job's idempotency key, rows, commit time and token, and a table's shard keeps those for the idempotency window. The two side
     files `bulk-load-idempotency.log` and `bulk-load-outcomes.log` are gone. A directory in catalog format 10 (0.5.0) is refused at
     open naming 10 and 11; there is no migration — reload the data from its source.
-  - (**Lead S26, 0.6.0**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
+  - (**Lead S26, 0.6.0**) The catalog format became **12** and the database registry format (`Server/databases.json`) **3**:
     a table records its durability level, and a database its level in place of `enableWal`. A data directory written by an
     earlier build is refused at open naming the version found and the version expected; there is no migration.
-  - (**BL-1378, 0.11.0**) The catalog format is **17**: an auth database's `_api_keys` table and its per-user permission table carry
+  - (**BL-1378, 0.11.0**) The catalog format became **17**: an auth database's `_api_keys` table and its per-user permission table carry
     a `source` column (where a key or permission row came from: created through the API, or declared in configuration). The format version
     marks the **whole data directory**. A directory written by 0.10.0 or earlier (format 16) makes the **server refuse to start**:
     before any database is opened the registry is read and the first database whose catalog declares another format ends the
@@ -782,7 +783,7 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Data path exists but DB cannot open | Invalid/partial directory state or config mismatch | Check server startup logs, validate `DataPath`, verify required DB subdirectories |
-| `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 12 only" (6 in 0.3.0, 10 in 0.5.0; 12 since **Lead S26, 0.6.0**) | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, 0.5.0 wrote 10, a newer build writes more (**architecture review, RR-A2-4, 0.3.0**). A shard or journal naming another version under the root's format is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
+| `DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<catalog root>` at start, then "catalog root declares format version N; this build reads format version M only" (**BL-1420, 0.12.0**; the engine's `CatalogFormatException` says the same when a database is opened on its own) | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, 0.5.0 wrote 10, a newer build writes more (**architecture review, RR-A2-4, 0.3.0**); [Upgrading](upgrading.md) lists the version of every release. A shard or journal naming another version under the root's format is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
 | A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#10-errors)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | The table's effective level is `unlogged` or `memory` (its own, or the database's) | Check `GET .../tables/{table}` → `durability` (`level`, `source`) and the database's `options.durability` (**Lead S26, 0.6.0**) |

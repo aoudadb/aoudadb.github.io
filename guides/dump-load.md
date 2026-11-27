@@ -17,6 +17,7 @@ databases, no branches. To protect data from a failed disk use [backups](backup.
 
 1. **Stop the writers.** A database that is written while it is dumped fails the dump (`DUMP_WRITES_DURING_DUMP`): every table is
    read again at the end and its row count and digest compared with what was written.
+   (**BL-1762, next train**) A table whose re-read the server ends with an error — the read-path memory ceiling, for one — fails the dump as `DUMP_EXPORT_FAILED`, naming the server's code (`MEMORY_BUDGET_EXCEEDED`); it is not reported as a write during the dump. `DUMP_WRITES_DURING_DUMP` means the count or digest differed.
 2. **Dump from the old server**, running its own build, with an operator key. Use the `aouda` of a build that has `dump` (the new one):
 
    ```bash

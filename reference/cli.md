@@ -261,7 +261,7 @@ touches; [`aouda load`](#load) reads it. A dump is **not a backup** and holds se
 |---|---|
 | `0` | The dump is complete. |
 | `1` | Refused or failed; the directory has no `dump.json`, so `load` refuses it. |
-| `64` | Misuse. |
+| `64` | Misuse — a value that is not an Aouda key among them (**BL-1764, next train**): the line names the reason, never the value, and nothing was sent. |
 | `69` | The server is unreachable, or failing. |
 | `77` | The key was refused. |
 
@@ -279,7 +279,7 @@ touches; [`aouda load`](#load) reads it. A dump is **not a backup** and holds se
 
 `aouda load` loads a directory `aouda dump` wrote into a server of this or another version: databases, schema, rows
 (each table verified by row count and digest), materialized queries, then the dump's declaration planned against the server. Run it again to resume:
-a table already loaded is skipped. Exit `0` done, `2` done with the declaration left to adopt, `1` refused or failed, `64` misuse, `69` unreachable, `77` the key
+a table already loaded is skipped. Exit `0` done, `2` done with the declaration left to adopt, `1` refused or failed, `64` misuse (a key that is not an Aouda key included, **BL-1764, next train**), `69` unreachable, `77` the key
 refused (and a table with a stamp column needs the server operator's key, `LOAD_RESTORE_REQUIRES_OPERATOR`). When the data is loaded and only the
 declaration's plan fails, `load` ends with the plan's own status (`1`, `69` or `77`) after the line `the data is loaded; …`: read that line before
 concluding nothing was written.
