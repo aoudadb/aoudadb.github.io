@@ -81,7 +81,9 @@ server on it with `aouda start --data-path <dir>`.
   part-way therefore never leaves the old database's catalog over the backup's files: run the restore again, or restore another set.
 
 - **A failed restore does not take the operator's sign-in.** The server's auth database (`_serverauth`, and every other auth database in
-  the set) is restored **last**, into a copy beside it, and swapped in by rename only once every other member has restored. A restore
+  the set) is restored into a copy beside it, and swapped in by rename, **last**, only once every other member has restored. The copies are
+  restored and opened **first**, before any other member is touched (**BL-1711, next train**), so a refusal of an auth database — its replay,
+  or a set that leaves nobody able to operate the server (below) — changes nothing at all. A restore
   that fails — a full disk, a damaged blob, in any member or in the auth database itself — leaves it as it was: the operator's key still
   signs in, a restart opens it, and the restore can be run again. The data member a failed restore stopped in still refuses to open
   until a restore of it completes (above). A crash during the swap is finished by the next start: the old auth database before the
@@ -89,10 +91,25 @@ server on it with `aouda start --data-path <dir>`.
   point-in-time restore's replay, an exact restore's first open — so a replay that is refused there (`PITR_KEYLESS_DELETE_UNRESOLVED`,
   a damaged archived frame) fails the restore with its own code and leaves the working auth database in place, signing the operator
   in; it used to run after the swap and quarantine the only auth database left.
+- **A restore never leaves the server with nobody who can operate it** (**BL-1711, next train**). The copy of the server auth database is
+  judged on the open copy — replayed, so at a point-in-time restore's target — before anything is swapped: it must hold an enabled
+  principal that holds `manage` on `server` **and** has a credential that signs in by itself — a stored key that is neither revoked nor
+  expired, a password, or an OIDC trust. A limited key does not count (it lives with its parent), nor does a derived key (it signs in only
+  where the declaration holds its key root). A set that holds nobody like that — its last operator was deleted, disabled or left with a
+  revoked key before a scheduled backup took it, or its key expired since — is refused `409 RESTORE_LEAVES_NO_OPERATOR`, naming the set
+  and counting what it found: nothing was changed, and the operator who ran it is still signed in. It used to answer `200`, after which
+  every key, the old host's and the new host's, was refused. A server whose declaration declares an operator in `server.principals`
+  (manage on server, with a credential) is not refused: the converge after the restore writes that operator. The ways out: declare an
+  operator in `server.principals` and restart, then restore again; restore another set or target; or restore offline (`--to`) and start
+  that directory with such a declaration.
 - **A member that does not open fails the restore.** A restore answers success only when every member it restored is open: one whose
   files were restored and that does not open (a database this server knows, at the reopen; one it did not know, at its registration)
   is quarantined with the cause, and the restore answers `500 BACKUP_RESTORE_FAILED` (a point-in-time restore: `PITR_FAILED`) naming it
   and its cause, and the members that did open. It used to answer success while the member's failure was only in the server log. A cancelled restore returns only once every download it started has finished.
+  The same holds for a database **outside the set** (**BL-1821, next train**): a restore stops and reopens every engine, so a database that
+  was open before it and does not reopen fails the restore the same way, its message naming it after `Not in the set, and did not
+  reopen:` with its state and cause. A database that was not open before the restore — quarantined by the operator or by an earlier
+  failure, or listed in `Aouda:SkipDatabases` — is not named: the restore did not close it.
 - **A restore checks the space first.** Before anything stops, it compares what it will write — every member's backed-up files, the copy
   each auth database is restored into, the WAL a point-in-time restore stages — plus a margin of 16 MiB and 5 % with the free space of
   the data directory's volume, and refuses `507 DISK_FULL` (with `Retry-After`) naming both numbers when it does not fit; nothing is
@@ -404,6 +421,8 @@ refused key (401 / 403) has the authentication envelope instead, and a `507 DISK
 | A read meets a cold segment whose column file is missing or short | `COLD_SEGMENT_UNREADABLE`, HTTP 500, logged | The read is refused, not answered with nulls; restore from a backup |
 | `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |
 | A restore failed part-way over several databases | the message ends `Databases already restored: …`, and says the auth databases were not changed | Restore again once the cause is fixed; those databases are already at the restore, and the operator is still signed in |
+| A set restore would leave nobody able to operate the server (**BL-1711, next train**) | `RESTORE_LEAVES_NO_OPERATOR` 409, naming the set and the server auth database, counting its server managers and how many can sign in | Nothing was changed. Declare an operator in `server.principals` and restart, then restore again; or restore another set or target; or restore offline (`--to`) and start it with that declaration |
+| A database outside the set did not reopen after the restore (**BL-1821, next train**) | `BACKUP_RESTORE_FAILED` 500 (a point-in-time restore: `PITR_FAILED` 500), `Not in the set, and did not reopen: '<db>': <state>: <cause>` | The members are restored; fix the cause named and unquarantine that database |
 | A restored member did not open | `BACKUP_RESTORE_FAILED` 500 (a point-in-time restore: `PITR_FAILED` 500), the message naming each member that did not open, its quarantine and its cause, and `Restored and open: …` | Fix the cause named, then restore the set again (it clears the quarantine), or unquarantine the member |
 | The data volume cannot hold the restore | `DISK_FULL` 507 + `Retry-After`, naming the bytes needed and free; offline, `DISK_FULL` and exit 1 | Nothing was changed: free space (or restore offline onto a larger volume) and retry |
 | A blob of the set or the WAL archive does not match its key | `BACKUP_BLOB_DAMAGED` 409, naming the file and the set | Restore another set: the destination's copy is damaged. The database the restore stopped in refuses to open until a restore of it completes |
