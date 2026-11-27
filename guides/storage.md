@@ -512,11 +512,17 @@ next backup or until the ladder invalidates it — whichever comes first.
 an archive destination. `Aouda.Server` does this when `Archive.Enabled` is true and `Destination`
 is set (standalone `Aouda:Archive`, or a replica-set Backup node's `ThisNode.Archive`).
 
-1. `WalArchiveWorker.RunOnceAsync()` loads the local WAL manifest and the archive manifest.
-2. It archives completed (non-active) segments with compression and content-addressable upload.
-3. Archive slot is advanced after successful archive writes (positions are cumulative byte offsets).
+1. `WalArchiveWorker.RunOnceAsync()` loads the local WAL manifest and **its WAL root's record** in the archive
+   (`wal-archive/<walRootId>.json`, one document per root, written whole by that root's worker alone — **BL-1672, next train**;
+   a destination that still holds the single archive manifest of an earlier build is refused, `FILE_FORMAT_REFUSED: kind=wal-archive-manifest`).
+2. It archives completed (non-active) segments with compression and content-addressable upload. A segment whose blob is already
+   there is written again first when it is old enough for a prune to collect it, and checked after the save that names it
+   (**BL-1769, next train**); a long pass saves its record at least every ten minutes.
+3. Archive slot is advanced after the record that names the segments is saved (positions are cumulative byte offsets). A local
+   destination fsyncs every blob, record and backup file it writes before it returns (**BL-1827, next train**).
 4. Cleanup path removes archived entries older than `WalRetentionDays` while respecting the oldest backup's
-   WAL boundary.
+   WAL boundary, under the same gate as the pass (**BL-1826, next train**), and deletes an abandoned root's record (every
+   restore that starts a new WAL root leaves one) whole once nothing can need it.
 
 `RequireArchiveBeforeDelete = true` is rejected at startup unless archive is enabled and destinationed.
 

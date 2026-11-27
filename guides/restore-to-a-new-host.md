@@ -111,8 +111,8 @@ refuses to open (`RESTORE_INCOMPLETE`) whatever opens it. Delete it and restore 
 
 - **Do not restore over a running server's data directory.** Use `aouda backup restore <id>` against the server, or an empty directory.
 - **Do not let two servers archive to one destination at the same time.** A restored copy that runs while its source is still up must use
-  its **own** destination: two databases archiving to one destination lose each other's archive-manifest entries, and retention compares
-  positions across them.
+  its **own** destination: the two servers' retention policies would prune each other's backups, and retention compares WAL positions
+  across them. (Their archived WAL itself is kept apart — one record per WAL root, **BL-1672, next train**.)
 - **Do not expect branches back from a point-in-time restore.** An exact restore brings them back; a point-in-time restore drops them and names each
   ([Backup and restore](backup.md#42-branches-and-a-pitr)).
 - **Do not rely on a set you have not restored.** Restore the newest set to a spare host and check a row count, on a schedule.

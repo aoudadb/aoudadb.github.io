@@ -529,7 +529,8 @@ The WAL-fill debt above is measured against `MaxWalBytes` (`T23`), and its rungs
 checkpoint is forced, and the stall curve starts slowing writers), `T26` = 0.85 (retention runs now), `T27` = 0.95 (**source
 writes** are refused, `503 WAL_CAPACITY_EXCEEDED`; a materialized result's own maintenance is still admitted up to `MaxWalBytes`, so a
 result that is behind catches up and releases its WAL instead of pinning it — at `MaxWalBytes` everything but a
-checkpoint is refused). The cap is not configurable; it is derived:
+checkpoint is refused). A schema change (a create, an added or altered column, a policy) is refused at `T27` the same way, before
+anything of it changes (**BL-1632, next train**: it was saved in the catalog and then refused by the log). The cap is not configurable; it is derived:
 
 - **At open:** a tenth of the volume's free space, at least `min(256 MB, free / 4)` and at most 4 GiB.
 - **After a reclaim** (at most once a minute): the larger of that bootstrap — now over the free space **plus the WAL's own

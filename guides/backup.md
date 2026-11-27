@@ -199,6 +199,14 @@ instant** (`targetTime`).
   restored, and the answer says so (§10).
 - **The WAL-root incarnation the backup was taken in.** An exact restore starts a new incarnation, so a PITR from a backup that
   predates it needs the archive, or a backup taken after the restore.
+- **A backup's history ends at a later restore in place** (**BL-1631, next train**). After the database was restored in place (a PITR
+  or an exact restore), a PITR of a backup taken *before* that restore, to a target *after* it, is refused with
+  `PITR_WINDOW_UNAVAILABLE` (409): the log that backup belongs to ends where the restore cut it. After a **PITR** in place the message
+  says so — *this backup's history ends there: the database was restored in place after it, and its log continues as incarnation <n>* —
+  and names what to do: restore from a backup taken after that restore, or choose a target before the instant it names; it never says
+  to wait. An **exact** restore starts a new WAL root, which the old backup's record does not name, so after one the message says to wait
+  only when the backup's database still runs on the same WAL root — it does not: restore from a backup taken after the restore, or
+  choose an earlier target.
 - **The archive's RPO for a host loss** is `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (a minute):
   the active WAL segment is sealed and shipped when its oldest frame is that old.
 - **A level change that retires the WAL ends the window** at the change; see [Write durability](write-durability.md#changing-a-level).
@@ -211,8 +219,9 @@ Restore exactly to keep them; a per-branch point in time is not available.
 ### 4.3 Onto another host
 
 A PITR and an exact restore onto another host from the destination alone are supported: segment ids are not reissued and `.hot` rows come
-back. A restored copy must archive to **its own** destination while its source still runs: two databases
-archiving to one destination at the same time lose each other's archive-manifest entries. The runbook is
+back. A restored copy must archive to **its own** destination while its source still runs: the two servers' retention policies would
+prune each other's backups. (The archive keeps one record per WAL root, written by that root's server alone, so two servers archiving
+to one destination no longer lose each other's archived WAL — **BL-1672, next train**.) The runbook is
 [Restore to a new host](restore-to-a-new-host.md).
 
 ## 5. Retention
