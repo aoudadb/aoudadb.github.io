@@ -16,7 +16,7 @@ Aouda serves **two browser populations with different trust**. The distinction i
 | **Operators** | Studio, Hub, DBAs | **Admin** (default bind/port) | Everything, including ad-hoc query and `admin/*` |
 | **Application end users** | Your product's browsers | **Data plane** (optional second bind) | Auth + named query + named mutation + subscribe. Everything else is **404**. |
 
-Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#listeners-and-profiles). Named artifacts: [Named queries](named-queries.md).
+Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#listeners). Named artifacts: [Named queries](named-queries.md).
 
 ---
 

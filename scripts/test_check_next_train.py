@@ -136,7 +136,7 @@ class CheckTests(unittest.TestCase):
 
     def test_an_allow_listed_phase_card_stays_next_train(self):
         """A released section names an allow-listed card as an open defect. A marker for its fix is not stale."""
-        self.assertEqual(cnt._ALLOW, {"BL-332", "BL-1472"})  # BL-1472: Operability S16 (0.14.0 names it as unfinished)
+        self.assertEqual(cnt._ALLOW, {"BL-332", "BL-1472", "BL-1672"})  # BL-1472: Operability S16 (0.14.0 names it as unfinished); BL-1672: Operability S13 (0.17.0 names it as a known limitation)
         self.write("a.md", "(**BL-332, next train**) and (**BL-100, next train**)\n")
         findings = cnt.check(self.root, self.released)
         self.assertEqual([f.bl for f in findings], ["BL-100"])

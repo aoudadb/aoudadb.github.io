@@ -108,6 +108,8 @@ All API responses include:
 | `X-Auth-Database` | **On 401 auth errors only (optional).** Legacy/discovery hint. Clients should use the same auth context as the request: server auth → `POST /api/auth/signin`; app auth → `POST /api/databases/{db}/auth/signin`. Omitted when not applicable. |
 | `X-Aouda-Token` | Observed consistency token (42-hex). Set on mutation and read success **and** on `TOKEN_*` errors. Same value as JSON `token`. Distinct from `X-Aouda-Current-Token` (integer fencing token on writes in a replica set). |
 
+<a id="access-principals-credentials-and-policy"></a>
+
 ### Access: principals, credentials and policy (**BL-1464, 0.16.0**)
 
 A request is decided in one way. The credential resolves to one principal. The principal's statements decide. The route's action and resource are the table below. A credential never grants; it can only narrow.
@@ -251,7 +253,7 @@ Open sockets end as [Revocation](../auth/credentials.md#revocation) describes: o
 |---|---|---|---|
 | `POST` | `/api/databases/{db}/auth/signup` | `{ "email", "password" }` | Creates a `source: signup` principal. Closed: `403 AUTH_SIGNUP_DISABLED`. |
 | `POST` | `/api/databases/{db}/auth/signin` | `{ "email", "password", "databases"? }` | A token pair. Omitted `databases` means the session has no database limit. |
-| `POST` | `/api/auth/signin` | the same | A `_serverauth` principal. |
+| `POST` | `/api/auth/signin` | `{ "email", "password", "deviceInfo"? }` | A token pair for a `_serverauth` principal; the body has no `databases` (see the allowance below). |
 | `POST` | `…/auth/refresh` | the refresh token | A new pair at the same `aal`. |
 | `POST` | `…/auth/signout` | | Revokes the session. Idempotent: repeating it with the same token answers `200` again. |
 
@@ -260,6 +262,160 @@ A session token carries `iss`, `sub` (the principal id), `email`, `sid`, `aal`, 
 A password change (`PUT …/auth/password`) that answers `503` or `409` changed nothing: the old password still signs in. An administrator's `DELETE /api/auth/admin/sessions/{id}` ends a session by its id whether or not it still has a row (`204`); `404` only when neither a session row nor a refresh family has that id.
 
 Password reset and MFA stay on the routes in [Setup and flows](../auth/setup.md). The admin path segment `users/{id}` takes the principal's id.
+
+An access token lives 15 minutes and a refresh token 30 days. The server has no setting for either; `expiresIn` in a sign-in or refresh answer is the access token's life in seconds (`900`). `POST …/auth/refresh` takes `{ "refreshToken" }` (`400 INVALID_REQUEST` when it is missing) and rotates it: the old one is spent. A refresh token that is spent, expired or revoked is `401 AUTH_REFRESH_TOKEN_INVALID`.
+
+<a id="sessions-are-devices"></a>
+
+#### Sessions are devices (**NativeClients, 0.4.0**)
+
+A **session** is one sign-in on one device. Its refresh tokens are one family, and every access token minted in it carries the family's id as `sid`. A refresh updates the session's `lastSeenAt`, `ipAddress` and `userAgent` and does not make a new session, so a principal with a laptop and a phone has two.
+
+Sign-up, sign-in, MFA verify and the native `token` call take an optional `deviceInfo`: the client's own description of the device, at most 512 UTF-8 bytes, stored as given and never trusted. More is `400 AUTH_DEVICE_INFO_TOO_LONG` and nothing is minted. `userAgent` (cut to 512 characters) and `ipAddress` are what the server saw.
+
+| Method | Path | Body | Result |
+|---|---|---|---|
+| `GET` | `/api/databases/{db}/auth/sessions`, `/api/auth/sessions` | | `200` `{ "sessions": [ { "id", "deviceInfo", "userAgent", "ipAddress", "createdAt", "lastSeenAt", "aal", "current" } ] }`, the most recently used first. `id` is the `sid`; `current` is true for the session of the token presented. |
+| `DELETE` | `…/auth/sessions/{id}` | | `204`: that session is ended, another device signed out. A session that is not the caller's, or no session: `404 AUTH_SESSION_NOT_FOUND`. |
+| `POST` | `…/auth/signout` | `{ "scope"? }` | `200` `{ "ok": true, "scope": "local" }`. `scope` is `local` (the default: this session), `others` (every other session of the principal; this one stays) or `global` (all of them), compared without regard to case. Any other value is `400 INVALID_REQUEST`. |
+
+These routes act on the caller's own session: the bearer is the session's access token. `…` is `/api/databases/{db}/auth` for an application auth database and `/api/auth` for `_serverauth`.
+
+**What ends a session.** Ending a session revokes its refresh family and refuses every access token it issued, on the next request: `401 AUTH_CREDENTIAL_REVOKED`, remedy `none`. Its refresh token is `401 AUTH_REFRESH_TOKEN_INVALID`. A session ends when:
+
+- it signs out, or the principal signs out of another device (`DELETE …/auth/sessions/{id}`) or with `others` or `global`;
+- an administrator ends it: `DELETE /api/auth/admin/sessions/{id}` (`204`; `404 AUTH_SESSION_NOT_FOUND` when neither a session row nor a refresh family has that id), or every session of one principal with `DELETE /api/auth/admin/sessions/user/{userId}` (`204`). `GET /api/auth/admin/sessions` lists them (`userId`, `limit`, `offset`; `{ "sessions": [ { "id", "userId", "userEmail", "deviceInfo", "ipAddress", "createdAt", "expiresAt", "userAgent", "lastSeenAt", "aal" } ], "total" }`). All three ask `manage` on `_serverauth/principal/*`, and ending another principal's session also needs coverage of that principal's whole policy. They are the routes of `_serverauth`: an application auth database has none, and its sessions end by the events below;
+- a spent refresh token is presented again. It is read as stolen: the whole session ends, the access token it last issued included. A client keeps the refresh token each refresh returns, not the one it first stored;
+- the principal's password is changed (`PUT …/auth/password`), reset (`…/auth/reset-password`) or set by an operator (`PUT …/admin/users/{id}/password`): every session of the principal ends. A change that answers `503` or `409` changed nothing;
+- an operator removes one of the principal's MFA factors (`DELETE …/admin/users/{id}/mfa/factors/{factorId}`): every session ends, the stepped-up ones that factor made included;
+- the principal is disabled or deleted.
+
+An open WebSocket or long-poll session is held to the same rule: [Realtime: a revoked or expired credential](#realtime-revoked-credential).
+
+> **Signing out is per device.** A client that signs a principal out everywhere sends `{ "scope": "global" }`.
+
+<a id="the-token-allowance"></a>
+
+#### The token allowance (**BL-1018, 0.9.0**; a limit since **BL-1464, 0.16.0**)
+
+Every application session token, its refresh family and every native sign-in code carry an **allowance**: the databases the session may open, at most 64, or no limit. It is the session's *limit* in the sense of [limited keys](#limited-keys): a narrowing, never a grant. What the session may do inside an allowed database is still the principal's statements.
+
+- **On the token.** `aud` is the allowance, always a JSON array: `["shop", "reports"]`, or `["*"]` when there is no limit. `iss` is the **auth database's** URL, `{base}/api/databases/{authDb}`, whichever database's path minted or refreshed the token. `{base}` is `Aouda:BaseUrl` when it is set, else the scheme and host of the request.
+- **Sign-in and password reset.** `databases` is optional. Omitted, the session has **no limit**: nothing is derived from roles, and the principal's statements alone decide. Given, it is the allowance: each name must be the auth database itself or a database linked to it, compared without regard to case and written in the registry's spelling, with duplicates removed. A name the auth database does not govern (it does not exist, or is linked elsewhere) is `400 INVALID_REQUEST`; so is an empty array, a blank name, and more than 64 names. Nothing is dropped silently and nothing is minted. The names are checked after the password is verified, so the refusal says nothing about an account to a caller who has not proved it, and a reset's checks run before its code is spent, so a corrected retry still works.
+- **Sign-up.** The session's allowance is the database signed up on, and only that one. A `databases` member is not read.
+- **`_serverauth`.** `POST /api/auth/signin` takes `email`, `password` and `deviceInfo`, and no `databases`. Its tokens carry no allowance, and keep the issuer `aouda` and the auth database's name as audience.
+- **Refresh** keeps the family's allowance. A refresh at a database outside it (the auth database itself is always inside) is refused before the refresh token is spent, so the same token still refreshes where it belongs.
+- **MFA verify** keeps the session's allowance and never widens it. The `aal2` session replaces the one verified from: the same device, its `deviceInfo` kept unless the request gives one.
+- **Native sign-in.** `authorize` stores the caller's allowance on the code, or the part of it `databases` names. See [Native sign-in](#native-sign-in-through-the-browser).
+- **A database outside the allowance** is `403 AUTH_POLICY_DENIED` with `remedy` `{ "kind": "none", "reason": "credential-limit" }`: granting the principal more would not help. Sign in again naming the database. The same on a refresh, on a code redeemed outside its allowance, and on the WebSocket handshake and `re_auth`. `AUTH_DATABASE_NOT_IN_ALLOWANCE` is not produced.
+- **Unlinking** a database from its auth database takes it out of every allowance that names it: the session no longer opens it. Stored allowances are not rewritten. A database linked later is in no existing allowance: sign in again to reach it.
+
+One sign-in that covers several applications is the allowance doing its job: name the databases in `databases`, or leave it out for no limit.
+
+<a id="rate-limits"></a>
+
+#### Rate limits on the auth routes
+
+Two limits per client IP address, each a sliding window of one minute in four segments. They count the client address the server sees (behind a proxy that is `X-Forwarded-For` only when `Aouda:ForwardedHeaders` trusts it: [reverse proxy](../deployment/reverse-proxy.md)), and are fixed: there is no setting. Calls with no address share one count.
+
+| Limit | Per IP and minute | Routes |
+|---|---|---|
+| Sign-up | 5 | `POST /api/databases/{db}/auth/signup` |
+| Sign-in | 20 | `POST /api/databases/{db}/auth/signin`, `POST /api/auth/signin`, and on `/api/databases/{db}/auth` only (`_serverauth` has none of these) `POST …/request-password-reset`, `POST …/reset-password`, `POST …/authorize`, `POST …/token`; `POST /api/auth/oidc/token` |
+
+Over the limit: `429 AUTH_RATE_LIMITED` with `Retry-After` in whole seconds (at least 1):
+
+```json
+{ "error": "AUTH_RATE_LIMITED", "message": "Too many requests. Please slow down.", "suggestion": "Retry after 12 seconds.", "requestId": "00000000000000000000000000000000" }
+```
+
+A client waits `Retry-After` and then tries again; the official SDKs do. The body has no `remedy`. Refresh, sign-out, MFA and the other auth routes are not in these two limits. Two other limits sit beside them:
+
+- **Account lockout.** Ten wrong passwords for one account (counted until its next successful sign-in) lock it for 15 minutes. A sign-in on a locked account, the right password included, is `423 AUTH_ACCOUNT_LOCKED` with `Retry-After` set to the seconds left. The numbers are fixed.
+- **The failed-sign-in ceiling** (optional, off by default): `Aouda:Auth:FailedSigninCeiling` with `Enabled` (`false`), `PermitLimit` (`100`) and `WindowSeconds` (`300`). Failed sign-ins on one auth database are counted in a sliding window per process; a successful sign-in does not count. When the ceiling is over, every sign-in on that auth database is `429 AUTH_RATE_LIMITED` with `Retry-After`, including one with the right password, until the window drains. It is checked before the password is hashed, so a tripped ceiling cannot be used to lock accounts. The first trip writes one audit row, `signin_ceiling_tripped`. It covers `POST …/auth/signin` and `POST /api/auth/signin` only. N server processes mean N times the ceiling.
+
+The data plane has a quota of its own per identity, `429 IDENTITY_QUOTA_EXCEEDED` ([defaults](../guides/defaults-reference.md)).
+
+<a id="native-sign-in-through-the-browser"></a>
+
+#### Native sign-in through the browser (**NativeClients, 0.4.0**)
+
+A native app (a desktop app, a phone app) signs a principal in by handing off to the browser, where the application's own web front is already signed in, MFA included, and comes back with a session of its own. Aouda serves no login page and no consent screen: the web front asks. The flow is [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser); the routes are these. `{db}` is a database the auth database governs, or the auth database.
+
+| Method | Path | Credential | Asks |
+|---|---|---|---|
+| `POST` | `/api/databases/{db}/auth/admin/native-clients` | a key or session of a principal | `manage` on `{db}` |
+| `GET` | `/api/databases/{db}/auth/admin/native-clients` | the same | the same |
+| `DELETE` | `/api/databases/{db}/auth/admin/native-clients/{id}` | the same | the same |
+| `POST` | `/api/databases/{db}/auth/authorize` | the signed-in principal's session token | nothing more: it acts on that session |
+| `POST` | `/api/databases/{db}/auth/token` | none | nothing |
+
+The admin routes are on the admin listener only; `authorize` and `token` are on both.
+
+**Register a client** (once). `POST …/auth/admin/native-clients` with `{ "name", "redirectUris" }`. `201`:
+
+```json
+{ "id": "7c1e4f9a-2b0d-4c58-9a4e-1f2d3c4b5a69", "name": "MyApp desktop", "redirectUris": ["http://127.0.0.1/callback", "com.example.myapp:/oauth"], "createdAt": "2026-11-27T09:30:00Z" }
+```
+
+`GET` answers `{ "clients": [ … ] }`, oldest first. `DELETE` answers `204`, or `404 AUTH_NATIVE_CLIENT_UNKNOWN`; the codes it had issued stop redeeming. A blank `name` is `400 INVALID_REQUEST`; no redirect URI, or one that cannot be registered, is `400 AUTH_REDIRECT_URI_INVALID`. A redirect URI is one of:
+
+- a **loopback** URL, `http://127.0.0.1/path` or `http://[::1]/path` (RFC 8252 §7.3), registered **without a port** and in exactly that written form: any port matches at `authorize` and `token`, the path and query exactly. `localhost`, `127.1`, `0x7f000001`, an empty port, `..` or an escaped character in the path are refused;
+- a **private-use scheme** in reverse-DNS form, one with a dot: `com.example.myapp:/oauth` (RFC 8252 §7.1), matched exactly;
+- a claimed **`https`** link with a host (RFC 8252 §7.2), matched exactly.
+
+No fragment, no `*`, no user information, no other `http`. Duplicates are stored once.
+
+**Step 1: `POST …/auth/authorize`**, from the web front, with `Authorization: Bearer <the principal's session token>`. Body:
+
+```json
+{
+  "clientId": "7c1e4f9a-2b0d-4c58-9a4e-1f2d3c4b5a69",
+  "redirectUri": "http://127.0.0.1:53114/callback",
+  "codeChallenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+  "codeChallengeMethod": "S256",
+  "state": "opaque",
+  "databases": ["shop"]
+}
+```
+
+`codeChallenge` is the base64url of the SHA-256 of the app's `codeVerifier`: exactly 43 characters. `codeChallengeMethod` is `S256` and only `S256`. `state` (at most 512 characters) is echoed back. `databases` narrows the code's allowance to part of the session's own (a name outside it, an empty array or a blank name is `400 INVALID_REQUEST`); omitted, the code carries the whole of it. `200`:
+
+```json
+{ "code": "…43 characters…", "state": "opaque", "redirectTo": "http://127.0.0.1:53114/callback?code=…&state=opaque", "expiresIn": 60, "aal": "aal2" }
+```
+
+The code is 32 random bytes in base64url, single use, valid for **60 seconds**, kept only as its SHA-256, and carries the web session's `aal`, never more. The caller sends the browser to `redirectTo` (`redirectUri` with `code` and `state`, `&` when it already has a query).
+
+**Step 2: `POST …/auth/token`**, from the native app. Body `{ "grantType": "authorization_code", "code", "codeVerifier", "clientId", "redirectUri", "deviceInfo"? }`, with `codeVerifier` 43 to 128 characters of `A-Z a-z 0-9 - . _ ~`, and `clientId` and `redirectUri` exactly as at `authorize`. The answer is the sign-in answer, a **new session** at the code's `aal`, listed under the principal's devices:
+
+```json
+{ "user": { "id": "…", "email": "ann@example.com" }, "accessToken": "eyJ…", "refreshToken": "…", "expiresIn": 900, "aal": "aal2" }
+```
+
+The code is consumed first, in one atomic update, before anything else is checked. A wrong verifier, client or redirect URI, or an expired code, therefore each spend it: start again. A second redemption of one code is treated as theft: it is refused `AUTH_CODE_REUSED` and the session the first redemption opened is ended. A refusal after the consume for capacity (`503`) puts the code back, so the retry the `503` asks for works. A code lives on as a row for 10 minutes so that a reuse is recognised.
+
+| Code | Status | Where | Meaning |
+|---|---|---|---|
+| `AUTH_NATIVE_CLIENT_UNKNOWN` | 400 (`404` on `DELETE`) | all three | No client with that `clientId` (or none given); at `token`, also a client removed after the code was issued |
+| `AUTH_REDIRECT_URI_INVALID` | 400 | register | Not a loopback, reverse-DNS scheme or `https` URI, or none given |
+| `AUTH_REDIRECT_URI_NOT_REGISTERED` | 400 | `authorize` | `redirectUri` is not one of the client's |
+| `AUTH_PKCE_METHOD_UNSUPPORTED` | 400 | `authorize` | `codeChallengeMethod` is not `S256` |
+| `AUTH_PKCE_CHALLENGE_INVALID` | 400 | `authorize` | `codeChallenge` is not 43 base64url characters |
+| `AUTH_UNSUPPORTED_GRANT_TYPE` | 400 | `token` | `grantType` is not `authorization_code` |
+| `AUTH_CODE_INVALID` | 400 | `token` | `code` is missing or unknown, the session that issued it has ended, or its principal no longer exists |
+| `AUTH_CODE_EXPIRED` | 400 | `token` | The code is older than 60 seconds |
+| `AUTH_CODE_REUSED` | 400 | `token` | The code was already redeemed; the session that redemption opened is ended |
+| `AUTH_REDIRECT_URI_MISMATCH` | 400 | `token` | `clientId` or `redirectUri` differs from the code's. The code is spent |
+| `AUTH_PKCE_VERIFIER_INVALID` | 400 | `token` | `codeVerifier` does not answer the code's challenge. The code is spent |
+| `AUTH_POLICY_DENIED` | 403 | `token` | The code's allowance does not include the database `token` was called on, remedy `none`, `reason: credential-limit`. The code is spent |
+| `AUTH_ACCOUNT_DISABLED` | 423 | `token` | The principal was disabled |
+| `AUTH_DEVICE_INFO_TOO_LONG` | 400 | `token` | `deviceInfo` is over 512 UTF-8 bytes |
+| `AUTH_RATE_LIMITED` | 429 | `authorize`, `token` | [The sign-in limit](#rate-limits) |
+
+All of these carry `{ "error", "message", "requestId" }`, except `AUTH_POLICY_DENIED`, which is the [envelope](#auth-error-envelope). A session token that `authorize` cannot read is the credential's own `401`.
+
+⚠️ **The web front must ask before it calls `authorize`.** Aouda shows no consent screen. A page that calls it as soon as it loads hands a session, at `aal2` if the principal did MFA, to whatever app opened it with its own challenge, and on a phone another app can register the same private-use scheme (RFC 8252 §8.6). A claimed `https` link reaches only the app that owns it.
 
 <a id="auth-error-envelope"></a>
 
@@ -317,6 +473,8 @@ A `write` or `delete` of a row the `write` statement's `where` does not admit is
 
 `set-identity` is its own action. No other action implies it.
 
+<a id="get-apiadmindeclaration"></a>
+
 #### The declaration view and its export
 
 (**BL-1463, 0.16.0**) Two reads, `manage` on `server` (an operator), on the admin listener,
@@ -368,6 +526,107 @@ before the body is judged. A database an embedding host declares in code (an in-
 a file and keeps every route. The emergency actions are reported as `DECLARED_OBJECT_OVERRIDDEN` at every start and reload while the
 file disagrees.
 
+<a id="post-apiadminreload"></a>
+
+#### Reload: `POST /api/admin/reload` and `GET /api/admin/reload` (**BL-1427, 0.14.0**)
+
+`POST /api/admin/reload` re-reads the server's declaration and converges it without a restart. It asks `manage` on `server` (an operator), on the admin listener only; the dry run and the `GET` ask the same. `aouda reload` is the command ([CLI reference](cli.md#reload)). What a reload applies and what takes a restart is [one table](../guides/server-configuration.md#reload-or-restart); the declaration it reads is [the file](declaration.md), from the path the process started with.
+
+A reload runs in two phases. **Phase 1** reads the declaration and validates it exactly as `aouda start` does, then checks it against the running server (the plan of [`aouda plan`](../guides/plan.md), finding codes in [Declaration finding codes](plan-codes.md)). A finding of severity `error` stops here: nothing was changed. **Phase 2** converges, in the start's order and one step at a time: `databases` (declared databases are created, and linked to their auth database), `schema` (each declared schema file, never destructively) and `roles` (the access section: roles, `signup`, principals and `anonymous`, removals last; **BL-1464, 0.16.0**). A setting a reload cannot apply is listed under `restartRequired` and the rest proceeds.
+
+| Method | Path | Result |
+|---|---|---|
+| `POST` | `/api/admin/reload` | `200` applied, or there was nothing to change. `422 RELOAD_REFUSED`: the declaration has an `error` finding and nothing was changed. `207 RELOAD_PARTIAL`: a step failed part-way. |
+| `POST` | `/api/admin/reload?dryRun=true` | The same plan, and nothing is written: not a row, not an audit row. |
+| `POST` | `/api/admin/reload?dryRun=true` with a body | The plan of a **posted** declaration, a candidate (below), instead of the server's files. Nothing is written. `200`, or `422 RELOAD_REFUSED` with the findings. |
+| `GET` | `/api/admin/reload` | `{ "last": null }`, or the last reload that ran since the process started (below). |
+
+**Parameters and order.** `dryRun` without a body is `true` or `false`, in any case; any other value, or the parameter twice, is `400 INVALID_REQUEST`. With a body it is exactly `true`; otherwise the answer is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, 0.14.0**) and the body is not read. A body must be `Content-Type: application/json` (`400 INVALID_REQUEST` otherwise). The checks run in this order, each only when the ones before it passed: the credential, whether there is a body, `dryRun`, the content type, the body (read before the reconcile gate is taken, so a slow body never holds it).
+
+**One at a time, taking turns** (**0.16.0**). A reload or dry run that finds another reload running, or a restore reconciling, waits for it, up to 120 seconds, and then runs. Only a wait that outlasts the 120 seconds is `409 RELOAD_IN_PROGRESS` with `Retry-After: 120`. There is **no rate limit**: two calls in a row are ordinary use (up to 0.15 a reload was limited to one per 5 s and a dry run to one per 1 s, `429 RELOAD_RATE_LIMITED`; that code is gone). A reload that has started applying finishes its step whoever hangs up, and is stopped at 120 seconds (`207`). Before the server is ready, every route but the probes is `503` with `Retry-After: 5` and the body `{ "error": "Server is starting up, please retry.", "code": "SERVER_STARTING" }` ([the start window](../guides/upgrading.md)).
+
+**The answer** is the plan of `aouda plan` with `target.kind` `"self"`, `changes` filled, and the reload's own members. It names entries, kinds and fingerprints, never a key, a hash, a password or a secret file's content:
+
+```json
+{
+  "format": "aouda-plan/1",
+  "aoudaVersion": "0.17.1",
+  "declaration": { "file": "/etc/aouda/aouda.json", "environment": null, "overlay": null, "schemaFiles": 1, "planHash": "sha256:…" },
+  "target": { "kind": "self" },
+  "outcome": "changes",
+  "summary": { "errors": 0, "warnings": 0, "info": 0, "changes": 2 },
+  "stages": [ { "name": "read", "status": "passed", "errors": 0, "warnings": 0 } ],
+  "findings": [],
+  "changes": {
+    "databases": { "created": [], "linked": [], "orphaned": [] },
+    "bootstrap": null,
+    "schema": [ { "database": "shop", "file": "/etc/aouda/shop.aouda.schema.json", "changes": [ { "type": "AddColumn", "table": "orders", "column": "note" } ], "summary": "1 change", "refusedDestructive": [] } ],
+    "roles": { "created": [], "updated": [], "removed": [] },
+    "principals": { "created": [ { "authDatabase": "auth", "principal": "checkout" } ], "updated": [], "removed": [] },
+    "signup": [],
+    "restartRequired": [ { "setting": "Aouda:Port", "from": "5433", "to": "5434" } ]
+  },
+  "notChecked": [ "settings outside the Aouda section and the bound server options (Kestrel, Aouda:WebSocket, …): a change to them needs a restart" ],
+  "dryRun": false,
+  "applied": true,
+  "valid": true,
+  "role": "standalone",
+  "writes": "applied",
+  "completedSteps": ["databases", "schema", "roles"],
+  "failedStep": null,
+  "durationMs": 41
+}
+```
+
+`stages` lists all eight stages in the start's order (`read`, `settings`, `principals`, `databases`, `bootstrap`, `schema`, `roles`, `principalRows`; the example shows one), each `passed`, `warnings`, `failed` or `skipped`; `bootstrap` in `changes` is always `null`. `updated` members of `roles` and `principals` are `{ "authDatabase", "role" | "principal", "members": [ … ] }`, the member names that change and never a statement's text. `outcome` is `clean`, `changes` or `errors`.
+
+- `dryRun` is `true` for a dry run. `applied` is `true` when the reload wrote, `false` for a dry run, a refusal and a call that changed nothing, and the **string** `"partial"` on `207`. `valid` is `false` only on `422`.
+- `role` is this node's role in lower case (`standalone`, `primary`, `secondary`, `hidden`). `writes` is `applied`, or `skipped` for a dry run, a refusal and **a node that does not accept writes**: such a node validates, takes the declaration's access section and key roots in memory and writes nothing, and `completedSteps` is empty.
+- `completedSteps` lists the phase-2 steps done, in order. `failedStep` is `{ "step", "entry" }` on `207` (`entry` is the database, role or principal named, or `null`) and `null` otherwise.
+- A non-`200` answer that carries a plan also carries `error` (the code), `message` and `requestId`. `409` carries only those three and no plan; so do the `400`s.
+- On `207 RELOAD_PARTIAL` the steps in `completedSteps` are applied and `failedStep` is not. `GET /ready` says `reload_failed` ([the probes](#get-ready)) until a reload completes; a refused reload adds none. Every step is idempotent: reload again.
+- A reload that is not a dry run writes an audit row, a refused one included, on a node that accepts writes.
+
+**`GET /api/admin/reload`**:
+
+```json
+{
+  "last": {
+    "time": "2026-11-27T09:41:12.5123456+00:00",
+    "outcome": "changes",
+    "applied": "true",
+    "planHash": "sha256:…",
+    "summary": { "errors": 0, "warnings": 1, "changes": 2 },
+    "failedStep": null,
+    "callerKeyId": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+`last` is the last non-dry reload that ran since this process started, refused ones included (a `409` or `503` is not a reload); it is kept in memory only. Here `applied` is the string `"true"`, `"false"` or `"partial"`. `callerKeyId` is the id of the caller's principal.
+
+**Planning a posted declaration** (**BL-1463, 0.14.0**). `POST /api/admin/reload?dryRun=true` with a JSON body plans that declaration against this server: what [`aouda plan --server`](../guides/plan.md) does. The server runs phase 1 over the body instead of its own files: every offline check under **its own** process settings (named-query limits, `SkipDatabases`, the dev-admin flag, the hosting environment: a body cannot set them), then every check that needs the data directory against a planned view. It writes nothing, takes the same gate, and **opens no path the body names**: paths are labels for the findings' locations. The answer is the plan above with `dryRun: true`. A body is only ever planned, never applied: what a reload applies is the server's own files.
+
+```json
+{
+  "format": "aouda-candidate/1",
+  "declaration": {
+    "databases": {
+      "auth": { "kind": "auth" },
+      "shop": { "kind": "data", "authDatabase": "auth", "schemaFile": "/etc/aouda/shop.aouda.schema.json" }
+    },
+    "access": { "databases": { "auth": { "signup": { "enabled": false } } } }
+  },
+  "schemaFiles": { "shop": { "document": { "tables": { "orders": { "columns": { "id": { "type": "Int64", "primaryKey": 1 } } } } } } }
+}
+```
+
+- `format`, `declaration` and `schemaFiles` are required; `declaration.databases` is required and `declaration.access` is optional. A database entry takes the members of a declared database in camelCase: `kind`, `authDatabase`, `schemaFile`, `schemaAllowDestructive`, `durability`, `maxMemoryShareBytes`, `memoryWeight`, `defaultTemperature`, `replicationMode`, `writeConcern`, `writeConcernTimeoutMs` and `onWriteConcernTimeout`. A declared `schemaFile` has its merged document under `schemaFiles.<database>.document`, and a document needs a database that names it. `access` is the declaration's access section as written (`server`, and per auth database `signup`, `roles` and `principals`), read with the file's own grammar: a stored key as its public id and SHA-256, a password seed as the marker `{ "seeded": true }` and nothing else.
+- Every member is **case-sensitive** and given once. A member nobody has is `400 INVALID_REQUEST` naming the JSON pointer, never the value; the 0.14 and 0.15 members for the identities file, its keys, the bootstrap key and the first admin are among them: those have no counterpart in the posted access section (**BL-1464, 0.16.0**). Database names are compared without regard to case.
+- Limits, fixed: 16 MiB (counted as the body is read: `413 INVALID_REQUEST`), JSON nested at most 64 deep, at most 4096 databases, labels of at most 4096 characters with no control character.
+- A schema document the schema reader refuses is a **finding** at its label (`SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_INVALID`; `422`), not a malformed body.
+- The body carries no key, no password and no secret file's content. Send it over `https` beyond a private network all the same: the bearer is an operator's key.
+
 
 #### Route actions
 
@@ -392,7 +651,7 @@ The route table is the action and resource each route asks. A principal is allow
 #### A missing database answers 401
 
 On `/api/databases/{db}/…`, a request whose credential is not one the target accepts is `401` — and **a database that does not exist is
-one of those cases**, for a `mk_svc_` key as for any other credential. This is deliberate: a `404` for a missing database and a `401` for
+one of those cases**, for a key as for any other credential. This is deliberate: a `404` for a missing database and a `401` for
 a present one would tell anyone holding any key which database names exist. The response is the same for both and says nothing about the
 database (**BL-1585**, documented; the public answer is unchanged).
 
@@ -403,9 +662,9 @@ To tell a bad key from a missing database, use what only the operator can see:
   note means the key;
 - `GET /ready` lists `database_pending` (declared in `Aouda:Databases`, not created yet) and `database_not_open` (registered, not
   open) with the database as `subject`, and answers `503` until they are gone;
-- `GET /api/databases` with a server credential lists the databases that exist.
+- `GET /api/databases` with a credential that holds `manage` on `server` lists the databases that exist.
 
-A start-up script should wait for `/ready` to be `200` before it uses a service key, and treat a `401` after that as the key.
+A start-up script should wait for `/ready` to be `200` before it uses a key, and treat a `401` after that as the key.
 
 ## Read Preferences
 
@@ -458,7 +717,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Wait | `waitMs` / `X-Aouda-Wait-Ms` (default 250, cap 30 000) |
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
-| Materialized query | (**WorkloadCore, 0.3.0**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
+| Materialized query | (**WorkloadCore, 0.3.0**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. (**BL-1847, next train**) The same rule judges a named query whose table or join side is a result (execute and batch) and a `/query` whose join side is a result; a read of several results is covered by the lowest of them, and its response token is no higher. |
 | Formula table | (**ADR 0072, 0.14.0**) A token on any read of a table that has an `Expression` column (`/query`, `/query/count`, a join side, a named query, subscribe) — input rows included — is judged by the **formula maintainer's progress**: it is covered once every commit up to the token has been recomputed, and a commit that left a value unchanged covers it. A lapse is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says (`fetchPrimary` does not turn it into a `421`; `fail` answers `409` at once). A replica answers `421 FORMULA_TOKEN_REQUIRES_PRIMARY`; a node whose maintainer is not running, `503 FORMULA_NOT_MAINTAINED`. A read joining a formula table and a materialized query's result is covered as far as both are; a materialized query built over a formula table is not yet judged by the formula maintainer (BL-1486). A snapshot's token and a change event's token are covers (keep the highest), a notice's is not. See [Formulas](../guides/formulas.md#when-values-change-eventual-consistency-and-tokens). |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
@@ -574,8 +833,9 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `TABLE_NOT_FOUND` | 404 | The specified table does not exist. Also a read whose table was dropped after its name was resolved and before it was read, on every read route — `/query`, `/query/count`, a named query, the graph and vector routes, `POST …/materialized-queries/{name}/query` and a subscribe's snapshot (an `error` message with this code) — with `details` "The table was dropped while this read was starting; nothing was read." (**BL-1936, next train**). A read that had already started reads the table to its end: a `DROP TABLE` keeps the files a running read holds until it is done, on the primary and on a replica that replays the drop (**BL-1933, next train**) |
-| `COLUMN_NOT_FOUND` | 404 / 400 | The specified column does not exist: `404` on a column route (`PATCH` / `DELETE …/tables/{name}/columns/{column}`), `400` when a read (`/query`, a named query) or a `rows/batch` operation names a column the table does not have (**BL-1937, next train**: a column found missing while a batch operation runs, with the `failedOperation` line) |
+| `TABLE_NOT_FOUND` | 404 | The specified table does not exist — a join's table included (**BL-1937, next train**). Also a read whose table was dropped after its name was resolved and before it was read, on every read route — `/query`, `/query/count`, a named query, the graph and vector routes, `POST …/materialized-queries/{name}/query` and a subscribe's snapshot (an `error` message with this code) — with `details` "The table was dropped while this read was starting; nothing was read." (**BL-1936, next train**). A read that had already started reads the table to its end: a `DROP TABLE` keeps the files a running read holds until it is done, on the primary and on a replica that replays the drop (**BL-1933, next train**) |
+| `COLUMN_NOT_FOUND` | 404 / 400 | The specified column does not exist: `404` on a column route (`PATCH` / `DELETE …/tables/{name}/columns/{column}`), `400` when a read (`/query`, a join's key, a named query's column — execute, batch and a batch slot alike) or a `rows/batch` operation names a column the table does not have (**BL-1937, next train**: a column found missing while a batch operation runs, with the `failedOperation` line) |
+| `FILE_FORMAT_REFUSED` | 503 | (**BL-1744, next train**) A table cannot be read or written because one of its files is of another version or is damaged: the answer names the file (`Table <id> cannot be read: FILE_FORMAT_REFUSED: found=<n> expected=<m> file=<name>.`; the path is not shown), is `503` with **no `Retry-After`** (a retry meets the same file), and stays until the directory is restored from a backup or opened by the build that wrote it ([Upgrading](../guides/upgrading.md#other-refusals)). The server has not changed anything. Before, such a table answered `500 INTERNAL_ERROR` with the refusal in `details` |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
 | `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
@@ -583,7 +843,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
 | `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
 | `BRANCH_EXISTS` | 409 | A branch with the specified name already exists, compared without regard to case; or a branch of that name is still being deleted — its name stays reserved until the delete's cleanup (engine shutdown, segment references, files) is done, so retry the create afterwards |
-| `BRANCH_BUSY` | 409 | A branch create or delete could not run now — a backup capturing the branch set (or, a delete, uploading the branch), a create or delete of the same branch, or (**BL-1760, next train**) a create that could not take its cut of the database: a flush still running, an open write, the cut past its hold, segment retirements that kept moving. The message names which; nothing was changed; no `Retry-After`. Retry |
+| `BRANCH_BUSY` | 409 | A branch create or delete could not run now — a backup capturing the branch set (or, a delete, uploading the branch), a create or delete of the same branch that is still running (a delete of a branch another request is still creating or deleting is this), or (**BL-1760, next train**) a create that could not take its cut of the database: a flush still running, an open write, the cut past its hold, segment retirements that kept moving. The message names which; nothing was changed; no `Retry-After`. Retry |
 | `BRANCH_SET_DAMAGED` | 500 | (**BL-1712, next train**) `branches.json` or `branch-segment-refs.json` in the database's catalog is damaged (not JSON, `{}`, `null`, a row without a name, a key that is not `table:segment`); the message names the file. Every branch route refuses rather than read it as "no branches", and the database keeps every segment a branch may read. No retry helps: restore the file from a backup, or repair it |
 | `EXACT_RESTORE_REFUSED` | 500 | The first open after an exact restore, or (**BL-1760, next train**) a branch's first query or insert, cannot load the write buffers it holds (a damaged file); the files are kept. For a branch: delete it and create it again. For a restore: restore the backup again |
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
@@ -607,7 +867,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 
 #### Authentication Errors (4xx)
 
-Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-error-responses) above) where the `"error"` field is the machine-readable code.
+Auth errors use the shape of [the auth error envelope](#auth-error-envelope), where the `"error"` field is the machine-readable code.
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
@@ -626,7 +886,21 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_INVALID_CREDENTIALS` | 401 | Signin credentials are invalid (wrong password or non-existent email) |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
 | `AUTH_ACCOUNT_DISABLED` | 423 | A refresh presented with the newest, unexpired refresh token of a family of a principal an administrator disabled (a rotated or expired token is `401 AUTH_REFRESH_TOKEN_INVALID`). The body is the auth payload and includes `suggestion` (not the remedy envelope). That principal's access token is `401 AUTH_CREDENTIAL_REVOKED`. Disabling the principal ends its open sessions |
-| `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
+| `AUTH_RATE_LIMITED` | 429 | Too many auth requests: the per-IP sign-up or sign-in limit, or the optional failed-sign-in ceiling. `Retry-After` header is set. See [Rate limits on the auth routes](#rate-limits). |
+| `AUTH_SESSION_NOT_FOUND` | 404 | `DELETE …/auth/sessions/{id}` or an administrator's `DELETE /api/auth/admin/sessions/{id}` named a session that is not the caller's, or none (**NativeClients, 0.4.0**). See [Sessions are devices](#sessions-are-devices) |
+| `AUTH_PRINCIPAL_NOT_FOUND` | 404 | (**BL-1722, next train**) An application auth database's administration route (`…/auth/admin/users/{id}/invite`, `…/mfa/enroll`, `…/mfa/factors`, `DELETE …/mfa/factors/{factorId}`, and the other user routes) named a user that does not exist. It was `404 DATABASE_NOT_FOUND`, which said the database was missing |
+| `AUTH_DEVICE_INFO_TOO_LONG` | 400 | `deviceInfo` (sign-up, sign-in, MFA verify, native `token`) is over 512 UTF-8 bytes. Nothing was minted (**NativeClients, 0.4.0**) |
+| `AUTH_NATIVE_CLIENT_UNKNOWN` | 400 / 404 | Native sign-in: no registered client with that `clientId`; `404` on `DELETE …/native-clients/{id}` (**NativeClients, 0.4.0**). See [Native sign-in](#native-sign-in-through-the-browser) |
+| `AUTH_REDIRECT_URI_INVALID` | 400 | Registering a native client: a redirect URI that is not a loopback, reverse-DNS scheme or `https` URI, or none (**NativeClients, 0.4.0**) |
+| `AUTH_REDIRECT_URI_NOT_REGISTERED` | 400 | `authorize`: `redirectUri` is not one of the client's (**NativeClients, 0.4.0**) |
+| `AUTH_PKCE_METHOD_UNSUPPORTED` | 400 | `authorize`: `codeChallengeMethod` is not `S256` (**NativeClients, 0.4.0**) |
+| `AUTH_PKCE_CHALLENGE_INVALID` | 400 | `authorize`: `codeChallenge` is not 43 base64url characters (**NativeClients, 0.4.0**) |
+| `AUTH_UNSUPPORTED_GRANT_TYPE` | 400 | `…/auth/token` serves `grantType: "authorization_code"` only (**NativeClients, 0.4.0**) |
+| `AUTH_CODE_INVALID` | 400 | `token`: the code is missing or unknown, the session that issued it has ended, or its principal no longer exists (**NativeClients, 0.4.0**) |
+| `AUTH_CODE_EXPIRED` | 400 | `token`: the code is older than 60 seconds (**NativeClients, 0.4.0**) |
+| `AUTH_CODE_REUSED` | 400 | `token`: the code was already redeemed; the session that redemption opened has been ended (**NativeClients, 0.4.0**) |
+| `AUTH_REDIRECT_URI_MISMATCH` | 400 | `token`: `clientId` or `redirectUri` differ from the ones the code was issued for. The code is spent (**NativeClients, 0.4.0**) |
+| `AUTH_PKCE_VERIFIER_INVALID` | 400 | `token`: `codeVerifier` does not answer the code's challenge. The code is spent (**NativeClients, 0.4.0**) |
 | `RELOAD_REFUSED` | 422 | (**BL-1427, 0.14.0**) `POST /api/admin/reload`: the declaration has an `error` finding (what the next start would refuse); nothing was changed. The body is the plan with every finding |
 | `RELOAD_PARTIAL` | 207 | (**BL-1427, 0.14.0**) A reload stopped part-way (`failedStep`); the steps before it are applied, `/ready` says `reload_failed`. Reload again |
 | `RELOAD_IN_PROGRESS` | 409 | (**BL-1427, 0.14.0**) A reload or a restore was still reconciling the declaration when this call's 120 s wait ran out (a reload or dry run waits its turn; a restore is refused at once). `Retry-After` is set |
@@ -2161,7 +2435,7 @@ omitted is not sent as `null` or `false`.
 | `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (an `"auto"` load folded by the pass — held while its table goes on loading, **LoadSpeed M.3, 0.4.0**; **WorkloadCore S10, 0.3.0**: every load but a `"skip"` one; until the 0.4.0 also a `"deferred"` load). `0` when none; absent on older servers. While it is above zero the query is also `isStale` (behind) and not `current`, with a `staleReason` like "2 bulk load(s) into its source are pending the table's pass…"; it is owed work, not holed, so `staleOnly` does not select it and `currentLagMs` counts from the oldest owed load's commit (**WorkloadCore S10**). `:refresh` of the query runs the table's pass at once. |
 | `stalenessMs` | integer? | (**ColumnarMerge S01, 0.2.0**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
 | `current` | boolean | (**WorkloadCore, 0.3.0**) **Whether the result is current for a reader starting now** — the one rule the server uses to route a source-table read to this result and to decide whether a consistency token is covered by it: no lost update (`isStale` for that reason), nothing queued or in flight for it or for a query it is built on (an incremental update, a bulk-load publish, a load past its commit point), no commit to its source still being routed, and its frontier (`token`) at the WAL head. `false` on older servers. |
-| `frontierLagBytes` | integer? | (**WorkloadCore, 0.3.0**) How many WAL bytes the query's frontier is behind the head. **Omitted** when it is at the head. A size, not a position: positions are only ever on the wire as tokens. |
+| `frontierLagBytes` | integer? | (**WorkloadCore, 0.3.0**) How many WAL bytes the query's frontier is behind the head. **Omitted** whenever the query is `current`: the frontier can sit below the head by frames that concern no query (**BL-1789, next train**). A size, not a position: positions are only ever on the wire as tokens. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
 | `token` | string? | The query's **frontier** (**WorkloadCore, 0.3.0**; the maintenance watermark before): the WAL position its result incorporates, encoded as a consistency token. A position to wait for, not a claim that the result is current — `current` is the claim. |
 | `window` | object? | (**Horizon, 0.5.0**) The query's window as declared — `{ "keep": "7d" }`, with `column` when one was named. Absent for an unbounded query. |
@@ -2310,6 +2584,8 @@ hot segment or a cold one — is skipped and counted as `skipped` (**BL-1489, 0.
 ```
 
 A table may carry `absent` as any write body does; a cell left absent is not part of that row's seed.
+
+(**BL-1722, next train**) **A seed's cell is read as an insert's cell is.** A `Date` or `Timestamp` cell takes the text forms an insert takes, read in the table's `culture` from the schema document; a malformed one is `400`, naming the row and the column. An integer outside its column's range — `Byte` 300, `Int16` 40000, `UInt64` -1 — is refused the same way, `400` naming the row and the column, and nothing of the seed is applied.
 
 **Response:** `200 OK` — `SeedApplyResult` with per-table `insertedCount` and `skippedCount` (existing primary keys skipped).
 
@@ -4457,7 +4733,7 @@ and sentence), `MetricName`, and the helpers `metricValue`, `metricIncrease` and
 
 ### Backup and restore admin routes
 
-All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
+All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; the action and resource of each route are [Route actions](#route-actions)).
 A backup is one **set**: every database of the server, the auth database first, committed by a set record written last. Every example below is a response captured from a running server, trimmed where an array repeats (a `pitr` entry per member).
 
 #### Summary
@@ -5257,14 +5533,14 @@ Query parameters:
 
 Server-Sent Events endpoint (`text/event-stream`) that emits `log` events as new entries are written.
 
-(**BL-1001, 0.14.0**) A stream opened with an keys ends when the key stops authenticating: at once when the key is revoked on this node, otherwise within one `Aouda:WebSocket:HeartbeatInterval` (default 20 s; an expiry, or a linked user disabled). Its last event is `auth_error`, with the codes of [Realtime authorization](#realtime-revoked-credential), and the response then ends:
+(**BL-1001, 0.14.0**) A stream ends when the credential it was opened with stops authenticating, a key and a session token alike: at once when it is revoked on this node, otherwise within one `Aouda:WebSocket:HeartbeatInterval` (default 20 s: an expiry, a session signed out or ended, a principal disabled). Its last event is `auth_error`, with the codes of [a revoked or expired credential](#realtime-revoked-credential), and the response then ends:
 
 ```text
 event: auth_error
-data: {"code":"AUTH_TOKEN_REVOKED","message":"keys has been revoked"}
+data: {"code":"AUTH_CREDENTIAL_REVOKED","message":"Token has been revoked"}
 ```
 
-Up to 0.13.0 a revoked key's stream stayed open. A stream opened with a JWT is not re-checked.
+Up to 0.13.0 a revoked key's stream stayed open.
 
 **Event shape:**
 
@@ -5670,7 +5946,7 @@ one (a `stream_ack` error's `index` is the row's index in the batch).
 }
 ```
 
-**Server responds with:** `stream_ack` after durable write, or `error` on failure.
+**Server responds with:** `stream_ack` after durable write, or `error` on failure. A row whose primary key a live row already holds is an `error` with `DUPLICATE_PRIMARY_KEY` (**BL-1722, next train**; the same refusal as `POST …/rows`; an upsert is the write that replaces).
 
 ---
 
@@ -5749,8 +6025,8 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
-| `message` | string | Human-readable error description. |
+| `code` | string | The machine-readable code: a credential code of [the auth error envelope](#auth-error-envelope). Also sent to an **open** session whose credential is revoked (`AUTH_CREDENTIAL_REVOKED`) or expires (`AUTH_CREDENTIAL_EXPIRED`), before the server closes it ([a revoked or expired credential](#realtime-revoked-credential)). `AUTH_DB_UNAVAILABLE`: the auth database could not be read, or the session's permissions could not be resolved, and the handshake is refused rather than left open; it is **retryable**: reconnect after a short wait with the same credential. A check the server refused for capacity is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same credential; it is not invalid. |
+| `message` | string | Human-readable error description. Match on `code`. |
 | `remedy` | object? | The one thing to do about a credential refusal ([the auth error envelope](#auth-error-envelope)); omitted for an unauthenticated data-plane caller. |
 | `protocol_version` | number? | The server's protocol version, with `PROTOCOL_VERSION_UNSUPPORTED` only (**BL-1830, next train**). |
 
@@ -5758,8 +6034,9 @@ Authentication failure. The server closes the connection after sending this mess
 ```json
 {
   "type": "auth_error",
-  "code": "AUTH_TOKEN_EXPIRED",
-  "message": "Token has expired"
+  "code": "AUTH_CREDENTIAL_EXPIRED",
+  "message": "Token has expired",
+  "remedy": { "kind": "renew" }
 }
 ```
 
@@ -6142,6 +6419,32 @@ Client                                  Server
   ──── stream_close (id="s1") ─────────►
   ◄─── stream_closed (id="s1") ─────────
 ```
+
+<a id="realtime-revoked-credential"></a>
+
+### Realtime: a revoked or expired credential (**BL-1001, 0.14.0**; **BL-1464, 0.16.0**)
+
+An open WebSocket or long-poll session ends when the credential it authenticated with stops authenticating over HTTP. That holds for every credential: a stored, derived or limited key, and a session token. A limited key also ends with its parent. Up to 0.13.0 a session opened with a key was never re-checked: a revoked key's socket kept receiving changes, accepting subscribes and writing rows until it closed.
+
+**When.**
+
+- **At once, on the node where it happens.** A credential is revoked (`POST …/credentials/{id}/revoke`) or deleted (`DELETE …/credentials/{id}`), and a reload that removes a declared one does the same; a principal is disabled or deleted (every credential of it); an OIDC trust is removed (the sessions exchanged through it). From the moment the answer is sent, the session handles no further message: a `subscribe` gets no answer, and a `stream_rows` that arrives after that is not written and gets no `stream_ack`. The WebSocket then receives `auth_error` and is closed; a long-poll whose poll is waiting answers `401` at once. A session on a **replica**, which applies the revoke from replication and announces nothing, ends within one heartbeat instead.
+- **Within one heartbeat, for everything else.** The interval is `Aouda:WebSocket:HeartbeatInterval`, default 20 s. That covers a credential whose expiry passes (a key's `expiresAt`, a session token's `exp`, including an expiry set after the connect), a session that is signed out, ended or revoked (a session has no push), a refresh token that was reused, and a password that was changed. The WebSocket checks at every heartbeat. A long-poll session checks its expiry on every request and everything else at its next `poll` or `send`, at most once per interval. A write stream also checks before it writes a frame batch. A check the server cannot complete (a read refused for capacity) is made again at the next interval; it never ends the session.
+
+**A write in flight may or may not have been written.** Rows with a `stream_ack` are written. A `stream_rows` the server was already writing when the credential ended may still commit, and its `stream_ack` may never arrive because the socket closes. Treat a `stream_rows` without a `stream_ack` as **unknown**, not as unwritten: re-send it idempotently with a valid credential (in `upsert` mode, or with rows whose primary key makes a repeat harmless), or read the table before re-sending. Re-sending it in `insert` mode can duplicate rows or fail on a duplicate key.
+
+**What the client receives.** The same two codes on every transport:
+
+| Cause | `code` | `remedy` |
+|---|---|---|
+| A key revoked or deleted; a key whose principal is disabled or deleted; a limited key whose parent ended; a session that is signed out, ended or revoked; a session exchanged through an OIDC trust that was removed | `AUTH_CREDENTIAL_REVOKED` | `{ "kind": "none" }` |
+| A key past its `expiresAt`; a session token past its `exp` | `AUTH_CREDENTIAL_EXPIRED` | `{ "kind": "renew" }` |
+
+- **WebSocket:** an [`auth_error`](#auth_error) frame with that `code`, `message` and `remedy`, then a close with status `1008` (policy violation) and the code as the close reason.
+- **Long-poll:** `401` with `{ "code", "message", "remedy" }`; the session is removed, so the request after that is `404 SESSION_NOT_FOUND`. Open a new session with a valid credential.
+- **`GET /admin/node/logs/stream`:** a last `auth_error` event ([above](#get-adminnodelogsstream)), without `remedy`.
+
+A client that holds a refresh token refreshes it and opens a new session on `AUTH_CREDENTIAL_EXPIRED`; on `AUTH_CREDENTIAL_REVOKED` there is nothing to renew: an operator has to act. `message` is for people: match on `code`.
 
 ---
 

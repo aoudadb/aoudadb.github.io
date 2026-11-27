@@ -104,7 +104,111 @@
                     },
                     "where": {
                       "type": "object",
-                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                      "description": "A row condition (ADR 0071 D-9): a group { and, or, groups } of conditions { column, op, value, principal, ignoreCase }. A bare condition is not a where: put it in 'and' or 'or'.",
+                      "minProperties": 1,
+                      "properties": {
+                        "and": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                            "properties": {
+                              "column": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "op": {
+                                "type": "string",
+                                "enum": [
+                                  "eq",
+                                  "ne",
+                                  "gt",
+                                  "gte",
+                                  "lt",
+                                  "lte",
+                                  "in",
+                                  "nin",
+                                  "like"
+                                ]
+                              },
+                              "value": {
+                                "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                              },
+                              "principal": {
+                                "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                              },
+                              "ignoreCase": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "column",
+                              "op"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "or": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                            "properties": {
+                              "column": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "op": {
+                                "type": "string",
+                                "enum": [
+                                  "eq",
+                                  "ne",
+                                  "gt",
+                                  "gte",
+                                  "lt",
+                                  "lte",
+                                  "in",
+                                  "nin",
+                                  "like"
+                                ]
+                              },
+                              "value": {
+                                "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                              },
+                              "principal": {
+                                "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                              },
+                              "ignoreCase": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "column",
+                              "op"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "groups": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A group: the same members as a where, nested at most 5 deep; the server checks its members.",
+                            "minProperties": 1,
+                            "propertyNames": {
+                              "enum": [
+                                "and",
+                                "or",
+                                "groups"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "embargoSeconds": {
                       "type": "integer",
@@ -163,7 +267,111 @@
                       },
                       "where": {
                         "type": "object",
-                        "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                        "description": "A row condition (ADR 0071 D-9): a group { and, or, groups } of conditions { column, op, value, principal, ignoreCase }. A bare condition is not a where: put it in 'and' or 'or'.",
+                        "minProperties": 1,
+                        "properties": {
+                          "and": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                              "properties": {
+                                "column": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "op": {
+                                  "type": "string",
+                                  "enum": [
+                                    "eq",
+                                    "ne",
+                                    "gt",
+                                    "gte",
+                                    "lt",
+                                    "lte",
+                                    "in",
+                                    "nin",
+                                    "like"
+                                  ]
+                                },
+                                "value": {
+                                  "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                                },
+                                "principal": {
+                                  "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                                },
+                                "ignoreCase": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "column",
+                                "op"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "or": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                              "properties": {
+                                "column": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "op": {
+                                  "type": "string",
+                                  "enum": [
+                                    "eq",
+                                    "ne",
+                                    "gt",
+                                    "gte",
+                                    "lt",
+                                    "lte",
+                                    "in",
+                                    "nin",
+                                    "like"
+                                  ]
+                                },
+                                "value": {
+                                  "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                                },
+                                "principal": {
+                                  "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                                },
+                                "ignoreCase": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "column",
+                                "op"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "groups": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "description": "A group: the same members as a where, nested at most 5 deep; the server checks its members.",
+                              "minProperties": 1,
+                              "propertyNames": {
+                                "enum": [
+                                  "and",
+                                  "or",
+                                  "groups"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "embargoSeconds": {
                         "type": "integer",
@@ -228,7 +436,111 @@
                       },
                       "where": {
                         "type": "object",
-                        "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                        "description": "A row condition (ADR 0071 D-9): a group { and, or, groups } of conditions { column, op, value, principal, ignoreCase }. A bare condition is not a where: put it in 'and' or 'or'.",
+                        "minProperties": 1,
+                        "properties": {
+                          "and": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                              "properties": {
+                                "column": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "op": {
+                                  "type": "string",
+                                  "enum": [
+                                    "eq",
+                                    "ne",
+                                    "gt",
+                                    "gte",
+                                    "lt",
+                                    "lte",
+                                    "in",
+                                    "nin",
+                                    "like"
+                                  ]
+                                },
+                                "value": {
+                                  "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                                },
+                                "principal": {
+                                  "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                                },
+                                "ignoreCase": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "column",
+                                "op"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "or": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                              "properties": {
+                                "column": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "op": {
+                                  "type": "string",
+                                  "enum": [
+                                    "eq",
+                                    "ne",
+                                    "gt",
+                                    "gte",
+                                    "lt",
+                                    "lte",
+                                    "in",
+                                    "nin",
+                                    "like"
+                                  ]
+                                },
+                                "value": {
+                                  "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                                },
+                                "principal": {
+                                  "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                                },
+                                "ignoreCase": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "column",
+                                "op"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "groups": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "object",
+                              "description": "A group: the same members as a where, nested at most 5 deep; the server checks its members.",
+                              "minProperties": 1,
+                              "propertyNames": {
+                                "enum": [
+                                  "and",
+                                  "or",
+                                  "groups"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "embargoSeconds": {
                         "type": "integer",
@@ -356,7 +668,7 @@
                             "properties": {
                               "file": {
                                 "type": "string",
-                                "description": "A JWKS file."
+                                "description": "A JWKS file; a relative path is relative to the directory of the declaration file."
                               },
                               "url": {
                                 "type": "string",
@@ -430,7 +742,111 @@
                     },
                     "where": {
                       "type": "object",
-                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                      "description": "A row condition (ADR 0071 D-9): a group { and, or, groups } of conditions { column, op, value, principal, ignoreCase }. A bare condition is not a where: put it in 'and' or 'or'.",
+                      "minProperties": 1,
+                      "properties": {
+                        "and": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                            "properties": {
+                              "column": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "op": {
+                                "type": "string",
+                                "enum": [
+                                  "eq",
+                                  "ne",
+                                  "gt",
+                                  "gte",
+                                  "lt",
+                                  "lte",
+                                  "in",
+                                  "nin",
+                                  "like"
+                                ]
+                              },
+                              "value": {
+                                "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                              },
+                              "principal": {
+                                "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                              },
+                              "ignoreCase": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "column",
+                              "op"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "or": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                            "properties": {
+                              "column": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "op": {
+                                "type": "string",
+                                "enum": [
+                                  "eq",
+                                  "ne",
+                                  "gt",
+                                  "gte",
+                                  "lt",
+                                  "lte",
+                                  "in",
+                                  "nin",
+                                  "like"
+                                ]
+                              },
+                              "value": {
+                                "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                              },
+                              "principal": {
+                                "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                              },
+                              "ignoreCase": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "column",
+                              "op"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "groups": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A group: the same members as a where, nested at most 5 deep; the server checks its members.",
+                            "minProperties": 1,
+                            "propertyNames": {
+                              "enum": [
+                                "and",
+                                "or",
+                                "groups"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "embargoSeconds": {
                       "type": "integer",
@@ -495,7 +911,111 @@
                     },
                     "where": {
                       "type": "object",
-                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                      "description": "A row condition (ADR 0071 D-9): a group { and, or, groups } of conditions { column, op, value, principal, ignoreCase }. A bare condition is not a where: put it in 'and' or 'or'.",
+                      "minProperties": 1,
+                      "properties": {
+                        "and": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                            "properties": {
+                              "column": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "op": {
+                                "type": "string",
+                                "enum": [
+                                  "eq",
+                                  "ne",
+                                  "gt",
+                                  "gte",
+                                  "lt",
+                                  "lte",
+                                  "in",
+                                  "nin",
+                                  "like"
+                                ]
+                              },
+                              "value": {
+                                "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                              },
+                              "principal": {
+                                "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                              },
+                              "ignoreCase": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "column",
+                              "op"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "or": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A condition: column and op, and a value or a principal (not both); ignoreCase only for eq, ne, in, nin and like.",
+                            "properties": {
+                              "column": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "op": {
+                                "type": "string",
+                                "enum": [
+                                  "eq",
+                                  "ne",
+                                  "gt",
+                                  "gte",
+                                  "lt",
+                                  "lte",
+                                  "in",
+                                  "nin",
+                                  "like"
+                                ]
+                              },
+                              "value": {
+                                "description": "A scalar, or a list for in and nin; for like, a string pattern."
+                              },
+                              "principal": {
+                                "description": "A member of the calling principal (principal.id or an attribute) in place of value."
+                              },
+                              "ignoreCase": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "column",
+                              "op"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "groups": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "description": "A group: the same members as a where, nested at most 5 deep; the server checks its members.",
+                            "minProperties": 1,
+                            "propertyNames": {
+                              "enum": [
+                                "and",
+                                "or",
+                                "groups"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "embargoSeconds": {
                       "type": "integer",
@@ -623,7 +1143,7 @@
                           "properties": {
                             "file": {
                               "type": "string",
-                              "description": "A JWKS file."
+                              "description": "A JWKS file; a relative path is relative to the directory of the declaration file."
                             },
                             "url": {
                               "type": "string",

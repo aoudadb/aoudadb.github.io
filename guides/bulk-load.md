@@ -88,7 +88,7 @@ Scope boundaries:
 | HTTP protocol/server behavior | `src/Aouda.Server/Controllers/BulkLoadController.cs`, `src/Aouda.Server/Services/BulkLoadSessionRegistry.cs` |
 | .NET client surface | `src/Aouda.Client/AoudaClient.cs`, `src/Aouda.Client/Internal/BulkLoadCoordinator.cs`, `src/Aouda.Client/Exceptions/BulkLoadExceptions.cs` |
 | CLI surface | `src/Aouda.Cli/Commands/TableBulkLoadCommand.cs` |
-| Representative tests | `tests/Aouda.Engine.Api.Tests/BulkLoad/*`, `tests/Aouda.Server.Tests/BulkLoad/*`, `tests/Aouda.Engine.Replication.Tests/*BulkLoad*`, `tests/Aouda.Client.Tests/BulkLoad/*` |
+| Representative tests | `tests/Aouda.Engine.Api.Durability.Tests/BulkLoad/*`, `tests/Aouda.Server.Tests/BulkLoad/*`, `tests/Aouda.Engine.Replication.Tests/*BulkLoad*`, `tests/Aouda.Client.Tests/BulkLoad/*` |
 
 ---
 
@@ -1413,8 +1413,8 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 | HTTP commit semantics | `tests/Aouda.Server.Tests/BulkLoad/BulkLoadControllerCommitTests.cs` | Not run in S2 session | Strong | Covers success, duplicate commit, invalid write concern, jobId mismatch. |
 | Admin list and force-abort routes | `tests/Aouda.Server.Tests/BulkLoad/BulkLoadListRouteTests.cs` | Not run in S2 session | Strong | Covers list snapshots and terminal-state force-abort behavior. |
 | Replica state machine and fetch concurrency | `tests/Aouda.Engine.Replication.Tests/Replay/BulkLoadReplicaCoordinatorTests.cs` | Not run in S2 session | Strong | Covers staged/committed transitions, concurrency, dedup, cancellation. |
-| Cluster force-log policy | `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadForceLogShipTests.cs` | Not run in S2 session | Medium | Confirms policy rejection and perf counter increments. |
-| Watchdog lifecycle integration | `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadWatchdogLifecycleTests.cs` | Not run in S2 session | Medium | Verifies registration/clear/dispose paths. |
+| Cluster force-log policy | `tests/Aouda.Engine.Api.Durability.Tests/BulkLoad/BulkLoadForceLogShipTests.cs` | Not run in S2 session | Medium | Confirms policy rejection and perf counter increments. |
+| Watchdog lifecycle integration | `tests/Aouda.Engine.Api.Durability.Tests/BulkLoad/BulkLoadWatchdogLifecycleTests.cs` | Not run in S2 session | Medium | Verifies registration/clear/dispose paths. |
 | Client protocol orchestration and error mapping | `tests/Aouda.Client.Tests/BulkLoad/BulkLoadCoordinatorTests.cs` | Not run in S2 session | Medium | Covers the append content type, cursor mismatch, deferred polling. |
 
 ---
@@ -1466,8 +1466,8 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 - `src/Aouda.Client/Internal/BulkLoadCoordinator.cs`
 - `src/Aouda.Client/Exceptions/BulkLoadExceptions.cs`
 - `src/Aouda.Cli/Commands/TableBulkLoadCommand.cs`
-- `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadForceLogShipTests.cs`
-- `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadWatchdogLifecycleTests.cs`
+- `tests/Aouda.Engine.Api.Durability.Tests/BulkLoad/BulkLoadForceLogShipTests.cs`
+- `tests/Aouda.Engine.Api.Durability.Tests/BulkLoad/BulkLoadWatchdogLifecycleTests.cs`
 - `tests/Aouda.Engine.Replication.Tests/Replay/BulkLoadReplicaCoordinatorTests.cs`
 - `tests/Aouda.Server.Tests/BulkLoad/BulkLoadControllerBeginTests.cs`
 - `tests/Aouda.Server.Tests/BulkLoad/BulkLoadControllerCommitTests.cs`

@@ -372,7 +372,7 @@ Common mistake: assuming a unified `Aouda.CreateClient()` symbol exists in this 
 
 ```csharp
 // Remote .NET client package
-using var client = new AoudaClient("http://localhost:5433", "default");
+using var client = new AoudaClient("http://localhost:5000", "default");
 var rows = await client.GetTable("orders").Where("total", "gte", 50).ToListAsync();
 ```
 
@@ -386,7 +386,7 @@ Common mistake: using `Aouda.Abstractions` directly in app code instead of insta
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5433",
+  serverUrl: "http://localhost:5000",
   database: "default",
 });
 
@@ -405,7 +405,7 @@ Common mistake: expecting embedded in-process mode from TypeScript package (curr
 ```bash
 # Install and run CLI tool
 dotnet tool install -g Aouda.Cli
-aouda start --port 5433 --data-dir "./data"
+aouda start --data-dir "./data"
 ```
 
 ```http
@@ -445,8 +445,8 @@ When to use:
 
 Steps:
 1. Install CLI tool: `dotnet tool install -g Aouda.Cli`
-2. Start server: `aouda start --port 5433 --data-dir "./data"`
-3. Run either .NET `AoudaClient` or TS `createAoudaClient` against `http://localhost:5433`.
+2. Start server: `aouda start --data-dir "./data"`
+3. Run either .NET `AoudaClient` or TS `createAoudaClient` against `http://localhost:5000`.
 
 Expected result checks:
 - `GET /health` returns `200`.

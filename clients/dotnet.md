@@ -42,7 +42,7 @@ For the same API in-process, without a server, use `Aouda.Embedded` (see
 | Know what is retried after a failure | §8 What the SDK re-sends |
 | Subscribe to a table or a named query, and know which listener takes which | §8a Subscriptions |
 | Handle errors | §9 Errors |
-| Authenticate | [Getting Started: SDK usage with server auth](../getting-started/index.md#sdk-usage-with-server-auth) |
+| Authenticate | [Getting Started: SDK usage](../getting-started/index.md#sdk-usage) |
 | See the wire format | [HTTP API reference](../reference/http-api.md) |
 
 ---
@@ -222,7 +222,7 @@ public sealed class QuoteReader(IAoudaClient aouda)
 |---|---|---|---|
 | `ServerUrl` | string | none | The server's base URL (required unless `HttpClientFactory` supplies an `HttpClient` with a base address) |
 | `DatabaseName` | string | none | The database this client is scoped to (required) |
-| `ApiKey` | string | none | An API key of any kind; surrounding white space is removed. Not together with `ApiKeyFile` |
+| `ApiKey` | string | none | A key; surrounding white space is removed. Not together with `ApiKeyFile` |
 | `ApiKeyFile` | string | none | A file holding the key (a Docker or Kubernetes secret). Read **when the client is first resolved**, not when `AddAouda` runs, so a secret mounted late is found; leading and trailing white space (a trailing newline above all) is removed. A missing, unreadable or empty file is an `InvalidOperationException` that names the path and never the content |
 | `Timeout` | `hh:mm:ss` | the client's 30 s | `AoudaClientOptions.Timeout` |
 | `ApplicationName` | string | none | Sent in the `User-Agent`, so the server's log names this service |

@@ -247,7 +247,7 @@ Runtime notes:
    2,048-row vectors holding a selected row.
 4. Validity bitmaps and deletion masks are preserved through decode/projection.
 5. Tests: the differential oracle (`ReadRuleOracle*Tests`) and the reference fuzzer (`ReadFuzz*Tests`) in
-   `tests/Aouda.Engine.Api.Tests/ColumnarRead/`, `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
+   `tests/Aouda.Engine.Api.Read.Tests/ColumnarRead/`, `tests/Aouda.Engine.Api.Read.Tests/QueryCorrectnessC2IntegrationTests.cs`.
 
 ### Path C: Aggregate/count with mixed hot+cold and unflushed rows
 
@@ -288,7 +288,7 @@ Runtime notes:
 8. **Routing (**ColumnarRead S18, 0.3.0**):** every one of these reads — rows, columns, aggregates, GROUP BY, the per-key
    collapse — is answered from a materialized query that holds the answer and is current
    ([routing](materialized.md#routing-a-read-to-a-maintained-result)); `WithDirectScan()` reads the table regardless.
-9. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
+9. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Read.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
    `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`; S18's `ReadRuleOracleRoutingTests`
    for routing) and the reference fuzzer.
 
@@ -576,7 +576,7 @@ Quick-answer matrix:
 | Query translation/validation/defaults | `tests/Aouda.Server.Tests/QueryTranslatorTests.cs` | Pass | Strong | Validates translator rules and normalization. |
 | One scan: pruning rules, top-K, aggregates, routing against a reference model (**ColumnarRead, 0.3.0**) | `tests/Aouda.Engine.Api.Tests/ColumnarRead/ReadRuleOracle*Tests.cs`, `ReadFuzzTests.cs` | — | Strong | Every pruning rule and route has an oracle case, rule on and off. Replaces the deleted `QueryEngineRowWindowBatchTests`, `QueryEnginePrunedExecutionTests` and `RowFilterEngineColdValidityTests` (their engines are gone). |
 | TypeScript query payload mapping | `aouda-client-ts/tests/query-builder.test.ts` | Pass | Strong | Covers builder immutability, operators, order, pagination serialization. |
-| Mixed-state correctness (hot/cold/unflushed) | `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`, `tests/Aouda.Engine.Api.Tests/C2ScenarioMirrorIntegrationTests.cs` | Not run in this pass | Medium | Evidence from prior report cycle; re-run recommended for release gates. |
+| Mixed-state correctness (hot/cold/unflushed) | `tests/Aouda.Engine.Api.Read.Tests/QueryCorrectnessC2IntegrationTests.cs`, `tests/Aouda.Engine.Api.Tests/C2ScenarioMirrorIntegrationTests.cs` | Not run in this pass | Medium | Evidence from prior report cycle; re-run recommended for release gates. |
 
 ## 2.17 Testing gaps and proposed tests
 
@@ -652,8 +652,8 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 - `aouda-client-ts/src/types.ts`
 - `tests/Aouda.Server.Tests/QueryIntegrationTests.cs`
 - `tests/Aouda.Server.Tests/QueryTranslatorTests.cs`
-- `tests/Aouda.Engine.Api.Tests/ColumnarRead/` (`ReadRuleOracle*Tests`, `ReadFuzzTests`)
-- `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`
+- `tests/Aouda.Engine.Api.Read.Tests/ColumnarRead/` (`ReadRuleOracle*Tests`, `ReadFuzzTests`)
+- `tests/Aouda.Engine.Api.Read.Tests/QueryCorrectnessC2IntegrationTests.cs`
 - `tests/Aouda.Engine.Api.Tests/C2ScenarioMirrorIntegrationTests.cs`
 - `aouda-client-ts/tests/query-builder.test.ts`
 

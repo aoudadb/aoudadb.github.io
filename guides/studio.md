@@ -7,8 +7,8 @@ parent: "Guides"
 # Aouda Studio — Web Management Console
 
 _Domain: Studio UI features, data explorer, cluster management, admin operations_
-_Status: Operator parity with server 0.1.8 (P39, Studio 0.0.18 — 2026-08-20)_
-_Primary Phases: P5, P6, P9, P12, P16, P34, P36, P37 (thin), P39_
+_Status: Studio 0.16.0 (Principals: Access and Declaration pages); behaviour marked **next train** is on the phase branch and not in a release_
+_Primary Phases: P5, P6, P9, P12, P16, P34, P36, P37 (thin), P39, Principals, Operability_
 _Repo: `aouda-studio` (Next.js / React)_
 
 ---
@@ -21,7 +21,7 @@ Aouda Studio is the web management console for Aouda. It provides:
 - **Schema Management** — view/edit tables, columns, ERD diagrams, insert-time compute
 - **Named Artifacts** — catalog from `schema.export()`, test/subscribe by name, structured authoring via schema apply
 - **Cluster Management** — node operations, topology, backup, configuration
-- **Admin Console** — monitoring, access (principals, roles, sign-up, sessions, audit log), streaming (table + named query), bulk-load job monitor
+- **Admin Console** — monitoring, access (principals, roles, sign-up, credentials, sessions, audit log), the declaration the server runs on, streaming (table + named query), bulk-load job monitor
 - **Hub Integration** — team server management, authentication, multi-server switching
 - **AI Integration** — natural language cluster operations
 
@@ -44,6 +44,9 @@ Aouda Studio is the web management console for Aouda. It provides:
 | Author unique / derived / checks / `call` / route / tee | §5.5 Insert-time compute |
 | Catalog and test named queries / mutations | §5.6 Named Artifacts |
 | See who may do what, and mint a key | §13 Access |
+| See what the server's declaration file says, plan a reload, export it | §13 Declaration |
+| Read a formula column, or ask why its cell has no value | §3 Formula columns |
+| See a table's retention | §5.5 Storage Policy |
 | Subscribe by named-query name | §13 Streaming Explorer |
 | Seed an explicit auto-increment ID on Add Row | §5.5 Identity-insert |
 | Manage branches | §5 Branches |
@@ -59,7 +62,8 @@ Aouda Studio is the web management console for Aouda. It provides:
 
 - Left sidebar: database selector, table list with row counts
 - Main area: paginated data grid with virtual scrolling
-- Cell editing: click to edit, inline validation, save on blur
+- Cell editing: click to edit, inline validation, save on blur. A pending edit belongs to the row's primary key, so a reload, a sort or a delete that moves the rows does not move it onto another row (**next train**)
+- An `Int64` or `UInt64` cell is a text cell: a value past 2^53 keeps its digits through an edit, the JSON export and a bulk expression operand (`$inc`, `$mul`, …), and text that is not a whole number in the type's range is refused with a message instead of being written as `0` (**BL-1111, next train**)
 - Row operations: insert, duplicate, delete with confirmation
 
 ### Filter Builder
@@ -78,7 +82,7 @@ Filters sync bidirectionally between the visual builder and the query bar text r
 
 ### Sorting and Pagination
 
-- Click column header to sort (ascending → descending → none)
+- Click column header to sort (ascending → descending → none). With a column projection, the header you click is the column that sorts; before, it sorted the column at that position in the table (**BL-1246, next train**)
 - `ORDER BY` in query bar
 - `LIMIT` / `OFFSET` with page navigation
 - Server-side count via `POST .../query/count` (safe for large tables)
@@ -99,8 +103,12 @@ running WHERE-based updates, deletes, and truncations from the browser:
 | 7. Confirm | Confirmation dialog: _"You are about to UPDATE/DELETE N rows. This cannot be undone."_ |
 | 8. Results | Shows `rowsUpdated`/`rowsDeleted`, execution time, and RETURNING rows |
 
-TRUNCATE requires the `Truncate` authorization scope — Studio shows a role-based warning if the
-current credential lacks this scope.
+TRUNCATE needs an unconditional `delete` statement on the table ([Bulk Mutations §4](bulk-mutations.md#4-truncate)).
+Studio does not check it: it asks you to type the table name to confirm, sends the request, and shows the server's refusal.
+A delete limit that is not a whole number above 0 is refused in the panel (Execute stays off and the panel says why); before, `0`
+or `-5` read as "no limit" and deleted every matching row (**BL-1111, next train**). A failed bulk delete reports "Deleted k of n",
+refreshes the grid and keeps the dialog on the rows not yet deleted, and a batch delete ordered descending is sent descending, so
+"delete the newest 10" deletes the newest (**BL-1111, BL-1838, next train**).
 
 See [Bulk Mutations guide](bulk-mutations.md) for the full API reference.
 
@@ -116,6 +124,15 @@ Per-record detail page with:
 - All fields displayed and editable
 - Related records listed by foreign key
 - Delete with confirmation
+
+### Formula columns (**next train**)
+
+An [`Expression` column](formulas.md) holds one formula per row. Studio shows and explains one; it has no formula editor, so it does not create or edit one ([§5.5](#expression-columns)).
+
+- **The formula cell** reads as the formula's text (`Revenue - Cost`, `coalesce(a, 0)`; cut at 200 characters; a copy of the cell is the formula's whole JSON), with an `fx` header icon labelled "Formula". A row whose formula is null (an input row) shows `input`, not `NULL`. The cell is read-only.
+- **The driven cell.** The column an Expression column drives is **read-only in a formula row**: the server refuses a write there with `FORMULA_VALUE_WRITE_REFUSED`. In an input row it is edited like any cell, and in a row read without the Expression column (a projection) Studio cannot tell, so the server's refusal answers. A formula row's driven cell that holds no value reads **no value — why?**.
+- **Why.** A click on a formula cell, or on a formula row's driven cell, opens a read-only dialog with the answer of [`explain`](formulas.md#a-cell-that-cannot-be-computed-null-and-explain): the formula, each cell it reads with its value now (or "not readable by this account", or "(itself a formula)"), the reason a cell has no value (a division by zero, an overflow, …), the stored value and the cells that read this one. A row with no formula says it is an input row. Studio asks the server only when you click, with the row's full primary key (exact past 2^53; a `Date` key as its day); a failed call shows its code and message.
+- **Forms.** The add-row form and the bulk SET editor never offer a formula column, because a new row is an input row. The query center shows a formula as its text too, and its edit mode offers no field for one.
 
 ### Array columns (**BL-035, 0.9.0**)
 
@@ -149,6 +166,10 @@ Build multi-table joins visually:
 - GROUP BY column selection
 - Combined with WHERE filters
 - Results as grouped data grid
+
+### Filter Groups and the SQL Preview
+
+The worksheet's filter is a list of **groups**: the groups are joined by **OR**, and the conditions inside a group by the group's connector, a button that cycles **AND**, **OR** and **OR GROUP** (which starts a new group). The **SQL PREVIEW** is what runs, and so is the column projection you chose (**Studio BL-QUX-01, BL-QUX-03, next train**; before, OR between groups was not sent and the projection was not executed, and the page said so). The wire has no OR of AND groups, so Studio sends the filter as an AND of OR clauses; a filter that works out to more than 64 clauses (or 256 comparisons) is refused with a message that says to simplify it, and never run as an AND of everything. A condition with nothing to say yet (an empty `IN` list, a `BETWEEN` with no bounds) is neither sent nor shown in the preview.
 
 ### Expression SELECT (Computed Columns)
 
@@ -191,13 +212,15 @@ Studio's schema management surface lets you inspect and evolve table schemas ent
 
 ### Accessing the Schema View
 
-Navigate to a table, then open the **Schema** tab. The schema view has three panels:
+Navigate to a table, then open the **Schema** tab. The schema view has these panels:
 
 1. **Columns table** — all columns with type, nullability, key role, reference, auto-increment, unique, and derived.
-2. **Storage Policy** — per-table temperature policy (`Auto`, `HotOnly`, `ColdPreferred`).
-3. **Checks / route / tee** — write-time predicates and insert routing (see below).
+2. **Storage Policy** — per-table temperature policy (`Auto`, `HotOnly`, `ColdPreferred`) and, read-only, the table's retention.
+3. **Who can reach this table** — the statements that name the table (see [§13 Access](#access)).
+4. **Checks / route / tee** — write-time predicates and insert routing (see below).
+5. **Durability Overrides**, then **Keys**, **Relationships (outgoing)** and **Indexes**.
 
-Who may read or write a table is not a setting of the table: it is in the statements of principals and roles ([§13 Access](#access)).
+Who may read or write a table is not a setting of the table: it is in the statements of principals and roles ([§13 Access](#access)). On a database whose schema the declaration file owns, the editing controls are disabled and badged with the file and the pointer ([§13 Declaration](#declaration)).
 
 ### The Columns Table
 
@@ -206,7 +229,7 @@ Each row in the columns table shows:
 | Column | Description |
 |--------|-------------|
 | **Name** | Column name |
-| **Type** | Aouda data type (e.g. `Int64`, `String`, `Timestamp`) |
+| **Type** | Aouda data type (e.g. `Int64`, `String`, `Timestamp`); an Expression column reads `Expression → drives <column>` (**next train**) |
 | **Nullable** | Yes / No |
 | **Key** | `PK (1)` for primary key with ordinal, `Partition`, `Cluster`, or `—` |
 | **Reference** | Foreign key target in `→ table.column` format, or `—` |
@@ -273,6 +296,8 @@ Click **Add column** above the columns table to open the Add Column dialog. Fill
 - Nullable flag
 - Optional: primary key order, auto-increment, references
 
+`Expression` is not in the type list (see [Expression columns](#expression-columns)).
+
 ### Renaming a Column
 
 Click `⋮` → **Rename** on the column row. Enter the new name and click Rename. The server applies the rename via the catalog.
@@ -304,6 +329,12 @@ The Storage Policy card shows the current `storageTemperature` for the table:
 | `ColdPreferred` | Segments move to disk as soon as possible |
 
 Change the value in the dropdown and click **Save** to apply the policy change. This calls `POST /api/databases/{db}/tables/{table}/policy` directly (imperative DDL, not via the declarative schema apply path).
+
+**Retention** (**next train**) is shown under the temperature, read-only: "Keeps 90d — rows before 2026-08-27 09:00 UTC are gone" (the horizon is always UTC), or "None — every row is kept". A retention is declared in the schema file and changed there; it can be changed, never removed ([Retention](retention.md)). The table list's per-table summary carries no retention, so the page header of a table does not show it (**BL-1885, next train**).
+
+### Expression columns
+
+An [`Expression` column](formulas.md) is declared in the schema file or with the SDK. Studio has no formula editor, so it does not create one: the Add-column dialog and the Create-table form say so, and `Expression` is not a type they offer. The schema view lists such a column as `Expression → drives <column>` and offers only **Rename** and **Delete** on it; the server refuses a change of its type, default, unique or derivation. How its cells read in the grid is in [§3 Formula columns](#formula-columns-next-train). (**next train**)
 
 ### Schema Diff View (Migrations Page)
 
@@ -361,31 +392,37 @@ SQL-ish authoring (ADR 0040 D-24) is not in Studio. Full contract: [Named querie
 
 ## 6) Cluster Management
 
+The **CLUSTER** section (**Nodes**, **Replication**, **AI Ops**) is shown on a node that is not standalone, to a credential that may administer ([What Studio Shows to Whom](#what-studio-shows-to-whom)). An operation acts on **the node Studio is connected to**, and runs when you press the button: there is no confirmation dialog.
+
 ### Cluster Operations
 
-| Operation | UI | Server API |
-|-----------|-----|------------|
-| Add node | Dialog: enter node address → join | `POST /admin/cluster/join` |
-| Remove node | Confirmation dialog → leave | `DELETE /admin/cluster/leave` |
-| Promote | Button on secondary node → trigger election | `POST /admin/cluster/promote` |
-| Failover | Button on primary → step down | `POST /admin/cluster/failover` |
-| Drain | Mark node as draining | `POST /admin/cluster/drain/{addr}` |
+| Operation | Where | Server API |
+|-----------|-------|------------|
+| Add node | **Nodes → Cluster operations**: *Replica set name*, *Role* (`secondary` or `witness`), *Primary address*, *This node address*, then **Add node**: this node joins that replica set | `POST /admin/cluster/join` |
+| Remove node | **Nodes → Cluster operations**: **Remove this node** leaves the cluster | `DELETE /admin/cluster/leave` |
+| Drain | **Nodes**, the **Drain** button on a member's row (off for a member already draining) | `POST /admin/cluster/drain/{addr}` |
+| Promote | **Replication → Status**: **Promote this node** asks for an election | `POST /admin/cluster/promote` |
+| Failover | **Replication → Status**: **Trigger failover** steps this primary down | `POST /admin/cluster/failover` |
+| Timing | **Replication → Cluster configuration**: *Heartbeat interval (ms)* and *Election timeout (ms)* are editable (**Save cluster timing**); the replica set name, the members and this node are not | `PATCH /admin/cluster/config` |
 
 ### Cluster Topology Visualization
 
-Visual diagram showing:
-- Primary, secondary, and witness nodes with role badges
-- Replication lag indicators
-- Status indicators (healthy, lagging, disconnected)
-- Connection lines between nodes
+**Nodes** shows a **Topology** diagram with one card per member, the primary first and witnesses last (a witness has a dashed border):
+- The role badge, **This node** and **Draining** badges, and the member's address
+- **Lag**, from the member's per-database lag in `GET /admin/replication/status` (`members`), the largest of its databases in bytes, with a count of the databases whose lag is unknown. Studio no longer takes lag from the topology, which carries none (**BL-1477, next train**)
+- **Hidden from reads** and **Not a read candidate**, from the topology
+
+A member the server has no WAL position for, or no primary position to measure against, shows **Lag: unknown** (it showed `0 B`). The status needs `manage` on `server` and the topology does not: when the status cannot be read the cards stay and say **Lag: not available**, where the page said "No members in topology" (**BL-1477, next train**). There are no connection lines between the cards, and no healthy / lagging / disconnected state: a lag of 1 MiB or more is shown amber and 10 MiB or more red.
+
+Below the diagram the **Cluster nodes** table lists each member's address, role, temperature profile, hidden, read candidate, drain state and an **Open** link. **Replication** adds the node's own **Status** (role, primary, whether it can accept writes, fencing token), **Replication placement** (read candidates and members), **Per-database lag** (WAL position, primary position, lag in bytes, this node's own) and **Coverage** (per-table replication subscriptions).
 
 ### Node Detail View
 
-Per-node detail page (clickable from topology):
-- Version, uptime, role
-- WAL position
-- Memory and disk usage
-- Real-time metric refresh
+**Nodes → Open** on a member opens **Node details** for that address. It refreshes every 5 seconds:
+- **Cluster member snapshot**: role, whether it is this node, read candidate, hidden (from the topology)
+- **Runtime node info**: version, node id, uptime, process id, machine, OS, CPU count, working set and GC heap, and "Disk usage: N/A". These come from `/admin/node`, so they are **the connected node's**, whichever member's page it is
+- **WAL and lag snapshot**: this node's own per-database view, from `perDatabaseLag`, again the connected node's
+- **Member lag** (**BL-1477, next train**): the member's own per-database WAL position and lag from the status `members`, with "unknown" where the server has no primary position. "Unknown" also covers a member the server has not heard from; "Not available" means the status lists no such member or this account may not read it
 
 ---
 
@@ -424,9 +461,7 @@ Visual gauge showing current usage vs. budget. Slider or numeric input for immed
 
 ### Cluster Configuration
 
-- Replica set name
-- Failover policies
-- Read preference defaults
+**Replication → Cluster configuration** (a cluster node): the replica set name and this node are shown read-only; the heartbeat interval and the election timeout are editable ([Cluster Operations](#cluster-operations)).
 
 ### Hot/Cold Policy Editor
 
@@ -515,7 +550,7 @@ The first time you visit `studio.aouda.com`, a **Connect to Server** dialog open
 | Field | Description |
 |-------|-------------|
 | Server URL | Full URL of the Aouda server, e.g. `http://localhost:5000` or `https://my-server.example.com` |
-| Key | A key (`aouda_...`) of a principal of the server auth database — leave blank to sign in, or on a server in setup mode |
+| Key | A key (`aouda_...`) of a principal of the server auth database. Leave it blank only for a server in setup mode (Studio then says the server has no administrator yet); otherwise the server asks for a credential and the dialog stays open. See [Connecting with a Key](#connecting-with-a-key) |
 | Remember key | Checked by default — persists the URL and key in browser `localStorage` |
 
 Once connected, the server URL appears in the top navigation bar. Click it at any time to open the Connect dialog again and switch to a different server.
@@ -630,6 +665,10 @@ docker run -p 3000:3000 \
 The image is **`ghcr.io/aoudadb/aouda-studio`** (**BL-1982, next train**; `aouda/studio`, the name older pages carried, was never published), `linux/amd64`. Studio and the server move together (the protocol version): run the Studio image of the server's release.
 
 Fully self-contained: no external CDN, font, or icon dependencies. Works air-gapped.
+
+### Studio's CI (**next train**)
+
+Studio's own tests run against mocks. A **real-server smoke test** also exists (`npm run test:smoke` in `aouda-studio`): it runs Studio's own hooks and library, with the real `@aouda/client`, against a server (`AOUDA_SMOKE_URL`, `AOUDA_SMOKE_KEY`) through connect, browse (a formula table and a table with a retention), query (a formula cell, an exact `Int64` key, `explain` naming a division by zero) and listing backups. It fails, never skips, when there is no server, and `npm run test` never includes it. The workflow that runs it on every pull request, from the server's release archive, is prepared for the maintainer to publish; it is a check on Studio's source, not something you deploy.
 
 ### Docker Compose
 
@@ -812,52 +851,114 @@ In manual mode no server is running yet, so it creates no admin and prints the c
 
 ### Log Viewer
 
-- Server log viewer with level filtering (Debug, Info, Warning, Error)
-- Real-time streaming via SSE
-- Searchable log history
+**ADMIN → Logs** (`/admin/logs`) reads the recent in-memory log of the node Studio is connected to (`GET /admin/node/logs`):
+
+- **Level** is a minimum: All levels, Trace, Debug, Information, Warning, Error or Critical.
+- **Contains** is a text filter. The table shows up to 300 entries: UTC timestamp, level, category and message.
+- **Refresh** reads again, and the **Auto** box reads again every 5 seconds. Studio polls; it does not use the server's SSE log stream (`GET /admin/node/logs/stream`).
 
 ### Slow Query Log
 
-View slow queries with timing information and query details.
+**ADMIN → Slow queries** is the same node log filtered by a message text (default `slow`) and a minimum level. It is marked a preview surface: it lists the log lines the server wrote and adds no timing or query detail of its own. Widen the filters if it is empty.
 
 ### Alert Configuration
 
-- Define alerts on metrics thresholds
-- Alert history with timestamps and resolution status
+**ADMIN → Alerts** evaluates three rules **in the browser**, from the server's metrics and a `/health` ping every 30 seconds: *Memory pressure* (a threshold in % of the server's maximum), *Replication lag* (a maximum in bytes; not on a standalone server) and *Server unreachable* (the browser's `/health` request failed). The rules and the history (kind, severity, message, time) are kept in the browser's `localStorage`, so they run only while Studio is open and are not shared between browsers. **Clear history** empties the list.
 
 ### Connection Monitor
 
-Active connections and their status.
+**ADMIN → Connections** shows the server URL and the auth scope Studio uses ("Server auth (global)"), the live sessions of the server auth database (`GET /api/auth/admin/sessions`, paged by 20; **Revoke this session** and **Revoke all for this user** from the row's menu), and a metrics summary: active connections, materialized queries, queries per second.
 
 ### Multi-Server Dashboard
 
 In Hub mode: aggregate health overview across all registered servers.
 
-### Role-Based UI Visibility
+### What Studio Shows to Whom
 
-Navigation items and features gated by user role (owner/admin/member/viewer).
+Studio reads `GET /api/auth/whoami` for the connected credential and uses its statements as a **hint for which pages to show**. It allows and denies nothing: every call goes to the server, and a control the server refuses shows the server's message, its code and its `remedy`. Until `whoami` has answered, the entries below stay hidden.
+
+| The credential holds | Studio shows |
+|---|---|
+| anything | The data, schema and query pages, **Dashboard** and **Monitoring** (the **Full** profile) |
+| `manage` on `server` or on a database | In addition: the operational pages (**Backups**, **Databases**, **Logs**, **Alerts**, **Slow queries**, **Connections**, **Streaming**, **Bulk Load**), the **SETTINGS** section, the write controls on **Materialized**, **Named Artifacts** and **Migrations**, and **CLUSTER** on a node that is not standalone |
+| `manage` on `server` | In addition: **Settings → Access** and **Settings → Declaration** |
+
+The profile switcher (**Full** or **Data Owner**) is a preference of the browser, not a permission: **Data Owner** shows only Tables, pinned tables and saved views.
 
 ### Connecting with a Key
 
-Connect to a server with a key from the Connect dialog, or from the connection card in **Settings → Access**.
+The Connect dialog (the first-run dialog, or the server URL in the top bar) takes the **Server URL** and, optionally, a key (`aouda_<id>_<secret>`) of a `_serverauth` principal. **Remember key on this browser** is on by default. Studio asks the admin listener first, with no credential (`GET /api/databases`), and shows what the answer means:
 
-### Keys and Principals
+| The server answers | Studio shows |
+|---|---|
+| `401` or `403` | The Connect dialog stays open: a credential is needed |
+| `404` | That URL is the data-plane listener; connect to the admin one |
+| `503 SETUP_REQUIRED` | **This server has no administrator yet.** The first administrator is made on the server's machine (`aouda init`, `aouda start --dev-admin`, or a declared `_serverauth` principal holding `manage` on `server`), never from a web page. Studio checks again for ten minutes, or on **Check again** |
+| `503 SERVER_STARTING` | "The server is starting up", and tries again after the server's `Retry-After` |
+| `200` | A message that this server is of another release than this Studio |
 
-Create principals and roles, edit statements and attributes, mint, limit, revoke and delete keys, and set `signup`, from **Settings → Access**. An object the declaration file owns is shown read-only with the file it is declared in.
+A key is then proved with `GET /api/auth/whoami`; a refusal is shown as the server wrote it, with its `remedy`. Studio holds **one** credential, a key or a session, stored with its kind; it never works the kind out from the text. A saved credential the server refuses is dropped and the dialog asks again. The connection card on **Settings → Access** takes a key too (**Connect**, **Disconnect**) and shows "Connected as `<authDatabase>/<name>`".
 
 ### Materialized Queries Browser
 
-- List materialized queries with freshness status (up-to-date, stale, processing)
-- Query materialized query results directly
-- Drop materialized queries
+- **Materialized** (under DATA, for the Full profile) lists the queries of the current database: name, source table, type, a state badge (Ready, Building, Rebuilding, Error, …), a **Behind** pill when the result is not current, **Freshness** and the row count. **Ready** still means readable.
+- A query that is behind reads "Behind for 1 min 30 s" (the server's `currentLagMs`), and its detail page and **Definition** sheet give the full `staleReason` as text. A current query shows "Updated <time>" and no lag. (**Studio BL-MQ-01, BL-MQ-02, next train**)
+- The detail page shows the query's result in a read-only grid, with **Definition** and **Refresh**.
+- With a credential that may administer (the second row above): **Create** (a dialog: name, source table, pattern type and its filter, group-by and order-by columns) and **Drop**. On a database whose schema the declaration file owns, both are disabled and badged ([Declaration](#declaration)).
 
 This page talks to the **runtime** MQ HTTP API. Schema-file desired state is a different axis: a **present** `materializedQueries` map on apply (including `{}`) drops live MQs that are not listed. See §5.5 Schema Diff View and [Schema CI/CD](schema-cicd.md).
 
 ### Access
 
-**Settings → Access** (**BL-1464, 0.16.0**) shows one auth database at a time — `_serverauth`, or an application's — with the tabs *Who am I*, *Principals*, *Roles*, *Sign-up* (application auth databases), *Sessions*, *Audit log* and *OIDC discovery*. *Who am I* is [`whoami`](../auth/whoami.md) of the connection's own credential: the principal, and every statement with where it came from.
+**Settings → Access** (`/settings/access`; **BL-1464, 0.16.0**) is the page for the principals, roles, sign-up, credentials and sessions of one auth database at a time. Its menu entry shows for a credential that holds `manage` on `server`; the page itself is the server's to refuse. See [Principals](../auth/principals.md), [Credentials](../auth/credentials.md) and [Declared access](declared-access.md) for the model.
 
-A refusal is shown with its `remedy`: the statement to grant, and whether the declaration file owns the principal. What a declared principal that is not connected would be allowed is [`aouda policy explain`](../reference/cli.md#policy-explain), offline. **Settings → Declaration** shows what the server runs on and exports it.
+- **Auth database.** *Server* is `_serverauth`; one more button per application auth database (a database of kind `application`). With none, the page says so: choose *Create `auth` and link* when you create a database, or declare one. The auth database and the tab are in the address: `/settings/access?authDatabase=<name>&tab=<id>`.
+- **Tabs.** *Who am I*, *Principals*, *Roles*, *Sign-up* (application auth databases only, `_serverauth` takes no signup), *Sessions*, *Audit log* and *OIDC discovery*. Below, `…` is `/api/auth/{authDatabase}`.
+
+| Tab | Shows, and lets an operator | Server routes | The principal needs `manage` on |
+|---|---|---|---|
+| *Who am I* | [`whoami`](../auth/whoami.md) of the connection's own credential: the principal (id, source, disabled), the credential (type, id, source, version, root, created, expires, parent, a limited key's statements, a session's `signedInWith`, `aal`, issuer and subject), the listener, the `permissionVersion`, the roles, attributes and every statement with where it came from. A **Policy database** field filters the policy to one database. **Create a limited key** (below) | `GET /api/auth/whoami[?database=]`, `POST /api/auth/keys` | nothing: any credential may ask who it is, and may limit itself |
+| *Principals* | The list, searched by name and filtered by source (all, declared, runtime, signup, builtin). **Create principal** (a slug or an email; a password only for an email; description, roles and attributes; add its statements on its page once it exists). For one principal: save its name (a rename keeps the id), description, roles, statements and attributes; **Disable** / **Enable**; **Delete** (type the name; its credentials and sessions end). `anonymous` takes statements and attributes only, and Studio says that what is granted there is public | `…/principals`, `…/principals/{name}` | `<auth>/principal/*` for the list and a create; the principal for the rest. A write must also cover every statement it grants |
+| *Roles* | The roles, built-ins (`admin`, `writer`, `reader`) read-only; **Create role**; a role's description and statements, who holds it and how many principals it reaches; **Delete** names its holders | `…/roles`, `…/roles/{name}` | `<auth>/role/*`, or the role |
+| *Sign-up* | **enabled**, the roles and the statements a signed-up principal gets, **Save sign-up**. It warns that people who sign up can do nothing until you grant them something | `…/signup` | `<auth>` |
+| *Sessions* | The sessions of the server auth database (user, device, IP, created, expires); **Revoke this session**, **Revoke all for this user** | `/api/auth/admin/sessions` | the server auth database and its principals |
+| *Audit log* | The audit rows, filtered by user id, action, and a from / to date | `/api/auth/admin/audit-log` | the server auth database and its principals |
+| *OIDC discovery* | The OIDC discovery URL and the JWKS URL of the auth database, each with **Copy** | none (the URLs are built) | nothing |
+
+**Credentials of a principal.** The principal's page lists each credential by id and kind (a stored key, a limited key, a derived key, an OIDC trust, whether a password is set), with its name, source, who made it, when it expires and its parent. A secret is never listed.
+
+- **Mint key** (name and expiry are optional; no expiry is the default). The key is shown **once**, in a box that is not an input, with **Copy**; closing without copying asks first, and the box clears itself after ten minutes or when the connection changes. The server keeps only a hash.
+- **Add trust** (an OIDC trust): issuer (`https://…`), audience, subject and optional claims; a workload exchanges its issuer's token at `POST /api/auth/oidc/token`. An issuer the server cannot reach by discovery needs `jwks`, which exists only in the declaration.
+- **Revoke** a stored or limited key, and **Delete** one (an OIDC trust is **Remove**): the sessions and sockets holding it end at once, or, for a trust, within the sessions' lifetime (at most an hour). Revoking the credential Studio is using says that you will be signed out. A limited key dies with its parent.
+- **Create a limited key** (on *Who am I*): a short-lived key for the connected principal alone. **expiresIn** is an ISO 8601 duration (presets 15 min to 24 h); choose *Narrow to these statements* (one statement) or *No narrowing — expires only*. It can only narrow what the principal holds.
+
+**Statements.** The editor offers the actions `read`, `write`, `execute`, `manage`, `delete`, `set-identity` and `*`, the resources (`server`, `<db>`, `<db>/table/<t>`, `<db>/query/<q>`, `<db>/mutation/<m>`, `<authdb>/principal/<n>`, `<authdb>/role/<r>`), a **Where (JSON)** field, **Embargo seconds** on a `read`, and an **unrestricted** box that asks for confirmation. A member the form does not show is carried unchanged. A warning the server returns with a save (a statement that names a column its table lacks) is shown under the statements. A statement's `where` is also summarised as text; for a `where` that has both `and` and `or` that text carries no parentheses, so read the JSON when it matters.
+
+**Declared objects.** A declared principal, role or `signup` setting is read-only: a badge says "Declared in `<file>` at `<pointer>`", the fields are disabled, and the one thing the server still allows is offered: **Disable** / **Enable** for a declared principal, and **Revoke** for a declared key or derived key ("Revoked here, still declared": the revocation is kept on this server only, and the file still declares the key, so remove it there). A `409 DECLARED_IN_CONFIGURATION` is shown as the server wrote it.
+
+**Refusals.** A refusal shows the server's code and message and its `remedy`: the statement to grant (`grant`), a `where` to add (`add-where`), the credential to use (`use-credential-of`), or "an operator must act". Studio offers the next step and performs none; it never turns `unrestricted` on for you.
+
+**A table's schema view** has a **Who can reach this table** card (**Show** / **Hide**): the statements of the governing auth databases that name the table, with who holds each, a link to the Access page, and a note that anonymous and signup rows are reachable by anyone. It is a listing, not a decision (a limited key, a credential or `disabled` are not applied); it needs `manage` on the principals to read, and says when it is incomplete.
+
+What a declared principal that is not connected would be allowed is [`aouda policy explain`](../reference/cli.md#policy-explain), offline.
+
+> **Known limit.** *Sessions* and *Audit log* are the server auth database's (`/api/auth/admin/…`). Selecting an application auth database there makes Studio ask `/api/databases/{db}/auth/admin/sessions` and `…/audit-log`, which the server does not have: the answer is `404`.
+
+### Declaration
+
+**Settings → Declaration** (`/settings/declaration`; **BL-1463, 0.16.0**) shows what the server runs on and lets an operator ask what a reload would do. Its menu entry, like Access, shows for a credential that holds `manage` on `server`. Every call below asks `manage` on `server`, on the admin listener. See [Declare a server in one file](declaration.md).
+
+| Part | What it shows or does | Server route |
+|---|---|---|
+| Header | Where the declaration comes from ("Declared by a file", "Declared in code by the host (no file)", or "Nothing is declared"), the file, the overlay, the environment, the plan hash (**Copy hash**), and the last start or reload: its origin, time, outcome and counts of errors, warnings, info and changes | `GET /api/admin/declaration` |
+| Tree | The declaration document the server runs on, as a tree with **Copy pointer** on each node. A credential is its public id only; a key-shaped string anywhere is shown as `aouda_<id>`. Shown when the source is a file | the same |
+| Findings | The findings of the last start or reload: severity, code, stage, where, message and fix | the same |
+| **Plan** | Runs a **dry-run** reload and shows the outcome ("Clean", "N changes would be applied by `aouda reload`" or "Errors"), the stages, the findings, the schema changes per database and file, the counts of the other changes and what was not checked. It cannot apply anything: "Studio cannot apply a declaration. Change the file, then run `aouda reload`." | `POST /api/admin/reload?dryRun=true` |
+| **Export** | On an explicit press, the server's current state as `aouda.json` and its schema files (**Copy** or **Download** each), an **Origins** tab (which pointers are declared and which were created at runtime, not in the file) and the server's notes. The file holds the SHA-256 of each stored key: it cannot sign in, but it is secret-class, so save it to the repository that owns your `aouda.json`, not to a chat. Studio keeps none of it after the dialog closes | `GET /api/admin/declaration/export` (no-store) |
+
+The export writes an audit row, so a node that does not accept writes (a secondary) answers `503 READ_ONLY`: export from the primary. A refusal (`401`, `403`) is shown with its code and `remedy`; with no credential the page says the server refused it, and **Export** stays off until the view has loaded.
+
+**A declared database or schema is not edited in Studio** (**BL-1463, 0.16.0**). The **Databases** list badges a declared database and disables its **Drop**; **Create database** refuses a declared name before sending it; on a declared schema the Columns, Storage Policy, Checks and route / tee editors, the materialized-query and named-artifact editors, **Create table** and the **Migrations** apply wizard are disabled and badged with the file and the pointer, and Migrations shows **Plan** instead (a branch merge can be planned, not executed). A database declared without a schema keeps its schema editors. Data writes stay live. A `409 DECLARED_IN_CONFIGURATION` is shown as the server wrote it. While the declaration cannot be read (loading, refused, failed), nothing is disabled: the server's `409` is the authority.
 
 ### Streaming Explorer
 
@@ -912,3 +1013,5 @@ Tables with derived columns, checks, or transforms reject `:begin` unless the cl
 | P36 | Column evolution UI (alter type/null/encoder/references, PK, reorder, Toggle AutoId via `alterColumn`) | `aouda-studio/docs/tasks/P36-*` |
 | P37 | Data-plane 404 connect copy | `aouda-studio` P37 slices |
 | P39 | Operator parity: named artifacts, insert-time compute, route/tee, named-query subscribe, schema-file MQ maps, identity-insert, bulk-load intent copy | `aouda-studio/docs/tasks/P39/` |
+| Principals (0.16.0) | Access page (principals, roles, statements, sign-up, credentials, OIDC trusts, limited keys, who you are), Declaration page (view, plan, export), declared databases and schemas read-only, one credential from `whoami`, the old auth and keys pages removed | `aouda/docs/tasks/Principals/` |
+| Operability (**next train**) | Reads the cut contracts (member lag from the replication status, a numeric materialized-query lag), a grid that sorts, edits and deletes what it shows, filter groups the worksheet runs, Expression columns and `explain`, retention, point-in-time restore and prune, a real-server smoke test | `aouda/docs/tasks/Operability/` |

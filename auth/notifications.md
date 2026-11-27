@@ -37,7 +37,7 @@ Application Auth uses server-level notification services:
 | MFA TOTP (authenticator app) | — | — |
 | MFA phone factor | — | Required |
 
-See [Use Case: Self-Service Password Reset](use-cases.md#20-use-case-self-service-password-reset) and [Use Case: Two-Factor Authentication (MFA)](use-cases.md#21-use-case-two-factor-authentication-mfa).
+See [Use cases: Password](use-cases.md#password) and [Use cases: MFA](use-cases.md#mfa).
 
 ---
 
@@ -595,6 +595,6 @@ Example (app repo):
 ## See also
 
 - [Setup and flows](setup.md) — signup, sign-in, password reset
-- [Use Cases](use-cases.md) — Password reset (§20), MFA (§21), onboarding (§19)
-- [Reference](reference.md) — Endpoint tables, errors, local developer setup (§27)
-- [Local developer setup](reference.md#27-local-developer-setup-for-consumer-applications) — `aouda start`, keys, IDE workflows
+- [Use Cases](use-cases.md) — password reset, onboarding, MFA
+- [Reference](reference.md) — Endpoint tables, errors, local developer setup
+- [Local developer setup](reference.md#testing) — `aouda start --dev-admin`, `AoudaTestServer`

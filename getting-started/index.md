@@ -1272,7 +1272,7 @@ The SDK calls above still take rows.
 Rules of thumb:
 - Prefer identity-insert over temporarily disabling `autoIncrement` for one-shot seeds.
 - Prefer [bulk-load identity-insert](../guides/bulk-load.md) when the seed is large enough for the P20 protocol.
-- Studio does not expose an identity-insert UI — use the API/SDK (BL-130/131 Non-Scope).
+- Studio's Add Row dialog has an identity-insert checkbox for a table with an identity column; the API and the SDKs take it too (BL-130/131).
 
 ### Explicit Schema Definition
 
@@ -1739,7 +1739,7 @@ The three databases are linked to the auth database `auth`; a key of `auth` sent
 | Code | HTTP | Meaning |
 |---|---|---|
 | `AUTH_CREDENTIAL_MISSING` | 401 | No credential on the admin listener. Remedy `sign-in` |
-| `AUTH_KEY_MALFORMED` | 401 | Bad shape or checksum, or a retired `mk_` key. Remedy `fix-key` |
+| `AUTH_KEY_MALFORMED` | 401 | Bad shape or checksum, or a key of a retired format. Remedy `fix-key` |
 | `AUTH_CREDENTIAL_INVALID` | 401 | Unknown id, wrong secret, or a bad session. Remedy `fix-key` |
 | `AUTH_CREDENTIAL_EXPIRED` | 401 | The key or session has expired. Remedy `renew` |
 | `AUTH_CREDENTIAL_REVOKED` | 401 | Revoked, or the principal is disabled. Remedy `none` |

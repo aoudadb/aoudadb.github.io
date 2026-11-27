@@ -97,5 +97,5 @@ An import API that accepts a key you supply, and a runtime API that adds a crede
 
 - [Defaults reference](defaults-reference.md#configured-api-keys) - the refused key settings and their replacements
 - [Declared access](declared-access.md) and [The declaration file](../reference/declaration.md) - principals and `credentials`
-- [HTTP API: credential types](../reference/http-api.md#credential-types)
+- [HTTP API: credential types](../reference/http-api.md#credentials-in-a-request)
 - [Server configuration](server-configuration.md)
