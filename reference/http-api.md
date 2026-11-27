@@ -3793,7 +3793,7 @@ column as null). It reads what a `:nearest` reads — the sealed vectors and the
 model version it was inserted with — and **flushes nothing and waits for no flush** (**BL-1733, BL-1735, next train**; before, it first
 flushed every edge and vector buffer of the database, with no deadline, and a batch being flushed refused it). A vector inserted while the
 export runs may or may not be in it. A deleted or truncated vector is not in it, sealed or buffered (**BL-1734, BL-1811, next train**), and
-a bulk-loaded table is exported (before, the export of a bulk-loaded vector table stopped at its first table segment as damaged).
+a bulk-loaded table is exported (**BL-1958, next train**; before, the export of a bulk-loaded vector table stopped at its first table segment as damaged).
 
 Needs a `read` statement on the table.
 
