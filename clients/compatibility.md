@@ -28,9 +28,36 @@ package built for `net10.0` does not restore into a `net8.0` project, so an appl
 
 ---
 
+## The protocol version: one rule (**BL-1830, next train**)
+
+A server speaks **one** protocol version, and so does every SDK release: `3` from the next train. It travels in the
+`X-Aouda-Protocol-Version` header of every HTTP and long-poll request and in the realtime `auth` message's `protocol_version`, and the
+server answers with its own in every response's header and in `auth_ok.protocol.version` ([HTTP API: Protocol
+Version](../reference/http-api.md#protocol-version)).
+
+**An SDK and a server of different protocol versions do not talk.** The request is refused — `400 PROTOCOL_VERSION_UNSUPPORTED` on
+HTTP, `auth_error` of that code on the socket — and both SDKs end for good on it (`AoudaProtocolVersionException` in C#,
+`AoudaProtocolVersionError` in TypeScript): no retry, no reconnect, no fallback to long poll. An SDK also refuses a server whose
+`auth_ok` names another version, or none. **There is no window**: use the SDK release published with the server, and move the server,
+the SDKs and Studio's `@aouda/client` pin together. A request that names no version — `curl`, a probe, the CLI, Hub — is served.
+
+| Release | Protocol version | What a client of another release gets |
+|---|---|---|
+| Server **next train**, `Aouda.Client` **next train**, `@aouda/client` **next major** | `3` | — |
+| Server `0.17.1` and before | `2` (the header accepted `1`–`2`, and nothing moved it on a wire change) | A new SDK (sends `3`) is refused on every HTTP call `400 UNSUPPORTED_VERSION` ("Supported versions: 1-2"); its socket is ended by the SDK (the old `auth_ok` says `1`) |
+| `Aouda.Client` `0.17.1` and before | sends `2` | Against a server of the next train: `400 PROTOCOL_VERSION_UNSUPPORTED` on every data call; a socket opens if nothing else is called (its `auth` names none) |
+| `@aouda/client` `0.17.0` and before, Studio `0.16.0` and before | send `1` | The same |
+
+The protocol version moves by one for every release whose wire contract changed since the last, additive or not; every change
+between two releases shares that one bump.
+
+---
+
 ## Compatibility matrix
 
-Update this table when shipping breaking server, client, or Studio changes.
+History: the matrix below is kept as the record of which releases went together before the protocol version meant something. Its
+*Wire protocol* column is the header's number, which stayed `2` across breaking wire changes up to 0.17.1. Update this table when
+shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
@@ -77,7 +104,7 @@ Update this table when shipping breaking server, client, or Studio changes.
 
 ### Reading the matrix
 
-- **Wire protocol** — HTTP header `X-Aouda-Protocol-Version`. Server and clients must agree on supported protocol versions.
+- **Wire protocol** — the `X-Aouda-Protocol-Version` header's number. From the next train a server and a client of different numbers do not talk ([the one rule](#the-protocol-version-one-rule-bl-1830-next-train)); up to 0.17.1 the server accepted `1`–`2` and the number did not move on a wire change.
 - **`@aouda/client`** — Minimum npm version for a server generation. Studio may pin a specific patch (see `aouda-studio/package.json`).
 - **`Aouda.Client`** — NuGet version for .NET apps and Hub; tracks API parity with the TS client but versions independently.
 - **Studio** — Requires a server reachable at runtime; build-time dependency is only `@aouda/client`.
