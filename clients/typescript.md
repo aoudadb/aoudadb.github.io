@@ -738,6 +738,12 @@ fewer rows in one request, or have the operator raise the database's memory shar
 statement. Before, a write this large waited and was refused `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After`, every time, and a
 `retryPolicy` re-sent it to its bound. See the [error codes](../reference/http-api.md#request-validation-errors-4xx).
 
+**A read whose materialized query's result was replaced while it was starting is `409 MQ_RESULT_REPLACED`**, thrown as
+`AoudaConflictError` (**BL-1932, next train**) and re-sent under a `retryPolicy`: nothing was read, and the next read is bound to the
+query's current result. The server answers it when the query was dropped and re-created with other columns during the read (or its
+result rebuilt more than four times during it); it was `500 INTERNAL_ERROR` on `/query` and `400 INVALID_REQUEST` on
+`materializedQueries.query`, which were not re-sent.
+
 **A realtime message larger than the server reads in one is `MESSAGE_TOO_LARGE`** (**BL-1938, next train**): 64 KiB before
 authentication, `Aouda:WebSocket:MaxMessageBytes` (4 MiB by default) after. On a WebSocket a write stream whose frame is refused this
 way ends with `AoudaWriteStreamError` of that `code`, and the frame is not sent again; on long-poll the `/send` is `413` and rejects
