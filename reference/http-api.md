@@ -4287,6 +4287,14 @@ Component-by-component status (catalog, WAL, replication, backup, materialized q
 
 The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, 0.3.0** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, 0.3.0**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, or a database holding more than 110 % of its ceiling. (**WorkloadCore S06, 0.3.0**: the budget is never tightened in-process any more, so there is no "tightening" verdict; a database's ceiling is the server's budget unless it has a hard cap.)
 
+The `archive` component (**BL-1843, next train**) judges **each open database's own WAL archive** and names the databases that are
+behind: `degraded` when a database's oldest sealed segment not archived was sealed `Aouda:Health:Thresholds:ArchiveStaleCycleMinutes`
+(default 10) or more minutes ago — a destination that hangs, a worker that stopped, a segment that cannot be shipped — or when its last
+archive step failed more recently than a pass last succeeded. Each database's `details` entry (`db:<name>`) has `archiveLagMinutes`,
+`minutesSinceLastError` and `minutesSinceLastSuccess`. It is never critical. It judged the server's archive counters as a whole, so one
+database whose archive had stopped was hidden while another's cycled cleanly. The same numbers are `aouda.wal.archive_lag_ms` and
+`aouda.wal.archive_last_error_age_ms` on `GET /api/admin/metrics`.
+
 **Operator wait (create / schema apply):** wait for `GET /ready` 200 **and** `GET /api/databases/{name}` 200 with `state=Active`. After `DELETE`, GET `{name}` 404 means the database is gone from serving.
 
 #### `GET /api/server/memory`
@@ -4507,7 +4515,8 @@ Refusals: `401 AUTH_CREDENTIAL_MISSING` (and the other credential refusals), `40
 `503 SERVER_STARTING` before the databases are open, `503 SETUP_REQUIRED` in setup mode, `400 INVALID_REQUEST` for a history range out of
 bounds. `GET /api/admin/metrics/summary`, `GET /api/admin/metrics/{subsystem}`, `GET /api/server/metrics` and
 `GET /api/server/databases/{db}/metrics` are gone: they answer `404`. `GET /api/server/memory` stays, a diagnostic (its `walBytesOnDisk`
-is the open databases' own logs, summed).
+is the open databases' own logs, summed, and its `walBytesReclaimable` the open databases' own last retention runs, summed: both were the
+last database's number).
 
 #### The answer
 
@@ -4569,7 +4578,7 @@ What a reader can rely on:
 - A database that is not open has only its `aouda.database.lifecycle_state` and `aouda.database.open_state` (`0`) points.
 - **Resets.** A counter starts at `0` when the process starts and only rises; a different `server.startedAt` means it was reset, and a
   reader takes the new value as the increase. `aouda.wal.appended_bytes_total` is the log's position, which a restart keeps. The *since
-  open* counters (the scrubber's, the stall's) start over when their database opens again: a lower value is a reset.
+  open* counters (the scrubber's, the stall's, the log's syncs) start over when their database opens again: a lower value is a reset.
 - **Polling.** The server builds the answer at most once a second and gives every poll within that second the same body. Studio polls
   every 10 s while a monitoring view is open, never faster than 5 s. No rate, ratio or percentile is computed by the server: a rate is
   `(v2 − v1) / (t2 − t1)` over two answers with the same `startedAt`.
@@ -4614,11 +4623,11 @@ What a reader can rely on:
 | `aouda.wal.appended_bytes_total` | counter | `database` | the log's position: bytes ever appended (kept over a restart); no `wal` point for a database without a log |
 | `aouda.wal.frames_total` | counter | — | frames appended |
 | `aouda.wal.group_writes_total` | counter | — | contiguous writes; frames ÷ writes is the group-commit size |
-| `aouda.wal.fsyncs_total` | counter | `database` | times the log was made durable: a sync, or a write-through write. Since open *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
-| `aouda.wal.fsync_ms_total` | counter | `database` | time in those. Since open *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.fsyncs_total` | counter | `database` | times the log was made durable: a sync, or a write-through write. At `os` a commit of an `os` table is none (the operating system writes it out); a `strict` table's commit and a segment's seal are one each. Since open |
+| `aouda.wal.fsync_ms_total` | counter | `database` | time in those. Since open |
 | `aouda.wal.size_bytes` | gauge | `database` | bytes of segment files on disk (preallocated ones included; without durable branches) |
-| `aouda.wal.segments_count` | gauge | `database` | segment files *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
-| `aouda.wal.reclaimable_bytes` | gauge | `database` | bytes below every slot and the redo floor at the last retention run *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.segments_count` | gauge | `database` | segment files |
+| `aouda.wal.reclaimable_bytes` | gauge | `database` | bytes below every slot and the redo floor at the last retention run |
 | `aouda.wal.fail_stopped_state` | gauge | `database` | `1` when a write or sync failed and the log refuses appends until the database is reopened |
 | `aouda.wal.refusals_total` | counter | `reason` | writes refused: `capacity` (`WAL_CAPACITY_EXCEEDED`, one per write) or `disk_full` (one per group write, whatever the number of commits in it) |
 | `aouda.wal.corrupt_frames_total` | counter | — | frames a reader stopped at |
@@ -4626,8 +4635,8 @@ What a reader can rely on:
 | `aouda.wal.slot_lag_bytes` | gauge | `database` | the log's position minus its lowest slot; no point without slots |
 | `aouda.wal.slots_invalidated_total` | counter | — | slots dropped because they held too much log |
 | `aouda.wal.archive_lag_bytes` | gauge | `database` | the log's position minus the archived prefix; no point without an archive destination. The unsealed segment always counts |
-| `aouda.wal.archive_lag_ms` | gauge | `database` | age of the oldest sealed segment not archived; `0` when none *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
-| `aouda.wal.archive_last_error_age_ms` | gauge | `database` | since the last failed archive step; no point when none since open *Not yet served* (**BL-851, next train**: in the contract, not in the answer until its source is built) |
+| `aouda.wal.archive_lag_ms` | gauge | `database` | age of the oldest sealed segment not archived; `0` when none |
+| `aouda.wal.archive_last_error_age_ms` | gauge | `database` | since the last failed archive step; no point when none since open |
 | `aouda.wal.archived_bytes_total` | counter | — | bytes uploaded |
 | `aouda.wal.archive_errors_total` | counter | — | failed archive steps |
 | `aouda.checkpoint.age_ms` | gauge | `database` | since the last durable checkpoint; **no point before the first** (the coordinator's own clock starts at open and would read as fresh) |
