@@ -4717,7 +4717,9 @@ What a reader can rely on:
 `GET /api/admin/metrics/history` gives a chart its first paint. The server samples every 10 s from the start of the process into a ring of
 24 hours, in memory only (a restart empties it). `minutes` is 1–1440 (default 60), `interval` 10–3600 seconds (default 60); a value out of
 range is `400 INVALID_REQUEST` naming the parameter and its range. A point of an interval is the **last sample in it**; a counter stays
-cumulative.
+cumulative. A value the server did not know at that sample is **`null`**, never `0` (**BL-1972, next train**): `aouda.memory.rss_bytes`
+and `aouda.memory.managed_heap_bytes` before the memory governor's first sample, about 10 s after a start (they were written as `0`, so
+every chart started at 0 MB). A chart leaves a `null` out.
 
 ```json
 {
