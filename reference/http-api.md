@@ -1848,7 +1848,7 @@ that opened with no tables and could be neither deleted nor created again.
 | Status | Code | When |
 |--------|------|------|
 | `409` | `BRANCH_EXISTS` | The name is taken (without regard to case), being deleted, or being created by another request |
-| `409` | `BRANCH_BUSY` | The create could not take its cut now: a backup is capturing the branch set; or (**BL-1760, next train**) a flush still running in the database (an edge or vector flush included), an edge or vector buffer that could not be sealed (the message names the table), an open write, the cut past the few seconds the commit fence may stay closed, or segment retirements that kept moving. The message names which, and the `remedy` names a backup only when one held it. Nothing was changed; no `Retry-After` — retry the create |
+| `409` | `BRANCH_BUSY` | The create could not take its cut now: a backup is capturing the branch set; or (**BL-1760, next train**) a flush still running in the database (an edge or vector flush included), an edge or vector buffer that could not be sealed (the message names the table, and the `remedy` says that a flush which keeps failing is settled only by a restart of the database), an open write, the cut past the few seconds the commit fence may stay closed, or segment retirements that kept moving. The message names which, and the `remedy` names a backup only when one held it. Nothing was changed; no `Retry-After` — retry the create |
 | `500` | `BRANCH_SET_DAMAGED` | (**BL-1712, next train**) The database's branch list or branch segment references file is damaged; the message names it. No retry helps: restore the file from a backup or repair it. Every branch route answers the same |
 
 #### `POST /api/databases/{db}/branches/{name}/diff`
