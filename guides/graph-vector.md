@@ -121,8 +121,8 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 | Edge table label (`EdgeLabel`) | `null` | No label filter on traversal operators; all edges in the table are considered one type. |
 | Vector quantization (`VectorQuantization`) | `None` (hot), `RaBitQ` when sealing cold | Hot segments store raw `float32`. Cold sealing applies RaBitQ by default when `Quantization` is set in `VectorColumnConfig`. Passing `None` in `VectorColumnConfig` stores raw floats in cold segments too. |
 | IVF cell count (`IvfCells` in `VectorColumnConfig`) | Caller-specified; no engine-side heuristic override | The engine uses exactly the value supplied. For small corpora (<10K vectors), `IvfCells = 1` (single cell, brute-force) is effective. For 1M+ vectors a common starting point is `sqrt(N)` cells. |
-| Distance metric (`VectorDistance`) | Caller-specified | No default; must be set explicitly in `VectorColumnConfig`. Cosine for normalized embeddings; L2 for Euclidean spaces; DotProduct for asymmetric models. |
-| Embedding model version on insert | `null` | When `null`, segment manifests record no model version. Specify `embeddingModelVersion` in `InsertVectorsAsync` to enable multi-model coexistence and future Drift-Adapter migration (Stage 2). |
+| Distance metric (`VectorDistance`) | Caller-specified | No default; must be set explicitly in `VectorColumnConfig`. Cosine for normalized embeddings; L2 for Euclidean spaces; DotProduct for asymmetric models. A search answers, smaller nearer: `L2` the squared Euclidean distance, `Cosine` one minus the cosine similarity, `DotProduct` the **negative** inner product, so the largest inner product comes first (**BL-1812, next train**; before, a `DotProduct` column was ranked, and its distances answered, by squared L2). |
+| Embedding model version on insert | `null` | Each vector keeps the version it was inserted with — before a flush, after it, after a crash, in an export — and a sealed segment holds vectors of one version, so its manifest names that one (`null`: none). (**BL-1733, next train**; before, a buffer stamped the last version it had been given on every vector of its flush.) Specify `embeddingModelVersion` in `InsertVectorsAsync` to enable multi-model coexistence and future Drift-Adapter migration (Stage 2). |
 | MdVector FDE auto-derive (`Fde`) | `true` | The `MdVectorColumnConfig` property reserves a Fixed Dimensional Encoding companion column slot for Stage 2. No FDE is computed in Stage 1; the field is stored only. |
 | `PkUniqueness` on edge tables | `PkUniquenessMode.Strict` | An edge insert (`POST …/edges`, `InsertEdgesAsync`) checks no key, so on an edge table a primary key does not name one row, whatever the mode: a `DELETE`, `UPDATE`, upsert or batch on an edge table removes exactly the rows it matched (logged by row, as on a `Recent` / `BestEffort` table), never every row that shares a matched key (**BL-1676, next train**; before, a keyed delete replayed after a crash also removed a copy of the key inserted after it). |
 
@@ -292,10 +292,25 @@ Aouda extends its columnar storage model with two new primitives alongside the e
 Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, not separate tables. They may appear on any tabular table:
 - `DataType.Vector` — fixed-dimension dense float vectors. Each insert batch is WAL-framed, buffered in a per-column `VectorHraBuffer`, and flushed per IVF cell. Cold sealing optionally writes RaBitQ or PQ companion files.
 - `DataType.MdVector` — variable-length multi-vector storage (ColBERT / ColPali style). Written to `col_{colId}_mdvec.bin`. The companion FDE column for MaxSim retrieval is deferred to Stage 2.
-- **An inserted vector is found by `NearestNeighborsAsync` only after its buffer flushes** (BL-1728, open). The insert is acknowledged and
-  durable — its frame is logged and replayed after a crash — but the search reads flushed vector segments only, not the write buffer, so a
-  vector inserted a moment ago is not in its answer until the buffer flushes: the background pass's interval or row threshold, a clean
-  close, a [backup](backup.md)'s seal, or a vector export (`aouda dump`). (The graph operators do read the buffered edges.)
+- **An inserted vector is found by `NearestNeighborsAsync` as soon as the insert returns** (**BL-1728, next train**). A search reads one
+  view of the column: its write buffers (every partition's, scored whole) and its sealed segments, each vector in exactly one of them — also
+  while a flush is sealing a batch, so a vector is never found twice or missed at a flush, and the answer is the same before the flush and
+  after it. A table at durability `memory` is never flushed; its vectors are searched from the buffer. Before, a search read sealed
+  segments only, and nothing flushed a vector buffer by time (it flushes at 100 000 buffered vectors, a clean close, a
+  [backup](backup.md)'s seal), so up to 99 999 acknowledged vectors were not found — and a `memory` table's never.
+- **Equal distances are ordered by row key** (**next train**): of two vectors at the same distance the smaller row key comes first, and
+  at the `k`-th place the smaller key is kept, whatever segment or buffer each came from.
+- **A key inserted again is another copy.** Each copy is a candidate, buffered or sealed (two model versions on one key coexist, see
+  Scenario 3); a search can return a key more than once.
+- **A vector deleted and inserted again before a flush is the new copy only** (**BL-1813, next train**; before, the re-insert undid the
+  delete and the deleted copy was found too). `DeleteVectorAsync` removes the buffered copies of the key at once, and waits for a flush of
+  that buffer that is running. ⚠️ **A vector already sealed is not deleted** (BL-1734, open): a delete reaches only the copies still in
+  the write buffer, so a copy flushed before it is still found and exported. **A row's `DELETE` does not delete its vector**: a vector is
+  not a row (it may have none, §2.7.6), and only `DeleteVectorAsync` removes it.
+- **The vector export flushes nothing** (**BL-1735, next train**): `GET …/vectors/{column}:export` (what `aouda dump` reads) reads the same
+  view as a search — sealed and buffered vectors, each with its version — and waits for no flush. Before, it first flushed every edge
+  and vector buffer of the database, behind the flush pass, with no deadline: a reader cut every writer's segments, and while a backup
+  held the flushes an export waited.
 - **A flush that failed does not lose the buffer**. A graceful restart after an edge or vector flush
   failed replays the WAL for those rows — the open is slower, nothing is lost; before, the clean-shutdown marker was written before the
   last flush and a failed one lost the buffered edges or vectors. An edge or vector flush takes its segment ids from the catalog's allocator
@@ -306,11 +321,11 @@ Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, n
 
 ### 2.7.2 IVF cell assignment and sealed vector segments
 
-IVF (Inverted File Index) cells are realized as Aouda partitions over vector space. At flush time, `IvfCentroidStore` assigns each vector in the HRA buffer to its nearest centroid (by the column's declared distance metric). `VectorSegmentFlusher` writes one sealed segment per IVF cell, then writes optional companion quantization files (`*.rabitq`, `*.pq`) alongside the raw fp32 pages.
+IVF (Inverted File Index) cells are realized as Aouda partitions over vector space. At flush time, `IvfCentroidStore` assigns each vector in the HRA buffer to its nearest centroid — by **squared L2, whatever the column's metric** (the centroids are trained the same way); a search then probes the cells whose centroids are nearest the query by the column's declared metric. IVF is approximate either way. `VectorSegmentFlusher` writes one sealed segment per IVF cell and embedding-model version (**BL-1733, next train**), then writes optional companion quantization files (`*.rabitq`, `*.pq`) alongside the raw fp32 pages.
 
 The `IvfCellId` and `QuantizationMethod` fields in `SegmentManifest` identify which cell and what quantization a segment belongs to.
 
-**Key invariant:** `NearestNeighborsAsync` filters segments by IVF cell (partition pruning, Filtered ANN layer 1) before brute-force distance computation. A `partitionKey` argument further narrows the scan to one user-visible partition.
+**Key invariant:** `NearestNeighborsAsync` filters sealed segments by IVF cell (partition pruning, Filtered ANN layer 1) before brute-force distance computation; the buffered vectors, which have no cell yet, are all scored. A `partitionKey` argument further narrows the scan to one user-visible partition, buffered vectors included.
 
 ### 2.7.3 HRA freeze-and-swap is the same for all three primitives
 
@@ -318,7 +333,7 @@ The `IvfCellId` and `QuantizationMethod` fields in `SegmentManifest` identify wh
 
 ### 2.7.4 Embedding model version per segment
 
-`InsertVectorsAsync` accepts an optional `embeddingModelVersion` string. This is stored in the WAL frame and propagated to `VectorHraBuffer`; at flush time `VectorSegmentFlusher` writes it to `SegmentManifest.EmbeddingModelVersion` and to `SegmentEntry.EmbeddingModelVersion` in the catalog. Multiple model versions can coexist on the same table — the planner can pick the right segment set per query. This is the Stage-1 groundwork for the Drift-Adapter model-upgrade path in Stage 2.
+`InsertVectorsAsync` accepts an optional `embeddingModelVersion` string. This is stored in the WAL frame and kept with each vector in `VectorHraBuffer`; at flush time `VectorSegmentFlusher` writes one segment per (IVF cell, version) and the version to its `SegmentManifest.EmbeddingModelVersion` (**BL-1733, next train**). The catalog's `SegmentEntry.EmbeddingModelVersion` is **not** set for a vector flush: read the manifest. Multiple model versions can coexist on the same table. This is the Stage-1 groundwork for the Drift-Adapter model-upgrade path in Stage 2.
 
 ### 2.7.5 Stage-4 reservation fields are inert in Stage 1
 
@@ -406,12 +421,12 @@ Relevant tests: `tests/Aouda.Engine.Storage.Tests/Edge/SealedEdgeSegmentTests.cs
 1. Caller invokes `AoudaEngine.InsertVectorsAsync("documents", "embedding", rowKeys, vectorData, embeddingModelVersion: "text-embedding-3-large@v1")`.
 2. Engine resolves table; validates column `DataType == Vector`; confirms `vectorData.Length == rowKeys.Length * dimensions`.
 3. WAL frame `WalTag.VectorInsertV2` written (**BL-923, 0.3.0**; row keys, float data, model version, partition key).
-4. `VectorHraBuffer.InsertVectors` buffers rows.
-5. `HraManager` threshold trigger → freeze-and-swap.
-6. `IvfCentroidStore` assigns each vector to nearest centroid by declared distance metric.
-7. `VectorSegmentFlusher` groups by IVF cell; for each cell: writes raw fp32 column pages + row-key companion; if `Quantization == RaBitQ`, writes `*.rabitq`; if `PQ`, writes `*.pq`.
+4. `VectorHraBuffer.InsertVectors` buffers rows, each with its model version; a search finds them from here on (**BL-1728, next train**).
+5. `HraManager` threshold trigger (100 000 buffered vectors; there is no interval), a clean close or a backup's seal → freeze-and-swap.
+6. `IvfCentroidStore` assigns each vector to its nearest centroid by squared L2.
+7. `VectorSegmentFlusher` groups by IVF cell and model version; for each group: writes raw fp32 column pages + row-key companion; if `Quantization == RaBitQ`, writes `*.rabitq`; if `PQ`, writes `*.pq`.
 8. `SegmentManifest` written with `IvfCellId`, `QuantizationMethod`, `EmbeddingModelVersion`; Stage-4 reservation fields written as zero/null.
-9. `NearestNeighborsAsync` prunes to cells whose centroid is within a beam width of the query; for each candidate cell, decodes pages and computes distances; merges top-k.
+9. `NearestNeighborsAsync` captures the column's buffers, lists its sealed segments, and leaves out those a captured batch's flush made; prunes the segments to the √cells cells whose centroids are nearest the query (by the declared metric); decodes their pages and scores the buffered vectors; keeps the top-k by distance, then row key.
 
 Key observability: `SegmentManifest.IvfCellId`, `SegmentManifest.QuantizationMethod` visible in manifest diagnostics.
 
@@ -490,7 +505,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
+| `embeddingModelVersion` | `string?` | `null` | Written to the WAL frame and kept with each vector; at seal, the `SegmentManifest.EmbeddingModelVersion` of the segment that holds it (one version per segment, **BL-1733, next train**) |
 | `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, 0.9.0**; it was "no partition" in one place and a partition in another). The insert's row must satisfy the `where` of the caller's `write` statement, as any insert's (`403 AUTH_ROW_DENIED`) |
 
 ### NearestNeighborsAsync query parameters
@@ -505,7 +520,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 
 | Field | Location | Stage-1 value | Stage-4 semantic |
 |---|---|---|---|
-| `EmbeddingModelVersion` | `SegmentManifest` + `SegmentEntry` (catalog) | Written at seal by `VectorSegmentFlusher` and `BulkLoadAsync` | Used by Stage-2 Drift-Adapter for query-time model-version mapping |
+| `EmbeddingModelVersion` | `SegmentManifest` | Written at seal by `VectorSegmentFlusher` (one version per segment) and `BulkLoadAsync`; the catalog's `SegmentEntry` field is not set for vector segments | Used by Stage-2 Drift-Adapter for query-time model-version mapping |
 | `FrozenTierLayoutVersion` | `SegmentManifest` | `0` | Layout version for frozen segment file format; Stage 4 writes `1`+; `0` = not a frozen segment |
 | `HierarchicalSpfreshCentroids` | `SegmentManifest` | `null` | Coarse centroid blob for hierarchical SPFresh beam search |
 | `S3CompatibleHeader` | `SegmentManifest` | `null` | Self-describing header for catalog-independent frozen segment reads |
@@ -746,7 +761,7 @@ long[] path = await engine.ShortestPathAsync("follows", 42, 99);
 **Expected result checks:**
 - `hood` is ordered by `(Hops ascending, NodeId ascending)`.
 - `path` is `[42, ..., 99]` (both endpoints included) or empty if unreachable.
-- Traversal only considers edges in sealed CSR segments; edges still in `EdgeHraBuffer` become visible after flush.
+- Traversal reads the edges still in `EdgeHraBuffer` as well as the sealed CSR segments (**BL-813, 0.3.0**): an edge is traversable as soon as `InsertEdgesAsync` returns.
 
 ---
 
@@ -798,15 +813,16 @@ await engine.InsertVectorsAsync("docs", "embedding", oldRowKeys, oldEmbeddings,
 await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
     embeddingModelVersion: "text-embedding-3-large@v2");
 
-// Both model versions coexist as separate segments (SegmentManifest.EmbeddingModelVersion tracks each).
-// Queries against NearestNeighborsAsync see all sealed segments regardless of model version.
+// Both model versions coexist: each vector keeps its own, and at a flush they become separate segments
+// (SegmentManifest.EmbeddingModelVersion names each; BL-1733, next train).
+// NearestNeighborsAsync reads every copy — buffered and sealed — regardless of model version.
 // Note: searching across mixed model versions without a Drift-Adapter (Stage 2) may return
 // lower recall for rows encoded by the old model if distance spaces differ significantly.
 ```
 
 **Expected result checks:**
-- `SegmentManifest.EmbeddingModelVersion` reflects the version supplied at insert time.
-- `NearestNeighborsAsync` results include rows from both model-version segments.
+- `SegmentManifest.EmbeddingModelVersion` reflects the version supplied at insert time; the vector export names each vector's.
+- `NearestNeighborsAsync` results include rows of both model versions.
 - Full migration: use `BulkLoadAsync` to re-embed and replace old segments.
 
 ---
@@ -817,9 +833,9 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 
 | Question | Practical answer |
 |---|---|
-| Are edges becoming visible to traversal? | Check cold segment registry for the edge table after flush threshold is crossed (row count ≥ `MinFlushRows`); WAL replay re-populates `EdgeHraBuffer` on restart |
+| Are edges becoming visible to traversal? | An edge is traversable when its insert returns: traversal reads the write buffer (**BL-813, 0.3.0**); WAL replay re-populates `EdgeHraBuffer` on restart |
 | Are vector segments being sealed per IVF cell? | Inspect `SegmentManifest.IvfCellId` fields in manifests; one manifest per cell per flush cycle |
-| Is ANN returning fewer results than expected? | If IVF cells are not yet sealed (data still in HRA), `NearestNeighborsAsync` returns empty — Stage 1 searches sealed segments only |
+| Is ANN returning fewer results than expected? | Buffered vectors are searched (**BL-1728, next train**), so it is not the flush: check `partitionKey`, the caller's `read` statements, and with several IVF cells the cells probed (√cells of them) |
 | Is the cold segment scan slow for ANN? | Check `IvfCells` setting: too few cells means each cell is large; too many cells means centroid training is expensive and recall drops |
 | Are flush threshold events happening? | `Perf.CompactionFloorSuppressed` — incremented when a triggered flush was held back by the compaction floor (see `Functionality-HotCold-And-Memory.md`) |
 | What model version is in a segment? | Read `SegmentManifest.EmbeddingModelVersion`; use per-segment manifest diagnostics |
@@ -853,8 +869,8 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `TraverseAsync` returns empty even though edges were inserted | Edges still in HRA; sealed segments not yet written | Wait for flush threshold to be crossed (rows/bytes), or call `DisposeAsync`/restart to trigger shutdown drain |
-| `NearestNeighborsAsync` returns empty | No sealed vector segments; vectors still in HRA | Same as above — flush must occur before ANN search sees data |
+| `TraverseAsync` returns empty even though edges were inserted | Not the flush: traversal reads buffered edges (**BL-813, 0.3.0**) | Check the start node, the edge's partition, and the caller's `read` statements |
+| `NearestNeighborsAsync` returns empty | Not the flush: a search reads buffered vectors (**BL-1728, next train**) | Check the column name, `partitionKey`, and the caller's `read` statements (a policy that admits no row answers empty) |
 | `NearestNeighborsAsync` returns fewer than `k` results | Fewer than `k` rows across all scanned IVF cells | Normal when corpus is smaller than `k`; also happens if partition pruning narrows the scan aggressively |
 | `ArgumentException: Query embedding has N dimensions but column expects M` | Caller passed wrong-dimension embedding | Match `queryEmbedding.Length` to `VectorColumnConfig.Dimensions` |
 | `InvalidOperationException: Table '...' is not an edge table` | Called `InsertEdgesAsync` on a tabular table | Confirm table was created with `TableKind.EdgeTable` (use `CreateEdgeTableAsync`) |
