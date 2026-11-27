@@ -116,9 +116,9 @@ with the dump's declaration first), `LOAD_VERIFY_FAILED` (a loaded table's count
 A table with a **server-time or identity column** is loaded with its stamps as dumped: that needs the **server operator's** key
 (`LOAD_RESTORE_REQUIRES_OPERATOR`, exit 77, nothing written), and the audit log records `bulk_load_restore`. Tables with a `unique` or `references` column, edge tables and
 vector columns are **inserted, not bulk-loaded**, so they are not atomic: if a load of one fails part-way, truncate that table and load again.
-⚠️ **Not a table with a `Vector` column** (BL-1811, open): a truncate leaves its vectors (sealed and buffered), so the second load is refused
-`LOAD_TABLE_NOT_EMPTY`. Drop that table and load again (until BL-1814 is fixed, a table dropped with vectors still buffered makes
-every backup refuse `BACKUP_BUFFERS_UNSEALED` until the server is restarted).
+That holds for a table with a `Vector` column too (**BL-1811, next train**): a truncate removes its vectors, sealed and buffered, so the second
+load finds the column empty and loads it. Before, a truncate left them, and the second load was refused `LOAD_TABLE_NOT_EMPTY`. A vector
+deleted on the source (`DeleteVectorAsync`) is not dumped, whether it was buffered or sealed (**BL-1734, next train**).
 Two such tables are refused with `LOAD_TABLE_UNSUPPORTED`, because the insert path would change what they hold: one that also has a server-time or
 identity column (refused before the first write; load the others with `--tables`), and one with a write-time computed column (refused when
 `load` reaches it, after the tables before it were loaded).

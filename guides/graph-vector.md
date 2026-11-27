@@ -304,9 +304,24 @@ Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, n
   Scenario 3); a search can return a key more than once.
 - **A vector deleted and inserted again before a flush is the new copy only** (**BL-1813, next train**; before, the re-insert undid the
   delete and the deleted copy was found too). `DeleteVectorAsync` removes the buffered copies of the key at once, and waits for a flush of
-  that buffer that is running. ⚠️ **A vector already sealed is not deleted** (BL-1734, open): a delete reaches only the copies still in
-  the write buffer, so a copy flushed before it is still found and exported. **A row's `DELETE` does not delete its vector**: a vector is
-  not a row (it may have none, §2.7.6), and only `DeleteVectorAsync` removes it.
+  that buffer that is running.
+- **A delete reaches every copy of the key in its partition, buffered and sealed** (**BL-1734, next train**): a sealed copy is marked in
+  its segment's deletion mask, and a search and the export skip what a mask marks — live, after a restart, after a crash, after an exact
+  restore and after a point-in-time restore (a restore to before the delete finds the vector, to after it does not). A copy inserted again
+  after the delete is not touched, even once it is sealed. A copy of the key in **another partition** is not this delete's. On a branch, a
+  delete reaches the copies the branch sealed itself and leaves its parent's (the branch's search does not read its parent's sealed
+  vectors at all, BL-1799). Before, a delete reached only the copies still buffered: one flushed before it was found and exported for ever.
+- **`TRUNCATE` removes every vector of the table** (**BL-1811, next train**), buffered, sealed and bulk-loaded — live, after a restart, a
+  crash and a point-in-time restore past it — and leaves a vector inserted after it. Its `rowsDeleted` counts the table's **rows** only, not
+  its vectors. Before, a truncate left every vector found and exported, and counted each sealed one as a row.
+- **A row whose vector is null holds no vector** (**BL-1957, next train**): a bulk load leaves it out of the column's segments (its row
+  stays), so a search does not return it and the export does not hold it. Before, a bulk load stored it as a zero vector, which a search
+  returned (first, under `L2`, for a query at the origin).
+- **A row's `DELETE` does not delete its vector**: a vector is not a row (it may have none, §2.7.6), and only `DeleteVectorAsync` (or a
+  `TRUNCATE`) removes it.
+- **A vector column's segments are never merged** (**BL-1815, next train**): the cold coalescer leaves every cell segment as it was sealed
+  (its deleted vectors stay in it, skipped), and merges the table's own segments as any table's. Before, it took the cells as candidates and
+  every pass failed (`Data type Vector not supported for K-way merge`), so the table's own small segments never merged either.
 - **The vector export flushes nothing** (**BL-1735, next train**): `GET …/vectors/{column}:export` (what `aouda dump` reads) reads the same
   view as a search — sealed and buffered vectors, each with its version — and waits for no flush. Before, it first flushed every edge
   and vector buffer of the database, behind the flush pass, with no deadline: a reader cut every writer's segments, and while a backup
