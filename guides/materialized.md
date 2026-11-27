@@ -623,6 +623,7 @@ The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `Ma
 `result.stats.routedTo` in the TypeScript SDK.
 `ExplainRoutingAsync` gives the decision with its reason, every candidate's included.
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
+- A read that starts while the query is dropped and re-created with other columns (or rebuilt more than four times during that one read) is refused `409 MQ_RESULT_REPLACED`: nothing was read, and reading again answers from the current result; both SDKs retry it. A read that starts while the query is dropped is `404 TABLE_NOT_FOUND` (**BL-1932, BL-1936, next train**).
 - Source tables at durability `memory` (`MemoryOnly` before **Lead S26, 0.6.0**) are never subject to MQ auto-rebuild after bulk-load: a bulk load into one is refused.
 
 ## 2.8 How Aouda implements it
