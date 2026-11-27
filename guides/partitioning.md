@@ -123,7 +123,7 @@ Partitioning and multitenancy exist to make a single Aouda deployment practical 
   - `.NET`: `src/Aouda.Client/RemoteTableQuery.cs`
   - TypeScript: `../aouda-client-ts/src/client.ts`, `../aouda-client-ts/src/query-builder.ts`, `../aouda-client-ts/src/tables.ts`, `../aouda-client-ts/src/databases.ts`
 - Test evidence:
-  - `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/TableQueryPartitionTests.cs`
   - `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`
   - `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`
   - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
@@ -659,7 +659,7 @@ Core modules:
    - Otherwise requires equality or `in` filters for all partition key columns (`in` lowers to OR-of-equality). A composite prefix does not satisfy the guard for row-reading queries. A key-only DISTINCT (partition-key columns only, one key constrained) is the one exception — see [partition-filter rule](#partition-filter-rule-p40). Test anchors also: `tests/Aouda.Engine.Api.Tests/Query/PartitionFilterRuleTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`.
 4. Failure path throws `PartitionFilterRequiredException`.
 5. Observability: cross-partition executions increment `Perf.CrossPartitionQueries`.
-6. Test anchors: `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`.
+6. Test anchors: `tests/Aouda.Engine.Api.Read.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`.
 
 ### Walk-through B: Shared partition auto-promotion to dedicated storage
 
@@ -990,7 +990,7 @@ Last verification date (UTC): `2026-09-10`.
 
 | Capability | Test files / suites | Current status | Coverage strength | Notes |
 |---|---|---|---|---|
-| Partition key filter enforcement and the cross-partition flag | `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs` | Pass (historical/phase evidence) | Strong | Covers required-filter and cross-partition execution paths |
+| Partition key filter enforcement and the cross-partition flag | `tests/Aouda.Engine.Api.Read.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs` | Pass (historical/phase evidence) | Strong | Covers required-filter and cross-partition execution paths |
 | Partition storage path behavior (including nested paths) | `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs` | Pass (historical/phase evidence) | Medium/Strong | Validates nested partition routing semantics |
 | Multi-database lifecycle and isolation scenarios | `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs` + P7 scenario report | Pass (historical/phase evidence) | Medium/Strong | Covers create/list/drop/isolation/recovery classes of behavior |
 | Protocol serialization for database-scoped messages | `tests/Aouda.Protocol.Tests/SerializationTests.cs` | Pass (historical/phase evidence) | Medium | Verifies DTO field serialization contracts |
@@ -1082,7 +1082,7 @@ Last verification date (UTC): `2026-09-10`.
   - `../aouda-client-ts/src/tables.ts`
   - `../aouda-client-ts/src/databases.ts`
 - Tests:
-  - `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/TableQueryPartitionTests.cs`
   - `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`
   - `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`
   - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`

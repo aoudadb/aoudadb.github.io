@@ -429,7 +429,7 @@ refused key (401 / 403) has the authentication envelope instead, and a `507 DISK
 | A keyless delete the restore cannot apply | `PITR_KEYLESS_DELETE_UNRESOLVED` 409 | Restore to before the instant named, or from a later backup |
 | A damaged pending restore (`PITR_TARGET`) | `PITR_TARGET_REFUSED` | Run the restore again |
 | A damaged log manifest | `WAL_MANIFEST_REFUSED` | The file and both versions are named; restore from a backup |
-| A damaged versioned file | `FILE_FORMAT_REFUSED`, start exits 78 | The file is named; restore from a backup |
+| A damaged versioned file | `FILE_FORMAT_REFUSED`, start exits 78; a table opened on its first use answers `503 FILE_FORMAT_REFUSED` with no `Retry-After` (**BL-1744, next train**) | The file is named; restore from a backup |
 | A damaged WAL frame that is not a crash's torn tail, or a missing WAL segment | `FILE_FORMAT_REFUSED: kind=wal-segment`; the database stays quarantined, the server and its other databases run | The segment and the position are named; restore from a backup, or `unquarantine?salvagePastCorruptWal=true` to skip the frame and lose its writes |
 | A read meets a cold segment whose column file is missing or short | `COLD_SEGMENT_UNREADABLE`, HTTP 500, logged | The read is refused, not answered with nulls; restore from a backup |
 | `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |

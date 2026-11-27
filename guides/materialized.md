@@ -157,11 +157,11 @@ What is different in Aouda vs many systems:
   - `../aouda-client-ts/src/streaming/subscription.ts`
   - `../aouda-client-ts/src/tables.ts`
 - Test evidence:
-  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/LatestPerKeyApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/AggregateApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/FilterApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryAutoRoutingTests.cs`
+  - `tests/Aouda.Engine.Api.Materialized.Tests/MaterializedQueryApiTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/LatestPerKeyApiTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/AggregateApiTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/FilterApiTests.cs`
+  - `tests/Aouda.Engine.Api.Materialized.Tests/MaterializedQueryAutoRoutingTests.cs`
   - `tests/Aouda.Engine.Api.Tests/IncrementalUpdateSubscriptionTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Materialized/`
   - `tests/Aouda.Engine.Query.Tests/MaterializedQueryMatcherTests.cs`
@@ -751,7 +751,7 @@ Key implementation anchors:
    - `BulkLoadJobHandle.MqRebuildStatus` tracks rebuild state.
    - `BulkLoadJobHandle.MqRebuildCompleted` task resolves on completion.
 7. Tests:
-   - `BulkLoadMqRefreshTests.cs` (12 tests, `tests/Aouda.Engine.Api.Tests/BulkLoad/`)
+   - `BulkLoadMqRefreshTests.cs` (12 tests, `tests/Aouda.Engine.Api.Durability.Tests/BulkLoad/`)
    - `BulkLoadReplicaCoordinatorMqTests.cs` (6 tests)
 
 ## 2.9 Why Aouda is different (differentiators)
@@ -2079,7 +2079,7 @@ Last verification date (UTC): `2026-03-31`.
 | Query matcher/routing logic | `dotnet test tests/Aouda.Engine.Query.Tests --no-build --filter "FullyQualifiedName~MaterializedQueryMatcherTests" --verbosity minimal` | Pass (`21/21`) | 2026-03-31 | Confirms matcher contract and routing eligibility logic |
 | .NET client streaming MQ subscription tests | `dotnet test tests/Aouda.Client.Tests --no-build --filter "FullyQualifiedName~MaterializedQuerySubscriptionApiTests" --verbosity minimal` | Pass (`2/2`) | 2026-03-31 | Confirms standard table subscription path for MQ result names |
 | TypeScript streaming subscription tests | `npm test -- tests/streaming/subscription.test.ts` (in `../aouda-client-ts`) | Pass (`5/5`) | 2026-03-31 | Confirms TS subscribe flow behavior and message handling |
-| Known unresolved correctness issue | `tests/Aouda.Engine.Api.Tests/MaterializedQueryFlushIntegrationTests.cs` (tracked via P11 report) | Fail (known bug) | 2026-03-31 | Duplicate-row bug after flush; engine fix pending |
+| Known unresolved correctness issue | `tests/Aouda.Engine.Api.Materialized.Tests/MaterializedQueryFlushIntegrationTests.cs` (tracked via P11 report) | Fail (known bug) | 2026-03-31 | Duplicate-row bug after flush; engine fix pending |
 
 ## 2.16 Test coverage matrix
 
@@ -2181,13 +2181,13 @@ Last verification date (UTC): `2026-03-31`.
   - `../aouda-client-ts/src/tables.ts`
   - `../aouda-client-ts/src/materialized.ts` (P31 TS refresh)
 - Tests:
-  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/LatestPerKeyApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/AggregateApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/FilterApiTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryAutoRoutingTests.cs`
+  - `tests/Aouda.Engine.Api.Materialized.Tests/MaterializedQueryApiTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/LatestPerKeyApiTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/AggregateApiTests.cs`
+  - `tests/Aouda.Engine.Api.Read.Tests/FilterApiTests.cs`
+  - `tests/Aouda.Engine.Api.Materialized.Tests/MaterializedQueryAutoRoutingTests.cs`
   - `tests/Aouda.Engine.Api.Tests/IncrementalUpdateSubscriptionTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/MaterializedQueryFlushIntegrationTests.cs`
+  - `tests/Aouda.Engine.Api.Materialized.Tests/MaterializedQueryFlushIntegrationTests.cs`
   - `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadMqRefreshTests.cs` (P31 — 12 tests)
   - `tests/Aouda.Engine.Replication.Tests/BulkLoadReplicaCoordinatorMqTests.cs` (P31 — 6 tests)
   - `tests/Aouda.Engine.Storage.Tests/Materialized/`
