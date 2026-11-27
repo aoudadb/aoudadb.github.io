@@ -3660,7 +3660,14 @@ literal that is no time of the column's type (`"yesterday"`, `true`) is refused 
 text, so the `when` took the wrong branch. (**BL-1942, next train**) A definition that is stored — a derived column's `conditional`,
 a table's `checks`, a route's or a tee's `when` — is refused when it is applied, with the same message: `schema/apply` (and its dry
 run) answers `400 INVALID_REQUEST` and applies nothing, and the engine's own column and check changes refuse it before they change
-anything. Before, it was applied, and every later write of the table failed when the condition was evaluated.
+anything. Before, it was applied, and every later write of the table failed when the condition was evaluated. (**BL-1969, next train**) The
+same literal is refused **before any row is read** in a request's `selectExpr` and `setExpr` (`/query`, `PATCH …/rows`, the batch):
+`400`, naming the column. Before, it was refused at each row it reached, so the same request answered over a table with no matching
+row. It is refused in a named query's `where` (a join's too) and `selectExpr`, in a named mutation's `where` and `setExpr`, and in a
+filter query's predicate. When the document declares the table, `schema/apply` and its dry run answer `400` and apply nothing. When
+the definition binds to a table the document does not declare, its entry fails and is not applied. `POST …/materialized-queries`
+answers `400`. Before, a named definition failed every execute, and a filter result matched no row. A row policy's `where` is not
+checked when it is defined (its resource may be a wildcard), and a value there that is no time of its column matches no row.
 
 (**ADR 0072, 0.14.0**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not; in a formula, a malformed one is `400 FORMULA_REFERENCE_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, 0.14.0**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
 **Extended response when `returning` is set:**
