@@ -923,6 +923,10 @@ arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use 
   member is in [the HTTP reference](../reference/http-api.md#a-table-another-load-holds-bulk_load_table_locked) — and
   `error.retryAfterSeconds` says when to call again. Nothing was committed, and neither `bulkLoad` nor `bulkLoadJobs` sends it again
   by itself. (It was a `500` from the commit.)
+- **A load whose job ended for capacity** (**BL-1897, next train**) — its memory wait ran out after `:begin` — rejects with the
+  server's `503`: an `AoudaApiError` coded `MEMORY_BUDGET_EXCEEDED` (or `WAL_CAPACITY_EXCEEDED`), `retryAfterSeconds` set, as a
+  `:commit` refused for capacity does. Nothing was committed: wait, then run the load again. The SDK learns it with one keyed
+  `:begin`, which now begins a new job (aborted). It was a `BULK_LOAD_INVALID_STATE` that lost the reason.
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
   `409 BULK_LOAD_INVALID_STATE`). (**BL-1649, next train**) Only while the job's rows can be there: after the database is dropped and

@@ -773,7 +773,11 @@ server already applied would apply it twice:
   refusal.
 - **A `:commit` refused for capacity has failed its job.** The server answers every repeat of it with the same `503`, so the
   SDK's re-sends end in `AoudaCapacityException`. Wait its `RetryAfter`, then run the load again: it starts a fresh job and
-  sends every row (the key is free again).
+  sends every row (the key is free again). (**BL-1897, next train**) So does a load whose job ended for capacity **before** its
+  commit (its memory wait ran out after `:begin`): the `:append` is refused with that `503`, the keyed `:begin` the SDK sends to
+  find the job begins a new one instead (the SDK aborts it), and the SDK throws the `AoudaCapacityException` — not
+  `BulkLoadAbortedException`, and not, after four rounds of the same `503`, a `BulkLoadAppendFailedException` whose key could
+  only reach the dead job.
 - **A bulk-load `:append` is re-sent only by the SDK, after asking where the job is** (**Lead S21a, 0.6.0**). A job's frames
   are numbered and the server applies each number once, so a body sent again loads none of its rows twice. An `:append` that
   fails in transit (a connection error, a timeout, a `503`) is answered by a `:begin` with the job's key — which stops the
