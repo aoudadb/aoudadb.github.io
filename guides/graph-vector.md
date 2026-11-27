@@ -490,6 +490,13 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 
 ### VectorColumnConfig fields (set at table/column creation time)
 
+A vector column is declared **with its table** and its configuration — `CreateTableFromEntriesAsync` with a `VectorConfig`,
+`POST …/tables/{name}:create-vector-column`, or a schema document's `vector` / `mdVector`. Anything else is refused
+`400 VECTOR_COLUMN_UNSUPPORTED` with nothing changed (**BL-1696, BL-1816, next train**): a `Vector` / `MdVector` column on an edge table
+(no edge path carries a vector; once an edge was buffered every read of the table failed), one added by `AddColumnAsync` or
+`POST …/tables/{name}/columns` on any table, and one in `POST …/tables` — none of them carries a configuration, so the column could hold
+no vector. Keep a graph's embeddings in a tabular table of their own, keyed by the node id.
+
 | Field | Type | Required | Allowed values | Notes |
 |---|---|---|---|---|
 | `Dimensions` | `int` | Yes | `>0` | Fixed vector dimension; must match `queryEmbedding.Length` at search time |
@@ -522,6 +529,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
+| `vectorData` | `float[]` | — | Row-major, `rowKeys.Length × Dimensions` components, each a finite number: a `NaN` or an infinity is refused (`ArgumentException`; `400 INVALID_REQUEST` over HTTP; a bulk load is refused the same way), nothing written (**BL-1817, next train**; before, it was stored and a `NaN` vector ranked nearest to every query) |
 | `embeddingModelVersion` | `string?` | `null` | Written to the WAL frame and kept with each vector; at seal, the `SegmentManifest.EmbeddingModelVersion` of the segment that holds it (one version per segment, **BL-1733, next train**) |
 | `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, 0.9.0**; it was "no partition" in one place and a partition in another). The insert's row must satisfy the `where` of the caller's `write` statement, as any insert's (`403 AUTH_ROW_DENIED`) |
 
