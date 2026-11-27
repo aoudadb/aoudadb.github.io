@@ -201,10 +201,12 @@ instant** (`targetTime`).
   predates it needs the archive, or a backup taken after the restore.
 - **A backup's history ends at a later restore in place** (**BL-1631, next train**). After the database was restored in place (a PITR
   or an exact restore), a PITR of a backup taken *before* that restore, to a target *after* it, is refused with
-  `PITR_WINDOW_UNAVAILABLE` (409): the log that backup belongs to ends where the restore cut it. The message says so — *this backup's
-  history ends there: the database was restored in place after it, and its log continues as incarnation <n>* — and names what to do:
-  restore from a backup taken after that restore, or choose a target before the instant it names. Waiting does not help; the message
-  says to wait only when the backup's database may still be running on the same WAL root (the archive ships within its bound).
+  `PITR_WINDOW_UNAVAILABLE` (409): the log that backup belongs to ends where the restore cut it. After a **PITR** in place the message
+  says so — *this backup's history ends there: the database was restored in place after it, and its log continues as incarnation <n>* —
+  and names what to do: restore from a backup taken after that restore, or choose a target before the instant it names; it never says
+  to wait. An **exact** restore starts a new WAL root, which the old backup's record does not name, so after one the message says to wait
+  only when the backup's database still runs on the same WAL root — it does not: restore from a backup taken after the restore, or
+  choose an earlier target.
 - **The archive's RPO for a host loss** is `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (a minute):
   the active WAL segment is sealed and shipped when its oldest frame is that old.
 - **A level change that retires the WAL ends the window** at the change; see [Write durability](write-durability.md#changing-a-level).
