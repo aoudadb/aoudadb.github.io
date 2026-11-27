@@ -366,6 +366,33 @@ train**); `docker logs` shows both streams.
 
 ⚠️ **The default log level is `Warning`** for every category except startup narration. If a line the documentation mentions is not appearing, that is usually why — see [Defaults reference](../guides/defaults-reference.md#logging-defaults).
 
+**JSON lines, for a log collector** (**BL-1978, next train**). The console writes text by default. To write one JSON object per line, which Loki, Elastic, Datadog, Splunk and the cloud agents read, name Aouda's formatter:
+
+```bash
+Logging__Console__FormatterName=aouda-json   # an environment variable: a container's `-e`, a Compose `environment:`
+aouda start --output json                     # the same, for one run
+```
+
+⚠️ **The name is `aouda-json`, not `json`.** `json` is the .NET framework's own formatter and the server leaves it as it is; its lines have no timestamp, and PascalCase names (`LogLevel`, `State`) that no field below matches. A line of Aouda's:
+
+```json
+{"timestamp":"2026-11-27T14:02:51.2216466+00:00","level":"Warning","eventId":104,"eventName":"RequestRefused","category":"Aouda.Server.Middleware.RequestLoggingMiddleware","message":"Request refused. Method=GET, Path=/api/databases/nosuchdb, StatusCode=404, Code=DATABASE_NOT_FOUND, RequestId=req-9, CorrelationId=probe123, ElapsedMs=12, Suppressed=0, Endpoint=-","properties":{"method":"GET","path":"/api/databases/nosuchdb","statusCode":404,"code":"DATABASE_NOT_FOUND","requestId":"req-9","correlationId":"probe123","elapsedMs":12,"suppressed":0,"endpoint":"-","serverRole":"Standalone"}}
+```
+
+| Field | Holds |
+|---|---|
+| `timestamp` | When the line was written, ISO 8601, UTC (`Logging:Console:FormatterOptions:UseUtcTimestamp`, `TimestampFormat`) |
+| `level` | `Trace`, `Debug`, `Information`, `Warning`, `Error` or `Critical` |
+| `eventId`, `eventName` | Present when the line has one (a request's refusal is `104`, `RequestRefused`) |
+| `category` | The logger's name: filter on it with `Logging__LogLevel__<category>` |
+| `message` | The rendered text |
+| `exception`, `exceptionType` | The exception, with any key-shaped text replaced by `<redacted>` |
+| `properties` | The named values of the message and of the request it was written in: each key once, `correlationId`, `serverRole` among them |
+
+The formatter's options are under `Logging:Console:FormatterOptions:` (`UseCamelCase`, `IncludeScopes`, `IncludeEventId`, `IncludeException`, `IndentJson`); leave `IndentJson` off for a collector. The default format and the default levels are unchanged: text, and `Warning`.
+
+**A refused request is one line, and the default shows it** (**BL-1978, next train**). A request the server answers with an error that has a code (a `400`, `401`, `403`, `404`, `409`, `429`, `503`) writes `Request refused.` at `Warning`, with the `code`, the `statusCode`, the `requestId` (the caller's `X-Request-Id`, `-` when it sent none), the `correlationId` (the `X-Correlation-ID` the response carries) and the path. A `5xx` other than `503` is written at `Error`. A line is not written for a success, and an answer with no coded body (a route that does not exist) keeps its `Request completed` line at `Information`. A server in a refusal storm does not write a storm: **at most ten lines per code per second** are written at `Warning`, the rest at `Information`, and the next line of the code reports how many lines were left out in `suppressed`; `Logging__LogLevel__Default=Information` brings every line back.
+
 ---
 
 ## Kubernetes
