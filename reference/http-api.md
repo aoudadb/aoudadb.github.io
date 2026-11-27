@@ -570,7 +570,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `TABLE_NOT_FOUND` | 404 | The specified table does not exist. Also a read whose table was dropped after its name was resolved and before it was read, on every read route — `/query`, `/query/count`, a named query, the graph and vector routes, `POST …/materialized-queries/{name}/query` and a subscribe's snapshot (an `error` message with this code) — with `details` "The table was dropped while this read was starting; nothing was read." (**BL-1936, next train**). A read that had already started reads the table to its end: a `DROP TABLE` keeps the files a running read holds until it is done (**BL-1933, next train**) |
+| `TABLE_NOT_FOUND` | 404 | The specified table does not exist. Also a read whose table was dropped after its name was resolved and before it was read, on every read route — `/query`, `/query/count`, a named query, the graph and vector routes, `POST …/materialized-queries/{name}/query` and a subscribe's snapshot (an `error` message with this code) — with `details` "The table was dropped while this read was starting; nothing was read." (**BL-1936, next train**). A read that had already started reads the table to its end: a `DROP TABLE` keeps the files a running read holds until it is done, on the primary and on a replica that replays the drop (**BL-1933, next train**) |
 | `COLUMN_NOT_FOUND` | 404 | The specified column does not exist |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
 | `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
@@ -3491,7 +3491,8 @@ retry from the failed operation. What each answer means for what was applied:
   commits. (**BL-1303, 0.9.0**)
   So does the check of every operation against the table's schema (**BL-1937, next train**): an update's `set` column the table does
   not have, a `set` value its column refuses (`"many"` into an `Int32`, 40000 into an `Int16`) or a `null` for a column that is not
-  nullable, and a delete's `orderBy` column the table does not have are `400 INVALID_REQUEST` *Operation[i] …*, nothing applied. They were
+  nullable, and a delete's `orderBy` column the table does not have are `400 INVALID_REQUEST` *Operation[i] …*, nothing applied; a
+  delete's `orderBy` array column is `400 ARRAY_COLUMN_UNSUPPORTED`, nothing applied. They were
   refused while operation `i` ran, after operations `0` to `i − 1` were applied. A delete's `orderBy` column is matched without case, as
   every column a write names (`id` for `Id`; it was refused as an unknown column). A column found missing while an operation runs (the
   table changed under the batch) is `400 COLUMN_NOT_FOUND` with the `failedOperation` line (it was `404 TABLE_NOT_FOUND`).
