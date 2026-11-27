@@ -21,6 +21,7 @@ Exit `64` is misuse on every command (unknown command, unknown flag, a missing r
 | `--declaration` | `aouda.json`. Also `AOUDA_DECLARATION` and `Aouda:Declaration`. |
 | `--env` | Overlay `aouda.<env>.json`. Also `AOUDA_ENVIRONMENT`. |
 | `--dev-admin` | Development only. Prints one line, `AOUDA-DEV-ADMIN email=… password=… key=…`. |
+| `--output json` | The server's log, one JSON object per line (`Logging:Console:FormatterName=aouda-json`, **BL-1978, next train**): the fields are on the [Linux page](../deployment/linux.md#logs). `--output text` leaves the configured format as it is. |
 
 A start the declaration refuses exits `78`, or `1` when every error is a file that could not be read yet. Its lines are the plan's: each `error` names its code, and the last line names the status. A configuration the server cannot build with — a bind that is not an address, a port out of range, a `Logging:LogLevel` value that is not a level, a list where one value is expected, an OTLP endpoint that is not a URI — is that refusal too, with the code and the setting `aouda plan` reports (**BL-1472, next train**). A data directory whose `Server/databases.json` or `Server/pending_jobs.json` is not what it is refuses the start `DATA_DIRECTORY_FILE_INVALID` (78): the file is not repaired, moved or skipped (**BL-1548, next train**).
 

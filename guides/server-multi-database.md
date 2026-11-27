@@ -116,7 +116,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Max concurrent requests | `50` | Returns HTTP 503 when exceeded; queue up to 100 |
 | HTTP/2 | `true` | Kestrel serves HTTP/1.1 and HTTP/2 simultaneously |
 | Tracing | `false` | OpenTelemetry disabled until opt-in |
-| Structured (JSON) logging | `false` | Simple console formatter; enable via `Logging:Console:FormatterName: json` |
+| Structured (JSON) logging | `false` | Simple console formatter; enable via `Logging:Console:FormatterName: aouda-json` (**BL-1978, next train**; `json` is the .NET framework's formatter, not Aouda's) |
 | Health startup delay | `10 s` | `/ready` suppresses failures during startup window |
 | Database durability | `strict` per-db (**Lead S26, 0.6.0**) | WAL written through to disk before a write is visible; `os`, `unlogged` and `memory` are opt-in ([levels](write-durability.md#durability-levels-lead-s26-060)) |
 | Replication mode | `Replicate` per-db | Tables replicated to secondaries by default |
@@ -140,7 +140,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **Row count** — `POST /api/databases/{db}/query/count`.
 - **Connection lifecycle middleware** — request timeout (504), concurrency limit (503), correlation ID propagation, request logging.
 - **AOUDA_\* environment variable configuration** — Full config surface via env vars and CLI args.
-- **Structured JSON logging** — opt-in via `Logging:Console:FormatterName: json`.
+- **Structured JSON logging** — opt-in via `Logging:Console:FormatterName: aouda-json` (**BL-1978, next train**); the fields are on [Linux](../deployment/linux.md#logs).
 - **OpenTelemetry tracing** — opt-in; OTLP export configured in `Aouda:Tracing`.
 - **Per-database memory governance** — `ServerMemoryBudgetManager` with per-engine budget tracking.
 - **Per-database health checks** — `DatabaseHealthCheck` included in `/health/detailed`.
@@ -560,7 +560,7 @@ An invalid or unreadable `schema` file, or a declared role the roles API would r
 
 | Setting | Type | Default | Notes |
 |---|---|---|---|
-| `Logging:Console:FormatterName` | `string` | `"simple"` | Set to `"json"` for structured production logging |
+| `Logging:Console:FormatterName` | `string` | `"simple"` | Set to `"aouda-json"` for structured production logging (**BL-1978, next train**) |
 
 ### Configuration source priority (lowest → highest)
 
@@ -768,7 +768,7 @@ curl -s -X POST http://localhost:5000/api/databases/app/query \
       }
     },
     "Logging": {
-      "Console": { "FormatterName": "json" }
+      "Console": { "FormatterName": "aouda-json" }
     }
   }
 }

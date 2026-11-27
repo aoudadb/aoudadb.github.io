@@ -264,6 +264,16 @@ That is worth stating plainly, because **a line the documentation says exists an
 | Startup narration (`Aouda.Server.Startup.*`) | `Information` | The memory and CPU budget derivations, the database inventory, and the readiness transition. You cannot diagnose a sizing problem from a log that does not say what was derived |
 | The bulk-load commit line | `Information` | `BulkLoad :commit completed …` is how a loader confirms a session landed, and it is documented as such in [Bulk Load](bulk-load.md) |
 
+### The log format
+
+The console writes text. **`Logging__Console__FormatterName=aouda-json`** (or `aouda start --output json`) writes one JSON object per line instead, with a `timestamp`, a `level`, a `category`, the `message` and its named values under `properties` (**BL-1978, next train**). The name is `aouda-json`; `json` is the .NET framework's formatter, whose lines carry no timestamp. The fields, an example line, and the one line a refused request writes at `Warning` are on [Linux](../deployment/linux.md#logs) and [Docker](../deployment/docker.md#logs).
+
+| Setting | Default | |
+|---|---|---|
+| `Logging:Console:FormatterName` | the console's text format | `aouda-json` selects Aouda's JSON lines |
+| `Logging:Console:FormatterOptions:*` | UTC timestamp, camelCase names, scopes, event ids and exceptions on, one line per entry | The JSON formatter's options |
+| A refused request | one `Warning` line per refusal, at most ten a second for each code (**BL-1978, next train**) | The rest of a storm is written at `Information` |
+
 ### Turning it up
 
 Standard ASP.NET Core configuration — no Aouda-specific mechanism:
