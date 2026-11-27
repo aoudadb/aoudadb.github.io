@@ -4101,8 +4101,8 @@ Insert vectors for row keys. `vectorData` is **row-major**: the vectors one afte
 partition when omitted or null; an empty string names a partition of its own, **BL-1184, 0.9.0**). The vectors must satisfy the `where` of the caller's
 `write` statements, checked on the stored image (its first partition column holds `partitionKey`): else `403 AUTH_ROW_DENIED`, and none is written (**BL-1204, 0.9.0; BL-1464, 0.16.0**). Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`. So is a component that is not a
 finite number — a number beyond the 32-bit float range, read as an infinity — naming the vector and the component; nothing is written
-(**BL-1817, next train**; before, it was stored, and a `NaN` vector ranked nearest to every query). A [bulk load](../guides/bulk-load.md)
-refuses one the same way.
+(**BL-1817, next train**; before, it was stored, and a `NaN` vector ranked nearest to every query). A [bulk load](../guides/bulk-load.md#vector-values)
+refuses one the same way, at `:append` (as it does a vector of another length or with a null component).
 
 ```json
 { "rowKeys": [1, 2], "vectorData": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], "embeddingModelVersion": "v1" }
