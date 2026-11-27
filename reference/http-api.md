@@ -249,7 +249,7 @@ Open sockets end as [Revocation](../auth/credentials.md#revocation) describes: o
 |---|---|---|---|
 | `POST` | `/api/databases/{db}/auth/signup` | `{ "email", "password" }` | Creates a `source: signup` principal. Closed: `403 AUTH_SIGNUP_DISABLED`. |
 | `POST` | `/api/databases/{db}/auth/signin` | `{ "email", "password", "databases"? }` | A token pair. Omitted `databases` means the session has no database limit. |
-| `POST` | `/api/auth/signin` | the same | A `_serverauth` principal. |
+| `POST` | `/api/auth/signin` | `{ "email", "password", "deviceInfo"? }` | A token pair for a `_serverauth` principal; the body has no `databases` (see the allowance below). |
 | `POST` | `…/auth/refresh` | the refresh token | A new pair at the same `aal`. |
 | `POST` | `…/auth/signout` | | Revokes the session. Idempotent: repeating it with the same token answers `200` again. |
 
