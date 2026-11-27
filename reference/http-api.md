@@ -3600,6 +3600,7 @@ admin-listener routes: on the data-plane listener they are `404`. A write needs 
 | `POST` | `/api/databases/{db}/tables/{name}:create-vector-column` | `{ columnName, dimensions, distance?, quantization?, ivfCells?, embeddingModel?, rlsColumn? }` | `201` `{ "columnName" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}` | `{ rowKeys, vectorData, embeddingModelVersion?, partitionKey? }` | `200` `{ "rowsInserted", "token" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}:nearest` | `{ queryEmbedding, k }` | `200` `{ "rowKeys", "distances", "executionMs", "token" }` |
+| `GET` | `/api/databases/{db}/tables/{name}/vectors/{column}:export` | — | `200` column-batch frames (`application/vnd.aouda.column-batch-v2`): `partitionKey`, `rowKey`, `embeddingModelVersion`, `vector` |
 
 #### `POST /api/databases/{db}/edge-tables`
 
@@ -3729,6 +3730,15 @@ The answer is column arrays: `rowKeys[i]` is at `distances[i]` (**Lead S12, 0.6.
 `"results": [{"rowKey", "distance"}]`, one object per hit). `token` is the cut the search read. Only the vectors whose row the `where` of the
 caller's `read` statements admits are candidates. (**BL-1279, 0.9.0; BL-1464, 0.16.0**)
 
+- **What it reads** (**BL-1728, next train**): every vector the column holds when the search starts — the ones still in its write buffers
+  as well as the sealed ones, each once, so a vector is found as soon as its `POST …/vectors/{column}` returns (with or without its
+  `token` as `atLeast`), and the answer does not change when a flush seals it. Before, only sealed vectors were searched, and a buffer
+  flushes at 100 000 vectors, a clean shutdown or a backup — never by time.
+- **The distance** is smaller-is-nearer: `L2` the squared Euclidean distance, `Cosine` `1 −` the cosine similarity, `DotProduct` the
+  **negative** inner product (the largest inner product first; **BL-1812, next train** — it was ranked, and answered, by squared L2).
+- **Equal distances** are ordered by `rowKey`, and at the `k`-th place the smaller `rowKey` is kept (**next train**).
+- A row key inserted twice is two candidates; a search can return a key more than once.
+
 ```json
 { "queryEmbedding": [0.1, 0.2, 0.3], "k": 2 }
 ```
@@ -3736,6 +3746,24 @@ caller's `read` statements admits are candidates. (**BL-1279, 0.9.0; BL-1464, 0.
 ```json
 { "rowKeys": [1, 2], "distances": [0.0, 0.52], "executionMs": 2, "token": "…" }
 ```
+
+#### `GET /api/databases/{db}/tables/{name}/vectors/{column}:export`
+
+Every vector of a `Vector` column, as [column-batch frames](#the-column-batch-frame-acb2) (send `Accept: application/vnd.aouda.column-batch-v2`): one row per
+vector, the columns `partitionKey` (String, null for no partition), `rowKey` (Int64), `embeddingModelVersion` (String, null for none) and
+`vector` (Float32 array), then the end frame with the row count. What `aouda dump` reads of a vector column (a table query reads a vector
+column as null). It reads what a `:nearest` reads — the sealed vectors and the buffered ones, each copy of a key once, each vector with the
+model version it was inserted with — and **flushes nothing and waits for no flush** (**BL-1733, BL-1735, next train**; before, it first
+flushed every edge and vector buffer of the database, with no deadline, and a batch being flushed refused it). A vector inserted while the
+export runs may or may not be in it.
+
+Needs a `read` statement on the table.
+
+| Code | Status | When |
+|---|---|---|
+| `VECTOR_EXPORT_ROWS_RESTRICTED` | 403 | The caller's read of the table is restricted (a `where`): an export reads every vector, so it is refused, never answered with a subset. Export with a principal that reads the whole table. |
+| `VECTOR_EXPORT_UNSEALED` | 409 | A flush of the column's buffer completed with its catalog record unknown (its catalog write failed and whether it was recorded cannot be told; the server log names it): its vectors cannot be read whole until the database is reopened. Nothing was read. Restart the server and export again; retrying without a restart gets the same answer. |
+| `INVALID_REQUEST` | 400 | The column is not a `Vector` column. |
 
 **Errors:** on the routes under `tables/{name}`, `404 TABLE_NOT_FOUND` for an unknown table or column and `400 INVALID_REQUEST` for
 an operation the table does not support (for example a traversal of a table that is not an edge table); on every route, the
