@@ -153,8 +153,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **TypeScript client `client.Databases.get(name)` and `drop(name)`** — HTTP `GET /api/databases/{db}` and `DELETE /api/databases/{db}` exist on the server; the TypeScript client wraps are tracked as a follow-on item.
 - **`client.Databases.DropAsync()` in .NET client** — `AoudaDatabasesApi` currently exposes only `ListAsync` and `CreateAsync`; `GET /api/databases/{db}` and `DELETE /api/databases/{db}` are server-implemented but not wrapped. Backlog item.
 - **Per-database Prometheus scrape** — Current metrics API emits JSON; Prometheus format is explicitly deferred.
-- **`ActiveConnections` counter in `MetricsSummary`** — Returns 0; HTTP connection tracking wiring is not yet complete.
-- **Historical per-database metrics series** — Point-in-time snapshots only; no time-series store for per-db metrics.
+- **Historical per-database metrics series** — `GET /api/admin/metrics/history` keeps 24 h of a closed set of process-wide series; no `database`-labelled series is kept (**BL-851, next train**).
 
 ### Reserved / Not Yet Wired
 
@@ -207,7 +206,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Admin management API under `/admin/*` (P16) | ✅ | | | `src/Aouda.Server/Controllers/Cluster|Backup|Config|Node|CapabilitiesController.cs`, P16 §5.3 | |
 | Runtime config persistence (`cluster-state.json`; the backup schedule is in the `_settings` database) | ✅ | | | P16 §3.2, §5.6 | |
 | Prometheus scrape format | | | ❌ | P4 §10 (deferred); P6 §10 | See §2.18 |
-| `ActiveConnections` counter | | ❌ | | `MetricsSummary` returns 0; P4 §10 | See §2.18 |
+| Open connections and requests in flight (`aouda.realtime.connections_count`, `aouda.http.in_flight_count`) | ✅ | | | ADR 0073 (**BL-851, next train**); `MetricsSummary` and its constant `ActiveConnections` are gone | |
 | `aouda dev` as distinct ephemeral mode | | ❌ | | ADR 0026; P16 SA6 not evidenced; `aouda start` is the shipped entry point | See §2.18 |
 
 ---
@@ -947,7 +946,6 @@ curl -s http://localhost:5000/api/databases
 | Startup reconcile for the declared `databases` | Declarative provisioning on startup is described in P6 but no dedicated test confirmed | Add scenario: `aouda.json` declares two databases → server starts → both are Active without manual POST | High |
 | `Creating` state recovery after crash | Partial directory scaffold on aborted create; behavior on retry not covered | Add `DatabaseManagerTests` case: simulate crash after directory creation but before `Active` write; verify retry creates successfully | Medium |
 | Non-loopback caller rejection on shutdown | Unit test for `IsShutdownCallerLoopback` is in `CountIntegrationTests.cs` but path coverage of `RemoteIpAddress == null` fallback is unclear | Add unit test with null `RemoteIpAddress` and loopback `LocalIpAddress` | Low |
-| `ActiveConnections` counter wiring | Returns 0 always; when connection tracking is added, test should verify accurate reporting | Add integration test: open N concurrent connections, read `MetricsSummary.ActiveConnections` | Low (deferred) |
 
 ---
 
@@ -959,13 +957,11 @@ curl -s http://localhost:5000/api/databases
 
 - **`aouda dev` as a distinct command** — ADR 0026 mentions `aouda dev` as an ephemeral development server entry point. P16 SA6 shipped `aouda start` as the unified entry point; no `aouda dev` command is evidenced in `src/Aouda.Cli/` source materials in this repository. The `dev`-like behavior (ephemeral in-memory data path) is achievable with `aouda start --data-dir /tmp/aouda-dev`. This is a documentation drift between ADR 0026 intent and shipped P16 behavior.
 
-- **`ActiveConnections` in `MetricsSummary`** — Returns 0 until HTTP connection tracking is wired. Noted in `P4-Server-And-Clients-COMPLETION.md` §10.
-
 - **Prometheus scrape format** — JSON metrics API exists; Prometheus `/metrics` endpoint is explicitly deferred (P4 §10, P6 §10). No backlog ID confirmed.
 
 - **Dynamic table-subscription reconfig** — Changing per-table replication subscriptions (`TableFilter`) requires secondary reconnect. Dynamic hot-reconfiguration is deferred. See `docs/tasks/P6-COMPLETION.md` §10.
 
-- **Per-database historical metrics series** — `GET /api/server/databases/{db}/metrics` returns point-in-time snapshots. Time-series store for per-db metrics is deferred. See P6 §10.
+- **Per-database historical metrics series** — the `database`-labelled metrics of `GET /api/admin/metrics` are point-in-time; its `history` keeps process-wide series only (**BL-851, next train**: `GET /api/server/databases/{db}/metrics` is gone). See P6 §10.
 
 - **`aouda dev` ephemeral mode** — See drift note above. Operators who need ephemeral dev databases use `aouda start` with a temp data path.
 
