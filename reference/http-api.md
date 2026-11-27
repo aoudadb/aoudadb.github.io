@@ -547,6 +547,9 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
 | `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
 | `BRANCH_EXISTS` | 409 | A branch with the specified name already exists, compared without regard to case; or a branch of that name is still being deleted — its name stays reserved until the delete's cleanup (engine shutdown, segment references, files) is done, so retry the create afterwards |
+| `BRANCH_BUSY` | 409 | A branch create or delete could not run now — a backup capturing the branch set (or, a delete, uploading the branch), a create or delete of the same branch, or (**BL-1760, next train**) a create that could not take its cut of the database: a flush still running, an open write, the cut past its hold, segment retirements that kept moving. The message names which; nothing was changed; no `Retry-After`. Retry |
+| `BRANCH_SET_DAMAGED` | 500 | (**BL-1712, next train**) `branches.json` or `branch-segment-refs.json` in the database's catalog is damaged (not JSON, `{}`, `null`, a row without a name, a key that is not `table:segment`); the message names the file. Every branch route refuses rather than read it as "no branches", and the database keeps every segment a branch may read. No retry helps: restore the file from a backup, or repair it |
+| `EXACT_RESTORE_REFUSED` | 500 | The first open after an exact restore, or (**BL-1760, next train**) a branch's first query or insert, cannot load the write buffers it holds (a damaged file); the files are kept. For a branch: delete it and create it again. For a restore: restore the backup again |
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
 | `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter. `crossPartitionAccess` waives it and nothing else; on the data-plane listener it is not accepted and the guard decides (**BL-1227, 0.9.0**) |
@@ -1814,6 +1817,34 @@ found only by the apply, against the catalog.) `?format=markdown` answers the pl
 
 (**BL-1209, 0.9.0**) A branch name is one segment of 1–64 ASCII letters, digits, or hyphens, not `main` and not a Windows device name. `/`, `\`, `..`, a drive, a rooted name, a trailing dot or space, and `_` are refused. Every branch route answers `400 INVALID_REQUEST` and writes nothing.
 
+#### `POST /api/databases/{db}/branches`
+
+Create a branch of the database as it is now. The body is `{ "name", "from" }`; `from` is optional and only `"main"` is accepted.
+**`201`** answers the branch (`name`, `from`, `createdAt`, `diff`).
+
+**What a new branch holds** (**BL-1760, next train**). The create takes one cut of the database under its commit fence, as a backup
+does: every write the database acknowledged before the request is in the branch whole — rows still in the write buffer included, and
+both halves of an update — and a write that races the create is in it whole or not at all. Before, a branch was made from a catalog
+snapshot alone and lacked every buffered row, both versions of a flushed row whose update was buffered, and could name a segment
+already deleted (BL-1713). A create is therefore the catalog plus a copy of the database's buffered rows, not metadata only; the copy
+is written into the branch's own directory and moved into its own segments when the branch is first used.
+
+Two kinds of table are not copied whole:
+
+- a table at durability `memory` is **empty** in the branch, as after a restore (its rows end with the process);
+- an **edge table**'s buffered edges and rows are not in the branch (it reads the edges already in segments) until a later release.
+
+**A failed create leaves nothing** (**BL-1798, next train**). The branch is listed only once its files are whole: a create that fails,
+or a server that crashes inside one, leaves no branch of that name, and a create of the name succeeds afterwards. A leftover
+directory of the same name is removed by the next create rather than reused. Before, a crash inside a create left a listed branch
+that opened with no tables and could be neither deleted nor created again.
+
+| Status | Code | When |
+|--------|------|------|
+| `409` | `BRANCH_EXISTS` | The name is taken (without regard to case), being deleted, or being created by another request |
+| `409` | `BRANCH_BUSY` | The create could not take its cut now: a backup is capturing the branch set; or (**BL-1760, next train**) a flush still running in the database, an open write, the cut past the few seconds the commit fence may stay closed, or segment retirements that kept moving. The message names which, and the `remedy` names a backup only when one held it. Nothing was changed; no `Retry-After` — retry the create |
+| `500` | `BRANCH_SET_DAMAGED` | (**BL-1712, next train**) The database's branch list or branch segment references file is damaged; the message names it. No retry helps: restore the file from a backup or repair it. Every branch route answers the same |
+
 #### `POST /api/databases/{db}/branches/{name}/diff`
 
 The body is empty (`{}`); the answer is structural.
@@ -1825,6 +1856,10 @@ Query one table on a branch (**BL-1161, BL-1298, 0.9.0**). The body is `{ "table
 `200` is the same columnar body as [`POST …/query`](#post-apidatabasesdbquery): `columns`, `types`, `data`, `rowCount`, `stats`, `token`. The body has no `clrType`.
 
 The caller is authorized for `read` on that table of the **parent** (a branch is not a resource of its own), then the rows are filtered as a `/query` of the same table with no `where`: the row condition, and the embargo cutoff on a base table. A table that requires a partition-key filter, and whose row condition does not supply one, is `400 PARTITION_FILTER_REQUIRED` — the body has no `crossPartitionAccess` field. A branch table whose partition key, or whether a key filter is required, differs from the live table's is `403 AUTH_POLICY_DENIED` with remedy `none`, and nothing is scanned: a guard turned on after the branch was cut is refused rather than full-scanned. A materialized result the live database has dropped or replaced is refused the same way. An unknown branch and an unknown table are `404 NOT_FOUND`. A caller who may not read the table is refused before the branch is opened.
+
+A branch's first query or insert moves the buffered rows its create copied into the branch's segments. If that copy cannot be read
+(a damaged file), both routes answer `500 EXACT_RESTORE_REFUSED` and keep the files; the remedy is to delete the branch and create it
+again (**BL-1760, next train**; it was `500 INTERNAL_ERROR`).
 
 #### `POST /api/databases/{db}/branches/{name}/insert`
 
@@ -4433,7 +4468,7 @@ Set `cronExpression` to null to disable scheduled backups.
 
 #### Branch routes during a backup
 
-While a backup captures (or uploads) a database's branches, creating or deleting a branch of that database answers `409 BRANCH_BUSY` with a `remedy`; retry when the backup is done.
+While a backup captures (or uploads) a database's branches, creating or deleting a branch of that database answers `409 BRANCH_BUSY` with a `remedy`; retry when the backup is done. A create also answers it when it cannot take its cut of the database now (**BL-1760, next train**; see [`POST …/branches`](#post-apidatabasesdbbranches)).
 
 ---
 

@@ -306,6 +306,11 @@ await client.branches.create({ name: 'pre-truncate-backup', from: 'main' });
 await client.table('auditLog').truncate();
 ```
 
+The branch holds every row the table had when it was created, including rows still in the write buffer (**BL-1760, next train**;
+before, a branch lacked the buffered rows, so a safety net taken right after a write missed it). The rows stay readable **through
+the branch** (`POST …/branches/{name}/query`) after the truncate. A branch merge applies schema changes only: it does not bring
+the rows back into `main` — copy them back yourself if you need them there. A table at durability `memory` is empty in a branch.
+
 ### TRUNCATE vs DELETE … WHERE
 
 | Aspect | TRUNCATE | DELETE … WHERE |
@@ -982,12 +987,13 @@ const report = await client.table('sales')
 ```ts
 // In tests or staging: reset a table between runs
 // Branch first for safety, then truncate
-await client.branches.create({ name: `backup-${Date.now()}`, from: 'main' });
+const backup = `backup-${Date.now()}`;
+await client.branches.create({ name: backup, from: 'main' });
 
 await client.table('testEvents').truncate(); // requires Truncate scope
 
-// After test run, optionally restore from branch or delete branch
-await client.branches.delete(`backup-${Date.now()}`);
+// After the run: the old rows are still readable through the branch (a merge does not copy rows back); delete it when done
+await client.branches.delete(backup);
 ```
 
 ---
