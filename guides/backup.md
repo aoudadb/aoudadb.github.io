@@ -388,7 +388,7 @@ store, or use a new client.
   `aouda.wal.archived_bytes_total`, `archive_errors_total` and, per database, `aouda.wal.slots_count` and `slot_lag_bytes` (the log's
   position minus its lowest slot). Alert on `last_success_age_ms`. `lastBackupHoursAgo` is gone with `GET /api/admin/metrics/summary`: it
   was always `-1` (BL-1841).
-- **Health**: `GET /health/detailed` reports a backup component (stale if no recent success; `not_configured` before any backup) and an archive
+- **Health**: `GET /health/detailed` reports a backup component (**BL-1843, next train**: read from the same record as `aouda.backup.last_success_age_ms`, so a server that restarted knows its last backup; `degraded` when the last backup failed and none has succeeded since, or the last success is older than `Aouda:Health:Thresholds:BackupIntervalHours`, `unhealthy` at twice that; `not_configured` before any backup) and an archive
   that is not advancing.
 - **A WAL segment that is not whole stops the archive in front of it** (**Durability-1, next train**). A sealed segment that is short,
   damaged or longer than its manifest entry is not archived, and nothing after it is; each pass tries again and reports it in the server

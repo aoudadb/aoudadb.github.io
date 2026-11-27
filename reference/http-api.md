@@ -482,7 +482,7 @@ answered `Cache-Control: no-store`; neither writes anything, takes the reload's 
 
 | Method | Path | Result |
 |--------|------|--------|
-| GET | `/api/admin/declaration` | The declaration the server runs on: `source` (`file`, `code` for databases an embedding host set in code, `none`), `file`, `overlay`, `environment`, `planHash` (the same as `aouda plan` prints for the same files), `declaration` (the canonical document the plan hash is the hash of: a credential by its public id, a password seed only as set, never a key, hash, root or secret), `databases` (`name`, `kind`, `authDatabase`, `declaresSchema`, `pointer`), and `last` — the last start or reload: `origin` (`start` or `reload`), `at`, `outcome`, `applied`, `summary`, and every `finding` in the plan's shape |
+| GET | `/api/admin/declaration` | The declaration the server runs on: `source` (`file`, `code` for databases an embedding host set in code, `none`), `file`, `overlay`, `environment`, `planHash` (the same as `aouda plan` prints for the same files), `declaration` (the canonical document the plan hash is the hash of: a credential by its public id, a password seed only as set, never a key, hash, root or secret), `databases` (`name`, `kind`, `authDatabase`, `declaresSchema`, `pointer`), and `last` — the last start or reload: `origin` (`start` or `reload`), `at`, `outcome`, `applied` (a boolean, **BL-1987, next train**), `summary`, and every `finding` in the plan's shape |
 | GET | `/api/admin/declaration/export` | The server's state as declaration text: `{ "declaration": "<aouda.json>", "schemaFiles": { "schema/<db>.aouda.schema.json": "<text>" }, "origins": { "<pointer>": "declared" \| "runtime" }, "notes": [ { "code", "pointer", "message" } ] }` |
 
 `last` moves only when the declaration does: a reload that writes replaces it (and `declaration` and `planHash`); a dry run, a reload
@@ -580,7 +580,7 @@ A reload runs in two phases. **Phase 1** reads the declaration and validates it 
 
 `stages` lists all eight stages in the start's order (`read`, `settings`, `principals`, `databases`, `bootstrap`, `schema`, `roles`, `principalRows`; the example shows one), each `passed`, `warnings`, `failed` or `skipped`; `bootstrap` in `changes` is always `null`. `updated` members of `roles` and `principals` are `{ "authDatabase", "role" | "principal", "members": [ … ] }`, the member names that change and never a statement's text. `outcome` is `clean`, `changes` or `errors`.
 
-- `dryRun` is `true` for a dry run. `applied` is `true` when the reload wrote, `false` for a dry run, a refusal and a call that changed nothing, and the **string** `"partial"` on `207`. `valid` is `false` only on `422`.
+- `dryRun` is `true` for a dry run. `applied` is a boolean on every route that carries it (**BL-1987, next train**): `true` when the reload wrote (a reload that stopped part-way wrote its earlier steps: `applied` is `true`, and `207`, `failedStep` and `reload_failed` say it stopped; it was the string `"partial"`), `false` for a dry run, a refusal and a call that changed nothing. `valid` is `false` only on `422`.
 - `role` is this node's role in lower case (`standalone`, `primary`, `secondary`, `hidden`). `writes` is `applied`, or `skipped` for a dry run, a refusal and **a node that does not accept writes**: such a node validates, takes the declaration's access section and key roots in memory and writes nothing, and `completedSteps` is empty.
 - `completedSteps` lists the phase-2 steps done, in order. `failedStep` is `{ "step", "entry" }` on `207` (`entry` is the database, role or principal named, or `null`) and `null` otherwise.
 - A non-`200` answer that carries a plan also carries `error` (the code), `message` and `requestId`. `409` carries only those three and no plan; so do the `400`s.
@@ -594,7 +594,7 @@ A reload runs in two phases. **Phase 1** reads the declaration and validates it 
   "last": {
     "time": "2026-11-27T09:41:12.5123456+00:00",
     "outcome": "changes",
-    "applied": "true",
+    "applied": true,
     "planHash": "sha256:…",
     "summary": { "errors": 0, "warnings": 1, "changes": 2 },
     "failedStep": null,
@@ -603,7 +603,7 @@ A reload runs in two phases. **Phase 1** reads the declaration and validates it 
 }
 ```
 
-`last` is the last non-dry reload that ran since this process started, refused ones included (a `409` or `503` is not a reload); it is kept in memory only. Here `applied` is the string `"true"`, `"false"` or `"partial"`. `callerKeyId` is the id of the caller's principal.
+`last` is the last non-dry reload that ran since this process started, refused ones included (a `409` or `503` is not a reload); it is kept in memory only. Here `applied` is a boolean, as on the `POST` answer (**BL-1987, next train**; it was the string `"true"`, `"false"` or `"partial"`), and `failedStep` is set when the reload stopped part-way. `callerKeyId` is the id of the caller's principal.
 
 **Planning a posted declaration** (**BL-1463, 0.14.0**). `POST /api/admin/reload?dryRun=true` with a JSON body plans that declaration against this server: what [`aouda plan --server`](../guides/plan.md) does. The server runs phase 1 over the body instead of its own files: every offline check under **its own** process settings (named-query limits, `SkipDatabases`, the dev-admin flag, the hosting environment: a body cannot set them), then every check that needs the data directory against a planned view. It writes nothing, takes the same gate, and **opens no path the body names**: paths are labels for the findings' locations. The answer is the plan above with `dryRun: true`. A body is only ever planned, never applied: what a reload applies is the server's own files.
 
@@ -4264,7 +4264,7 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
 | `schema_applying` | (**BL-1462, 0.14.0**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
 | `schema_drift` | The start-time apply of a declared `SchemaFile` refused a change (a destructive one without `SchemaAllowDestructive`, or one the engine does not apply), so the catalog is not what the file says; the start went on. `503` until you allow the change or update the file, and restart. A failed apply fails the start instead, so there is no `/ready` to ask (**BL-1406, 0.11.0**). | the database |
 | `configured_key_inactive` | Not produced (**BL-1464, 0.16.0**). | none |
-| `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
+| `component_unhealthy` | A critical component (catalog, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
 
 A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up. `aouda status` prints every reason.
 
@@ -4293,6 +4293,16 @@ plus any start-time schema apply; once it returns 200, switch to liveness + read
 Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane). Answered in setup mode to every caller, like the three probes (**BL-1462, 0.14.0**).
 
 The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, 0.3.0** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, 0.3.0**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, or a database holding more than 110 % of its ceiling. (**WorkloadCore S06, 0.3.0**: the budget is never tightened in-process any more, so there is no "tightening" verdict; a database's ceiling is the server's budget unless it has a hard cap.)
+
+**What each component reads** (**BL-1843, next train**). Each is judged from the numbers its own database or the server keeps, never from a process gauge several databases write:
+
+| Component | Critical | Reads | Not healthy when |
+|---|---|---|---|
+| `wal` | no | each open database's log | `degraded`, naming every database whose log stopped after a failed write or sync (it refuses every write until the database is reopened). One database's stopped log does not take the node out of a load balancer, so the component is **not critical** (before this it was, and reported `healthy` for a stopped log: it read queue counters nothing wrote). `details`: `databasesWithALog`, `failStoppedDatabases`, and `db:<name>` per database. The queue thresholds `WalQueueCapacity`, `WalQueueDegradedPercent` and `WalQueueUnhealthyPercent` are gone |
+| `materializedQueries` | no | each open database's materialized queries (`aouda.materialized.lag_ms`, `queued_updates_count`) | the largest lag or the most queued updates of any one database is over `MqLagDegradedMs` / `MqLagUnhealthyMs` or `MqQueueDegradedDepth` / `MqQueueUnhealthyDepth`; the reason names the database. Also `degraded` for as long as a dropped update is on record (BL-427). `details` has `db:<name>` for each database with queries |
+| `replication` | no | on a secondary, each database's bytes behind the primary (`aouda.replication.lag_bytes`) | a database is behind by `ReplicationLagDegradedBytes` (default 10 000 000) or `ReplicationLagUnhealthyBytes` (default 60 000 000); the reason names it. A database whose primary position is not known is not judged. There is no seconds figure: `lagSeconds` and `ReplicationLag…Seconds` are gone |
+| `memory` | yes | the governor's ledger: every database's part and the process total | as above; `budgetManagerInitialized` is `false` and the usage zero before the databases are open |
+| `backup` | no | the server's backup record, kept over a restart (`aouda.backup.last_success_age_ms`, `last_failure_age_ms`) | `degraded` when the last set failed and none has succeeded since, or the last success is `BackupIntervalHours` old (default 24); `unhealthy` at twice that. `not_configured` before any set has run. `details`: `lastBackupUtc`, `hoursAgo`, `lastFailureUtc`, `runsSucceeded`, `runsFailed` |
 
 The `archive` component (**BL-1843, next train**) judges **each open database's own WAL archive** and names the databases that are
 behind: `degraded` when a database's oldest sealed segment not archived was sealed `Aouda:Health:Thresholds:ArchiveStaleCycleMinutes`
