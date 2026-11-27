@@ -246,6 +246,15 @@ principal (the same issuer and subject), and after `signOut({ scope: 'others' })
 WebSocket and long-poll alike — is re-authenticated with the new token. Before, only a refresh over the WebSocket did that: after a repeat
 sign-in or an exchange, and always over long-poll, everything ended when the token the connection was opened with expired.
 
+**An access token that expires on an open connection is renewed** (**BL-1921, next train**). The server ends a realtime session when its
+token expires and nothing re-authenticated it (`auth_error` or a poll's `401` `AUTH_CREDENTIAL_EXPIRED`, remedy `renew`); an application that
+only subscribes makes no call that would refresh the token first. The client now reconnects, refreshing the token before it does (even when the
+token's own expiry says it is still valid: the server's clock decides), and what was open resumes. A credential that cannot renew — a key past its
+expiry, a refresh the server refuses, an OIDC session (no refresh token) — is refused at that reconnect and ends every subscription and stream by
+name, once. A revoke, a sign-out elsewhere or a disabled user still ends everything at once. Before, every subscription and write stream ended
+with `AUTH_CREDENTIAL_EXPIRED` at the access token's lifetime (15 minutes by default). The C# client has done this since the last train's fix
+(S25e).
+
 Before this, an open connection was neither replaced by a sign-in nor closed by `signOut()`: the earlier user's subscriptions, and new ones
 made after the next sign-in, delivered the earlier user's rows and their streams wrote as that user, until the connection was lost; then the
 earlier user's subscriptions resumed as the next one. On those versions, `await client.disconnect()` and make a new client when the user changes
@@ -715,6 +724,14 @@ until this train one with a `Retry-After` was; a proxy may answer it after forwa
 [error codes](../reference/http-api.md#server-errors-5xx)). This is the C# SDK's rule. Reads — `GET`s, and the queries, counts and
 diffs sent as a `POST` — are re-sent after any transient failure, as before; a bulk load's `:append` is never re-sent by the retry
 policy — the bulk loader recovers it itself, after asking the server where the job is (below).
+
+**A `5xx` that no retry can satisfy is sent once** (**BL-1956, next train**): `500 BRANCH_SET_DAMAGED`, `500 EXACT_RESTORE_REFUSED`,
+`500 BULK_LOAD_CORRUPTION`, `503 FILE_FORMAT_REFUSED`, `503 DATABASE_QUARANTINED`, `503 LEGACY_WAL_PRESENT`, `503 RESTORE_INCOMPLETE` and
+`503 FORMULA_NOT_MAINTAINED` each wait for an operator (a file restored or repaired, a database unquarantined or restored, a branch made again)
+or for the node's state to change. A `retryPolicy` does not re-send them, even a read, and they do not count toward the circuit breaker —
+before, a branch list over a damaged branch file was sent four times and moved the breaker that guards every other call of the client. The C#
+client's list is the same. `FILE_FORMAT_REFUSED` is typed `AoudaServerError` and
+`AUTH_SESSION_NOT_FOUND` (`404`, a revoke of a session that does not exist) `AoudaNotFoundError`; both were a plain `AoudaApiError`.
 
 **A request no idle server could serve is `400 STATEMENT_TOO_LARGE`**, thrown as `AoudaValidationError` (**BL-1706, next train**; it
 was a plain `AoudaApiError`) and never re-sent: the same request is refused the same way. `details` says what to do — a write: send
