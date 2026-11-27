@@ -169,6 +169,15 @@ If you do nothing:
     log. Tables a replica registers from the log carry their real `createdAt` / `lastModifiedAt`.
   - Checkpoint transfer bootstrap for too-far-behind replicas.
   - Replica state machine applying WAL frames with transaction ordering safeguards.
+  - (**Durability-1, next train**) A replica's write buffer follows a replicated column change — a column's type or
+    nullability, an added or dropped column, a primary-key change — by the rule a point-in-time restore's replay follows, so the
+    replica reads what its primary reads (a key only a widened key type holds, a null, an added column's value); a replicated
+    key-column type change also rebuilds the replica's own key indexes, and a column rename reaches its buffer. A replica
+    started from a checkpoint image reads what the primary sends after the image: its state machine starts from the catalog the
+    image carries (and a restarted replica knows the tables created or changed since), and its buffer numbers rows after the
+    image's segments. A replicated keyed delete or update of a row the image brought reaches the image's segments too; because
+    the image is written while the primary takes writes, the delete waits until the stream has passed the image's rows (a
+    table that receives no row after the image applies it at its next row, and a bulk-loaded copy is not marked: **BL-1951**).
 - Election and failover mechanics:
   - Heartbeat protocol and failure detection. (**BL-980, 0.4.0**) An election heartbeat must carry its profile, hints,
     hidden flag and per-database fields; one missing any of them is not accepted.

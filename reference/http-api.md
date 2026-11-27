@@ -602,6 +602,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `FORMULA_REFERENCE_NOT_READABLE` | 403 | (**ADR 0072, 0.14.0**) A formula reads a row its writer may not read (no read access to the table, a row outside the writer's row or partition conditions, or a row that does not exist and cannot be judged on its key); also a server write that set a formula with no caller to check. The message names the formula row and the reference, never whether the row exists; nothing was written. |
 | `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, 0.14.0**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
 | `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, 0.14.0**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells, add an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain, its upstream queries' sources included) — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
+| `COLUMN_RENAME_REFERENCED` | 409 | (**BL-1925, BL-1926, next train**) A column rename (`PATCH …/columns/{c}` with `newName`, Embedded's `AlterColumnAsync` / `RenameColumnAsync`, or a schema apply's or branch merge's rename, where it is the rename's failed entry) is refused while a definition stored outside the catalog reads the column: a materialized query that names it — or, when its result holds the whole source row, any column of its source —, a named query or named mutation that names it, or an access-policy statement whose `where` reads it. Nothing was changed (on the `PATCH` route, no other field of the request either). The message names each definition, a statement by its holder (role, principal, limited key's principal, the signup setting) and never by its `where` values. A rename does not rewrite these definitions: drop or redefine each, rename the column, then re-create them by the new name. |
+| `TABLE_RENAME_REFERENCED` | 409 | (**BL-1929, next train**) A table rename (`PATCH …/tables/{name}`, Embedded's `RenameTableAsync`) is refused while a definition stored outside the catalog names the table: a materialized query that reads it or whose result it is, a named query that reads it (as its table or a join's), a named mutation of it, or an access-policy statement whose resource is `<db>/table/<name>` (a wildcard resource does not count). Nothing was changed. The message names each definition, a statement by its holder. A table rename rewrites other tables' `references` and transforms' `to`, not these definitions: drop or redefine each, rename the table, then re-create them by the new name. |
 | `DECLARED_IN_CONFIGURATION` | 409 | (**BL-1463, 0.16.0**) The call would change an object the declaration file declares — a declared database, the schema of a database that declares one, a declared principal, role, credential or `signup` setting. Nothing was changed; the message names the file and the JSON pointer. Change the declaration, then run `aouda reload`. See [One writer per declared object](#one-writer-per-declared-object) |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
@@ -2512,6 +2514,31 @@ where row conditions applies. statements `drop` is still required and is not eno
 
 Rename a table. `newName` follows the [table-name rule](#table-names): breaking it is `400 INVALID_REQUEST`. A `__mqbuild_*` `{name}` is `404 TABLE_NOT_FOUND`.
 
+(**BL-1929, next train**) The rename rewrites every definition in the catalog that names the table, in the same change: other tables'
+`references` to it (its own self-references too) and every table's `tee` / `route` transform whose `to` is it. A point-in-time restore
+and a replica replay the rename the same way. Before, both kept the old name: a tee into the renamed table failed each insert it
+matched, and once another table took the old name the reference and the tee resolved to that table — rows copied into it, a child's key
+checked against it.
+
+A table a stored definition outside the catalog names is not renamed: the request is refused `409 TABLE_RENAME_REFERENCED`, and nothing
+changes, while
+
+- a **materialized query** reads the table (its `sourceTable`), or the table is a materialized query's **result**;
+- a **named query** reads the table (as its `table` or a join's) or a **named mutation** is of the table;
+- an **access-policy statement** whose resource names the table — `<db>/table/<name>` — is a role's, a principal's, a limited key's
+  (one that has not expired or been revoked) or the signup setting's, in the auth database that governs the database. A wildcard
+  resource (`*`, `<db>/*`, `<db>/table/*`) follows the table and does not refuse. If that auth database exists and is not open, the
+  rename is refused too: its statements cannot be checked.
+
+The message names each definition (a statement by its holder). Drop or redefine each, rename the table, then re-create them by the new
+name. Table names match exactly: a definition naming the table in another case names another table. Before, the rename went through:
+the query's maintenance and every named call kept the old name, and a statement granted the table under a name nothing had any more —
+and granted it again to a table created later under that name.
+
+A `newName` that is a table's, or a materialized query's — one being created included, before its result table exists — is
+`409 TABLE_EXISTS` (**BL-1929, next train**: the query's name was not checked, so a table renamed into a query's create was taken for
+the query's result).
+
 **Request:**
 
 ```json
@@ -2611,6 +2638,27 @@ request carrying only `encoder` is now refused as having nothing to alter. The e
 (**BL-1199, 0.9.0**) A partition-key column is not renamed: `newName` on one is refused `400 PARTITION_KEY_FIXED`, before
 any other field of the request is applied (it was renamed; on a composite key a rename to or from `tenant_id` changed which column,
 and which JWT claim, partition-level security filters on).
+
+(**BL-1925, BL-1926, next train**) A column a stored definition reads is not renamed: `newName` is refused
+`409 COLUMN_RENAME_REFERENCED`, before any other field of the request is applied, while
+
+- a **materialized query** over the table names the column — its filter, `selectColumns`, group-by, an aggregate's input or order, the
+  order or tie-break of a `latestPerKey` / `firstPerKey` / `topNPerGroup` — or its result holds the **whole source row** (a `filter`,
+  `latestPerKey`, `firstPerKey` or `topNPerGroup` without `selectColumns`), which refuses a rename of any column of its source;
+- a **named query** that reads the table (as its table or a join's) or a **named mutation** of the table names the column;
+- an **access-policy statement** whose `where` reads the column and whose resource reaches the table (`*`, `<db>/*`,
+  `<db>/table/<name or *>`, or a query or mutation of the database) — a role's, a principal's, a limited key's (one that has not expired or been revoked) or the signup
+  setting's,
+  in the auth database that governs the database. If that auth database exists and is not open, the rename is refused too: its
+  statements cannot be checked.
+
+The message names each definition (a statement by its holder, never its `where` values). A rename rewrites the table's own definitions
+in the catalog — derived expressions, checks, transforms, references (**Durability-1, next train**) — but not these: drop or redefine
+each, rename the column, then re-create them by the new name. Before, the rename went through: a `filter` query over the renamed column
+answered an **empty** result and reported itself current, a query selecting it (or holding the whole row) went to `Error`, every call of
+a named query or mutation naming it failed `COLUMN_NOT_FOUND`, and a statement on it granted no row of the table.
+
+(**Durability-1, next train**) A `type` change that converts values (a Tier 2 change, such as `String` to `Int32`) is refused before anything changes when a **live** value does not convert, or a null sits in a `NOT NULL` column — *Column 'w' on table 't' cannot change from String to Int32: the value 'xyz' (hot segment 3, row 2) does not convert. Every live value converts or the change is refused; nothing was changed.* A deleted row's old value does not count. While a coalesce or a tier move of the table runs past 60 s the change is refused `409 WRITE_CONFLICT` and can be sent again. See [Schema: column type changes](../guides/schema.md#schemadiffresultwarnings--unsupported-modifications).
 
 **Request:**
 
@@ -3902,7 +3950,7 @@ Every error the backup controller raises is a JSON body with `error` (the messag
 | `BACKUP_ENGINE_NOT_READY` | 503 | the engine is not initialised yet |
 | `BACKUP_REQUEST_INVALID` | 400 | restore with neither `backupId` nor `targetTime` |
 | `BACKUP_TARGET_TIME_INVALID` | 400 | `targetTime` in the future, or at or before the set's cut; or the set is exact-restore-only (a member recorded no WAL root) |
-| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window; every member's window is checked before any engine stops, so nothing was changed |
+| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window, or an archived segment of it is not the whole segment its manifest entry spans (cut short, damaged or longer; the message names its seq — **Durability-1, next train**); every member's window is checked before any engine stops, so nothing was changed — except for a segment that can only be read when it is staged: the member's files were restored by then, and the message ends `The database '<db>' refuses to open (RESTORE_INCOMPLETE) until a restore of it completes.` |
 | `PITR_BULK_LOAD_UNAVAILABLE` | 409 | a bulk load committed before the target has no files in the store or the archive |
 | `PITR_KEYLESS_DELETE_UNRESOLVED` | 409 | a delete of a keyless table's row that the restore cannot apply |
 | `PITR_FAILED` | 500 | staging or replay failed; the database is quarantined (`POST /api/databases/{db}/unquarantine` after the cause is fixed) |
@@ -4115,12 +4163,12 @@ PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044
 |--------|------|
 | 400 Bad Request | `BACKUP_REQUEST_INVALID` (neither field); `BACKUP_TARGET_TIME_INVALID` (`targetTime` in the future, or at or before the set's cut — the message names both instants — or the set is exact-restore-only); `BACKUP_MANIFEST_REFUSED` or `BACKUP_SET_REFUSED` (another format); `BACKUP_DESTINATION_UNAVAILABLE` (a member's backup cannot be read) |
 | 404 Not Found | `BACKUP_NOT_FOUND`: the set does not exist at the destination, or no complete set lies at or before `targetTime` |
-| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `BACKUP_BLOB_DAMAGED`; `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
-| 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine` — except an auth database's, which runs on its staged copy before the swap: a refusal there leaves the auth database in place, unquarantined. `BACKUP_RESTORE_FAILED` for any other failure, among them a member whose files were restored and that did not open — the message names it, its quarantine and its cause, and `Restored and open: <names>` (a point-in-time restore answers this as `PITR_FAILED`) |
+| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive, or an archived segment of the window is not whole — **Durability-1, next train**); `BACKUP_BLOB_DAMAGED`; `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
+| 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine` (the open resumes the replay where it stopped, and the saved progress covers each schema change it had applied — **Durability-1, next train**; a keyless table's rows an interrupted open had flushed before their deletes were read cannot be resumed: *Run the restore again; it starts from the backup.*) — except an auth database's, which runs on its staged copy before the swap: a refusal there leaves the auth database in place, unquarantined. `BACKUP_RESTORE_FAILED` for any other failure, among them a member whose files were restored and that did not open — the message names it, its quarantine and its cause, and `Restored and open: <names>` (a point-in-time restore answers this as `PITR_FAILED`) |
 | 503 Service Unavailable | `BACKUP_ENGINE_NOT_READY`; `BACKUP_DESTINATION_UNAVAILABLE` |
 | 507 Insufficient Storage | `DISK_FULL`: the data directory's volume cannot hold the restore — what it writes (every member's backed-up files, the copy each auth database is restored into, the WAL a point-in-time restore stages) and a margin of 16 MiB and 5 %. The message names the bytes needed and the bytes free; `Retry-After: 30`; the body has `error` and `code` (no `remedy`: the middleware answers it, as for every `507`). What an in-place restore deletes first is not credited |
 
-The 400s, the 404, the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE`, `PITR_WINDOW_UNAVAILABLE` and the 507 `DISK_FULL` are decided before any engine stops: nothing was changed. `BACKUP_BLOB_DAMAGED` says in its message which it was: a damaged catalog root, or a damaged first WAL segment a point-in-time restore checks before it starts, changed nothing (`Nothing of '<db>' was changed.` / `Nothing was changed.`); any other damaged blob, the other `PITR_*` codes and the 500s come after a member's files were changed. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on holds `restore.incomplete` and is quarantined with `RESTORE_INCOMPLETE` — it is not opened on a mixture of its old files and the backup's — until a restore of it completes, which clears the quarantine; `POST /api/databases/{db}/unquarantine` on it answers `503 RESTORE_INCOMPLETE` and leaves it quarantined. **The auth databases are the exception**: `_serverauth` and every other auth database of the set are restored last, each into a copy beside it, and swapped in by rename only once every member has restored — so a restore that fails anywhere, the auth database included, leaves them as they were (the message says so), and the operator's key still signs in to run the restore again. A crash during the swap is finished by the next start: the old auth database before the swap's commit, the restored one from it. Fix the cause the `remedy` names, then restore again.
+The 400s, the 404, the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE`, `PITR_WINDOW_UNAVAILABLE` and the 507 `DISK_FULL` are decided before any engine stops: nothing was changed. The one exception is the window's last proof: the restore checks every archived segment of the window again as it stages it, and a segment that is not whole is found only then, after that member's backup files were restored — the member is left marked `restore.incomplete`, quarantined with `RESTORE_INCOMPLETE` until a restore of it completes, and the message says so (**Durability-1, next train**). `BACKUP_BLOB_DAMAGED` says in its message which it was: a damaged catalog root, or a damaged first WAL segment a point-in-time restore checks before it starts, changed nothing (`Nothing of '<db>' was changed.` / `Nothing was changed.`); any other damaged blob, the other `PITR_*` codes and the 500s come after a member's files were changed. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on holds `restore.incomplete` and is quarantined with `RESTORE_INCOMPLETE` — it is not opened on a mixture of its old files and the backup's — until a restore of it completes, which clears the quarantine; `POST /api/databases/{db}/unquarantine` on it answers `503 RESTORE_INCOMPLETE` and leaves it quarantined. **The auth databases are the exception**: `_serverauth` and every other auth database of the set are restored last, each into a copy beside it, and swapped in by rename only once every member has restored — so a restore that fails anywhere, the auth database included, leaves them as they were (the message says so), and the operator's key still signs in to run the restore again. A crash during the swap is finished by the next start: the old auth database before the swap's commit, the restored one from it. Fix the cause the `remedy` names, then restore again.
 
 **`integrityVerified` is always `true` in a 200**: every blob is checked against its SHA-256 and length as it is read, before the file gets its name, and a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`. The field stays for now and will be removed.
 
