@@ -11,12 +11,29 @@ Aouda runs from **one binary**. `aouda` and `Aouda.Server` are two names for the
 | Mode | Best for | Guide |
 |---|---|---|
 | **CLI** (`aouda start`) | Local development, quick demos, agent workflows | [Getting started](../getting-started/index.md) |
-| **Linux / systemd** | On-premise or cloud Linux servers | [Linux (systemd)](linux.md) |
-| **Windows Service** | On-premise Windows servers | [Windows Service](windows.md) |
-| **Docker** | Containerised environments, single-node production | [Docker](docker.md) |
+| **Linux / systemd** | On-premise or cloud Linux servers — **supported** | [Linux (systemd)](linux.md) |
+| **Windows Service** | Windows servers — **not supported for production** (see below) | [Windows Service](windows.md) |
+| **Docker** | Containerised environments, single-node production — **supported** (`linux/amd64` and `linux/arm64`) | [Docker](docker.md) |
 | **Docker Compose** | Server + Studio together, local multi-service setup | [Docker](docker.md#shutdown-grace) |
 | **A declared, multi-service deployment** (databases, keys, roles and schema files as configuration; wipe-and-start; `aouda reload`) | Compose or Kubernetes, many services, no seed script | [Declare a deployment](../guides/declare-a-deployment.md) (**0.15.0**) |
-| **Kubernetes / Helm** | Production clusters, multi-node replication, managed rollouts | [Kubernetes and Helm](kubernetes.md) |
+| **Kubernetes / Helm** | One node per database on Kubernetes, managed rollouts — multi-node replication is **not supported** (see below) | [Kubernetes and Helm](kubernetes.md) |
+
+---
+
+## Supported platform (**BL-1982, next train**)
+
+**Linux is the supported platform for a pilot**: the server in a container (the image is one manifest for `linux/amd64` and `linux/arm64` —
+**BL-1982, next train**; earlier images are `linux/amd64` only), or under systemd through `aouda service install`. Both architectures of Linux
+are supported.
+
+**Windows is built but not supported for production.** The Windows archives (`win-x64`, `win-arm64`) keep being published and labelled that way
+in every Release, because no part of the release gate runs on Windows and three Windows items are open: the flush and eviction fuzzers'
+sharing violations and wrong values on Windows (BL-996), the replication-slot tests' socket binds (BL-353) and a harness smoke that is red there
+(BL-1465).
+Use Windows to develop against a server, not to hold a pilot's data. This statement is revisited when a pilot runs on Windows or after 1.0.
+
+**Replication is not supported on any platform** in any release yet: run one node per database ([Kubernetes and Helm](kubernetes.md) says the
+same of the chart, and so does `docker-compose.cluster.yml`).
 
 ---
 

@@ -21,7 +21,9 @@ docker pull ghcr.io/aoudadb/aouda-server:<version>
 
 You need a token with `read:packages` on the `aoudadb` organisation.
 
-> **If you have seen `image: aouda/server` in older documentation, that image does not exist.** It was never published under that name, and any compose file or chart still naming it will fail to pull.
+> **If you have seen `image: aouda/server` or `aouda/studio` in older documentation, those images do not exist.** They were never published under those names, and any compose file or chart still naming them will fail to pull. Studio's image is **`ghcr.io/aoudadb/aouda-studio`** (**BL-1982, next train**), private in the same way: the repository's `docker-compose.yml` starts it beside the server, so log in to `ghcr.io` before `docker compose up`, or start only the server with `docker compose up aouda`.
+
+**Platforms** (**BL-1982, next train**). The server image is one manifest for **`linux/amd64` and `linux/arm64`**, so the same `docker pull` works on an Arm host (a Graviton instance, an Ampere VM, an Apple-silicon Linux VM); earlier images are `linux/amd64` only. Linux is the supported platform ([Deployment](index.md#supported-platform-bl-1982-next-train)). The Studio image is `linux/amd64` only.
 
 ---
 

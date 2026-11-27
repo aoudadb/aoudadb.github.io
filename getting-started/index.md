@@ -2007,7 +2007,7 @@ deployments is only which supervisor owns the process.
 | Mode | Command | Best for |
 |---|---|---|
 | **Development** | `aouda start --data-path ./data --port 5433` | Demos, quick testing, local AI-agent workflows |
-| **Production service** | `aouda service install`, then systemd or the Windows SCM owns it | VMs, bare metal, on-premise |
+| **Production service** | `aouda service install`, then systemd (**supported**) or the Windows SCM (**not supported for production**) owns it | VMs, bare metal, on-premise |
 | **Container** | `docker run … ghcr.io/aoudadb/aouda-server` | Containerised environments, Kubernetes |
 
 The engine and the auth model are identical in all three. What changes is who keeps the process

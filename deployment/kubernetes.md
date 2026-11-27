@@ -15,7 +15,15 @@ This guide describes how to deploy Aouda to Kubernetes using the official chart 
 
 - Kubernetes cluster (local or managed)
 - Helm 3
-- Access to `ghcr.io/aoudadb/aouda-server` and (optionally) `aouda/studio` images
+- Access to `ghcr.io/aoudadb/aouda-server` and (optionally) `ghcr.io/aoudadb/aouda-studio` images. Both are **private** (**BL-1982, next train**): create a pull secret from a `docker login ghcr.io` (a token with `read:packages`) and name it in the chart's `imagePullSecrets` value:
+
+  ```bash
+  kubectl create secret generic ghcr -n aouda --type=kubernetes.io/dockerconfigjson \
+    --from-file=.dockerconfigjson=$HOME/.docker/config.json
+  helm install aouda ./charts/aouda-cluster --namespace aouda --create-namespace --set 'imagePullSecrets[0].name=ghcr'
+  ```
+
+  The chart's images default to `ghcr.io/aoudadb/aouda-server` and `ghcr.io/aoudadb/aouda-studio` (the `aouda/server` and `aouda/studio` of older charts were never published). Pin `image.tag` to a released version rather than `latest`. The server image runs on `linux/amd64` and `linux/arm64` nodes; the Studio image on `linux/amd64` only.
 
 ## Quick Start
 
@@ -109,7 +117,7 @@ helm uninstall aouda --namespace aouda
 
 ### Cluster Size and Storage
 
-Keep `replicaCount=1`: more than one replica is not supported, and is not a way to get high availability. The example below shows the chart value for reference only.
+Keep `replicaCount=1`, the default: more than one replica is not supported, and is not a way to get high availability. The example below shows the chart value for reference only.
 
 ```bash
 helm upgrade --install aouda ./charts/aouda-cluster \
@@ -230,6 +238,6 @@ helm template aouda charts/aouda-cluster --set witness.enabled=true --set studio
 
 ## Notes
 
-- `replicaCount=1` runs Aouda in standalone mode (no replica-set env vars). This is the only supported setting.
+- `replicaCount=1` runs Aouda in standalone mode (no replica-set env vars). This is the only supported setting, and it is the chart's default (**BL-1982, next train**; it was `3`). A larger value starts a replica set, which is not supported: `helm install` prints a warning, and `values.yaml` and `docker-compose.cluster.yml` say so at the top.
 - Witness is for election quorum and stores no data; it has no purpose on a single node.
 - Ingress/TLS/cert-manager are intentionally out of scope for this chart version. If you add an Ingress or cloud load balancer in front of the Service, configure [trusted proxies](reverse-proxy.md) on Aouda — otherwise per-IP rate limits, lockout attribution, and audit-log client IPs are the proxy's address.
