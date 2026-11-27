@@ -534,8 +534,7 @@ aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durab
 |---|---|---|---|
 | `Aouda:Health:StartupDelaySeconds` | `int` | `10` | Suppress readiness failures during startup window |
 | `Aouda:Health:CheckTimeoutMs` | `int` | `5000` | Per-component check timeout |
-| `Aouda:Health:Thresholds:ReplicationLagDegradedSeconds` | `int` | `10` | |
-| `Aouda:Health:Thresholds:WalQueueDegradedPercent` | `int` | `80` | |
+| `Aouda:Health:Thresholds:ReplicationLagDegradedBytes` | `long` | `10000000` | Bytes a database may be behind its primary before `replication` is degraded (**BL-1843, next train**; the seconds key and the three `WalQueue…` keys are gone: the log has no queue to judge, and a position has no clock before M3) |
 
 ### Per-database settings (`databases` in `aouda.json`)
 
