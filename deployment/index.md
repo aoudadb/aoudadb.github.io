@@ -16,7 +16,7 @@ Aouda runs from **one binary**. `aouda` and `Aouda.Server` are two names for the
 | **Docker** | Containerised environments, single-node production — **supported** (`linux/amd64` and `linux/arm64`) | [Docker](docker.md) |
 | **Docker Compose** | Server + Studio together, local multi-service setup | [Docker](docker.md#shutdown-grace) |
 | **A declared, multi-service deployment** (databases, keys, roles and schema files as configuration; wipe-and-start; `aouda reload`) | Compose or Kubernetes, many services, no seed script | [Declare a deployment](../guides/declare-a-deployment.md) (**0.15.0**) |
-| **Kubernetes / Helm** | Production clusters, multi-node replication, managed rollouts | [Kubernetes and Helm](kubernetes.md) |
+| **Kubernetes / Helm** | One node per database on Kubernetes, managed rollouts — multi-node replication is **not supported** (see below) | [Kubernetes and Helm](kubernetes.md) |
 
 ---
 
