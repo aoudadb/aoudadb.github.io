@@ -570,8 +570,8 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `TABLE_NOT_FOUND` | 404 | The specified table does not exist |
-| `COLUMN_NOT_FOUND` | 404 | The specified column does not exist |
+| `TABLE_NOT_FOUND` | 404 | The specified table does not exist. Also a read whose table was dropped after its name was resolved and before it was read, on every read route — `/query`, `/query/count`, a named query, the graph and vector routes, `POST …/materialized-queries/{name}/query` and a subscribe's snapshot (an `error` message with this code) — with `details` "The table was dropped while this read was starting; nothing was read." (**BL-1936, next train**). A read that had already started reads the table to its end: a `DROP TABLE` keeps the files a running read holds until it is done, on the primary and on a replica that replays the drop (**BL-1933, next train**) |
+| `COLUMN_NOT_FOUND` | 404 / 400 | The specified column does not exist: `404` on a column route (`PATCH` / `DELETE …/tables/{name}/columns/{column}`), `400` when a read (`/query`, a named query) or a `rows/batch` operation names a column the table does not have (**BL-1937, next train**: a column found missing while a batch operation runs, with the `failedOperation` line) |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
 | `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
@@ -693,6 +693,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TABLE_RENAME_REFERENCED` | 409 | (**BL-1929, next train**) A table rename (`PATCH …/tables/{name}`, Embedded's `RenameTableAsync`) is refused while a definition stored outside the catalog names the table: a materialized query that reads it or whose result it is, a named query that reads it (as its table or a join's), a named mutation of it, or an access-policy statement whose resource is `<db>/table/<name>` (a wildcard resource does not count). Nothing was changed. The message names each definition, a statement by its holder. A table rename rewrites other tables' `references` and transforms' `to`, not these definitions: drop or redefine each, rename the table, then re-create them by the new name. |
 | `DECLARED_IN_CONFIGURATION` | 409 | (**BL-1463, 0.16.0**) The call would change an object the declaration file declares — a declared database, the schema of a database that declares one, a declared principal, role, credential or `signup` setting. Nothing was changed; the message names the file and the JSON pointer. Change the declaration, then run `aouda reload`. See [One writer per declared object](#one-writer-per-declared-object) |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
+| `MQ_RESULT_REPLACED` | 409 | (**BL-1932, next train**) A read of a materialized query's result (`/query` naming it, `POST …/materialized-queries/{name}/query`, a subscribe's snapshot as an `error` message) whose result was replaced while the read was starting and which could not follow it: the query was dropped and re-created with other columns, or its result was rebuilt more often than one read re-binds (four times). Nothing was read. Read again: the next read is bound to the query's current result. `@aouda/client` (`AoudaConflictError`) and `Aouda.Client` retry it under their retry policy. Before, `/query` answered it `500 INTERNAL_ERROR` and the materialized endpoint `400 INVALID_REQUEST` |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
 
@@ -3491,6 +3492,13 @@ retry from the failed operation. What each answer means for what was applied:
 - **`400 INVALID_REQUEST` for the request's shape** (see Errors below), a policy `403`, a scope that admits nothing, and a row-condition
   refusal of operation 0 (`403 AUTH_ROW_DENIED`): nothing was applied. Those checks run before the first operation
   commits. (**BL-1303, 0.9.0**)
+  So does the check of every operation against the table's schema (**BL-1937, next train**): an update's `set` column the table does
+  not have, a `set` value its column refuses (`"many"` into an `Int32`, 40000 into an `Int16`) or a `null` for a column that is not
+  nullable, and a delete's `orderBy` column the table does not have are `400 INVALID_REQUEST` *Operation[i] …*, nothing applied; a
+  delete's `orderBy` array column is `400 ARRAY_COLUMN_UNSUPPORTED`, nothing applied. They were
+  refused while operation `i` ran, after operations `0` to `i − 1` were applied. A delete's `orderBy` column is matched without case, as
+  every column a write names (`id` for `Id`; it was refused as an unknown column). A column found missing while an operation runs (the
+  table changed under the batch) is `400 COLUMN_NOT_FOUND` with the `failedOperation` line (it was `404 TABLE_NOT_FOUND`).
 - **`403 BATCH_ROW_DENIED_PREFIX_APPLIED`**, no `Retry-After`: the row condition refused operation `k` ≥ 1. Operations `0` to `k − 1`
   were applied, operation `k` and the later ones were not, and the row that check refused was not written. `details` names
   `appliedOperations` and `totalOperations` (and `refusalCode=AUTH_ROW_DENIED`). **Do not re-send the batch as-is.**
