@@ -1767,9 +1767,17 @@ Full typed `client.admin.*` surface covering all server management operations.
 ```typescript
 const health = await client.admin.health.check();
 const readiness = await client.admin.health.ready(); // { ready, reasons } (BL-1393, 0.11.0)
-const metrics = await client.admin.metrics();
+const metrics = await client.admin.metrics.snapshot();   // ADR 0073 (BL-851, next train)
 const info = await client.admin.server.info();
 ```
+
+`admin.metrics.snapshot()` is the [admin metrics contract](../reference/http-api.md#admin-metrics-bl-851-next-train) (**BL-851, next train**): an object
+keyed by metric name, each `{ type, unit, points }`. `METRICS` is the catalogue (type, unit, labels and one sentence per metric) and
+`MetricName` names one. `metricValue(snapshot, name, labels?)` sums the matching points — `undefined` when none matches (the server does
+not know it: never `0`), `0` for an absent combination of a sparse counter; `metricIncrease(earlier, later, name)` reads a different
+`server.startedAt`, or a lower value, as a reset; `metricQuantile(snapshot, name, q)` reads a histogram's buckets. `admin.metrics.history()`
+takes `minutes` 1–1440 and `interval` 10–3600 (outside: `400 INVALID_REQUEST`). `summary()`, `subsystem()`, `admin.server.metrics()` and
+`admin.server.databaseMetrics()` are gone with their routes.
 
 `admin.health.ready()` returns every reason the server is not ready (**BL-1393, 0.11.0**). `ReadinessResponse` is
 `{ ready, reasons }`, each reason `{ code, message, subject? }` with a stable `code` (`setup_required`, `database_pending`,
