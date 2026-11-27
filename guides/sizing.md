@@ -141,9 +141,9 @@ Open-file limit: soft 1024 -> 1048576 (hard 1048576).
 `--ulimit nofile=1048576:1048576` (Docker) or set it in the runtime. A systemd install already sets
 `LimitNOFILE`. If the log line reports a hard limit near 1024, raise it there.
 
-`GET /api/server/metrics` reports current usage under `process`: `openHandles`,
-`fileDescriptorSoftLimit` and `fileDescriptorHardLimit`. The two limits are `-1` on Windows, which
-has no such limit.
+`GET /api/admin/metrics` reports current usage as `aouda.process.open_files_count` and the soft limit as
+`aouda.process.open_files_limit_count`, which has no point on Windows, where there is no such limit (**BL-851, next train**; the
+`process` block of `GET /api/server/metrics`, gone with that route, also had the hard limit).
 
 ## Inserts and their materialized queries (**BatchFirst S13, 0.1.40**)
 
@@ -825,7 +825,7 @@ can sit at 39 % of its ledger and at its heap limit simultaneously.
 collection**, not the heap the GC has committed. A fast load produces garbage in gigabytes, and the GC
 keeps most of that memory committed after sweeping it. Read as pressure, it throttled the pipeline for
 being fast: on an 8 GB box with ~800 MB live, admission refused a 64 KB rebuild for minutes. The
-`lastGen2LiveBytes` field on `GET /api/server/metrics` is the closest external reading.
+`runtime.lastGen2LiveBytes` field on `GET /api/server/memory` is the closest external reading.
 
 (**WorkloadCore S06, 0.3.0**) **Heap pressure no longer refuses writes.** When the live heap passes 80 % of the GC hard
 limit, the memory broker is woken and frees memory — caches first, then hot segments, then, if nothing else is left, it takes

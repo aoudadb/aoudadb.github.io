@@ -69,7 +69,7 @@ using var client = new AoudaClient("http://localhost:5433", "myapp");
 |---|---|
 | `new AoudaClient(string serverUrl, string databaseName)` | You need nothing but the address and the database. |
 | `new AoudaClient(AoudaClientOptions options)` | You set options: auth, timeouts, retries. The full auth pipeline (a `401` refreshes the token and retries) is available only here. |
-| `new AoudaClient(HttpClient httpClient, AoudaClientOptions? options = null)` | You supply the `HttpClient` (a test server, a custom handler). Its `BaseAddress` is used when `ServerUrl` is not set. Auth is a static header on this client: no refresh on `401`. |
+| `new AoudaClient(HttpClient httpClient, AoudaClientOptions? options = null)` | You supply the `HttpClient` (a test server, a custom handler). Its `BaseAddress` is used when `ServerUrl` is not set. Auth is a static header on this client: no refresh on `401`. A sign-in sets that header; a load, a load sequence or a batch writer made before a sign-in as another user is refused (`AUTH_SESSION_REPLACED`), as on the other constructors (**BL-1919, next train**). |
 
 The client is `IDisposable` and `IAsyncDisposable`. Create one per server and database and keep it for the life of the
 application.
@@ -295,7 +295,7 @@ give.
 - A collection passed to the single-row overload of `InsertAsync` (`InsertAsync(new[] { entity })`): pass the collection to the many-rows overload. Dictionary rows given to the single-entity overload are inserted as rows.
 - **The embedded package refuses the same combinations, with the same words** (`Aouda.Embedded`: `ITableOperations`, `EmbeddedTableHandle`, `EmbeddedTable<T>`; **BL-1785, next train**). Before, an embedded `.Where(…).Limit(1).UpdateAsync(…)` updated every match, `.OrderBy("Id", true).Limit(1).DeleteAsync()` and `Limit(0)` deleted every match, and `.Where(…).TruncateAsync()` emptied the table. An embedded delete now carries `OrderBy` / `ThenBy` and `Limit` as the remote one does (`Limit(0)` deletes none) and reports `HasMore`; `EmbeddedTableHandle.DeleteAsync()` returns the engine's `EngineDeleteResult` (it returned an `int`). The refusals come before a missing table answers `0` under `TreatMissingAsEmpty`.
 
-**`BatchAsync`** checks every operation before anything is sent or applied, on both surfaces (**BL-1665, BL-1785, next train**): an update with a `Limit` or a non-empty `OrderBy` (they bound a delete; before, both clients dropped them and every match was updated), a delete with a `Set` or `SetExpr` (before, dropped), an update with no `Set` / `SetExpr`, a null operation or a null `Where` — each an `ArgumentException` naming the operation's index. An embedded batch reads each `Where` with the server's rules and texts (`ignoreCase`, a null entry, an empty group, the nesting depth, an unknown operator, a condition's `param`: `Operation[i] …`), and binds every operation's `Where` against the table before the first one runs, so a refusal leaves every operation unapplied.
+**`BatchAsync`** checks every operation before anything is sent or applied, on both surfaces (**BL-1665, BL-1785, next train**): an update with a `Limit` or a non-empty `OrderBy` (they bound a delete; before, both clients dropped them and every match was updated), a delete with a `Set` or `SetExpr` (before, dropped), an update with no `Set` / `SetExpr`, a null operation or a null `Where` — each an `ArgumentException` naming the operation's index. An embedded batch reads each `Where` with the server's rules and texts (`ignoreCase`, a null entry, an empty group, the nesting depth, an unknown operator, a condition's `param`: `Operation[i] …`), and binds every operation's `Where` against the table before the first one runs, so a refusal leaves every operation unapplied. Each operation's `Set` (a column the table lacks, a value its column refuses, a `null` for a column that is not nullable) and a delete's `OrderBy` columns are checked against the table before the first one runs too, embedded and remote (**BL-1937, next train**); they were refused while that operation ran, after the earlier ones were applied. A read refused `409 MQ_RESULT_REPLACED` (a materialized query's result replaced while the read was starting; nothing was read) is read again under the client's `RetryPolicy` (**BL-1932, next train**).
 
 **A condition's operand is read by its column's type, embedded as remote** (**BL-1781, next train**). The embedded `Where(column, op, value)` and a batch's `Where` are translated by the server's own translator: an operand is read as its JSON form would be on the wire (a `DateTime` as its ISO text, a `Guid` as its text, a `decimal` or `float` as the number it prints), so `Where("Num", "gte", 1.4m)` is `1.4` on both surfaces. Before, the embedded surface rounded a `decimal` or `float` range operand to an integer (`gte 1.4m` read `gte 1`), threw on a `DateTime`, a `Guid` or a `JsonElement`, and accepted a fractional operand on an integer column that the server refuses. A refusal is an `ArgumentException` with the server's text; an unknown column stays a `KeyNotFoundException`. **A RETURNING list is resolved before the mutation runs** on both: `["*"]` is every column, an empty list or an unknown column is refused with nothing changed (**BL-1783, next train**; embedded, `["*"]` answered one column named `*` of nulls after the mutation ran).
 
@@ -757,7 +757,11 @@ A handle returned for a key whose job had already committed (nothing sent) has t
 ## 8) What the SDK re-sends, and what it does not
 
 `RetryPolicy` retries transient failures (a connection that failed, a timeout, a `503`) for reads and for writes a repeat
-cannot change, at most `MaxRetries` times (3 by default: four attempts in all), with exponential backoff. A **capacity
+cannot change, at most `MaxRetries` times (3 by default: four attempts in all), with exponential backoff. **Not a `503` that no retry can
+satisfy** (**BL-1956, next train**): `FILE_FORMAT_REFUSED`, `DATABASE_QUARANTINED`, `LEGACY_WAL_PRESENT`, `RESTORE_INCOMPLETE` and
+`FORMULA_NOT_MAINTAINED` wait for an operator or for the node's state to change, so they are sent once and do not count toward the circuit
+breaker (before, a read of a quarantined database was sent four times and moved the breaker that guards every other call). A `500` is never
+retried. `@aouda/client` keeps the same list. A **capacity
 refusal** — `503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` or `429 SERVER_AT_CAPACITY` (`AoudaCapacityException`) —
 is waited out: a `Retry-After` in seconds is the least the SDK waits before the next attempt; without one (or with an HTTP
 date, which is not read) the backoff applies. A write whose repeat is **not** a no-op is treated differently
@@ -773,7 +777,11 @@ server already applied would apply it twice:
   refusal.
 - **A `:commit` refused for capacity has failed its job.** The server answers every repeat of it with the same `503`, so the
   SDK's re-sends end in `AoudaCapacityException`. Wait its `RetryAfter`, then run the load again: it starts a fresh job and
-  sends every row (the key is free again).
+  sends every row (the key is free again). (**BL-1897, next train**) So does a load whose job ended for capacity **before** its
+  commit (its memory wait ran out after `:begin`): the `:append` is refused with that `503`, the keyed `:begin` the SDK sends to
+  find the job begins a new one instead (the SDK aborts it), and the SDK throws the `AoudaCapacityException` — not
+  `BulkLoadAbortedException`, and not, after four rounds of the same `503`, a `BulkLoadAppendFailedException` whose key could
+  only reach the dead job.
 - **A bulk-load `:append` is re-sent only by the SDK, after asking where the job is** (**Lead S21a, 0.6.0**). A job's frames
   are numbered and the server applies each number once, so a body sent again loads none of its rows twice. An `:append` that
   fails in transit (a connection error, a timeout, a `503`) is answered by a `:begin` with the job's key — which stops the
@@ -1062,7 +1070,12 @@ timeout. **A call is sent in the session it was made in** (**BL-1855, next train
 signed in, and a call the server refused `401` after the session was replaced, are not sent (again) with the new user's token — they throw
 `AoudaSessionReplacedException` with `ErrorCode` `AUTH_REFRESH_SUPERSEDED`, unsent; a retry (`RetryPolicy`) is not repeated once the session
 changed, and the call throws the failure its last attempt got. `SignOutAsync` signs out the session it was called in: it sends that session's
-token and clears only that session, so a sign-in that completed while it was under way stays signed in.
+token and clears only that session, so a sign-in that completed while it was under way stays signed in. **`Auth.RefreshAsync()` refreshes the
+session it was called in** (**BL-1922, next train**): when another user signed in, or the session was signed out, while it was under way, it
+throws `AoudaSessionReplacedException` (`AUTH_REFRESH_SUPERSEDED`) and the session held now is unchanged; before, it returned the other user's
+access and refresh token. A repeat sign-in of the same user meanwhile still answers that session's pair. This holds on a client built on your
+own `HttpClient` too (**BL-1919, next train**): a load, a load sequence and an `IBatchWriter` made before a sign-in as another user send nothing
+with that user's header.
 
 ---
 

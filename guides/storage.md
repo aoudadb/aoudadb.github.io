@@ -529,7 +529,8 @@ is set (standalone `Aouda:Archive`, or a replica-set Backup node's `ThisNode.Arc
 The local PITR window remains write volume even when archiving is off. Archiving extends recovery
 beyond that bound. See [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
 
-Observability: archive cycle, bytes, and error counters are on `GET /api/metrics` (`WalMetrics`);
+Observability: `aouda.wal.archived_bytes_total`, `aouda.wal.archive_errors_total` and, per database, `aouda.wal.archive_lag_bytes` are on
+[`GET /api/admin/metrics`](../reference/http-api.md#admin-metrics-bl-851-next-train) (**BL-851, next train**; there is no `GET /api/metrics`);
 `WalArchiveHealthCheck` degrades when archiving is configured but the worker has not completed a cycle.
 
 Primary tests:
@@ -651,7 +652,7 @@ GET /admin/replication/status
 
 Expected result: create-db returns DB options snapshot; replication status returns per-database WAL lag telemetry when replication is configured.
 
-Common mistake: using `/api/admin/metrics` backup counters as if they are backup job controls (they are observability outputs).
+Common mistake: using the `aouda.backup.*` metrics of `GET /api/admin/metrics` as if they were backup job controls (they are observability outputs).
 
 ### A) API coverage matrix
 
@@ -661,7 +662,7 @@ Common mistake: using `/api/admin/metrics` backup counters as if they are backup
 | Create DB with persistence options | `DatabaseManager.CreateDatabaseAsync` (server-side) | `client.databases.create(...)` | `POST /api/databases` | Implemented | Good parity for core options |
 | Per-table durability overrides | `CreateTableAsync(... durability)` / `AlterTableDurabilityAsync` | Schema document `durability.level` | Declarative schema `durability.level`; table GET reports `durability` (**Lead S26, 0.6.0**) | Partial | The level is surfaced; replication / write concern overrides are engine-only |
 | Replication persistence status | `ReplicationState`/host services | `client.admin.replication.status/topology/coverage` | `/admin/replication/*` | Implemented | Monitoring and topology surface available |
-| Backup metrics visibility | Perf + metrics collector | `client.admin.metrics.*` | `GET /api/admin/metrics*` | Implemented | Observability only |
+| Backup metrics visibility | `BackupRunStatus` (kept over a restart) | `client.admin.metrics.snapshot()` | `GET /api/admin/metrics` (`aouda.backup.*`, **BL-851, next train**) | Implemented | Observability only |
 | Execute backup/restore lifecycle | `BackupEngine`, `RestoreEngine`, `BackupLifecycleManager` | `client.admin.backup.*` | `/admin/backup/*` | Implemented | P16 SA4; PITR via `targetTime` (BL-186 S07) |
 | Archive worker lifecycle controls | `WalArchiveWorker` (started with the engine) | Not exposed | No explicit archive admin routes | Partial | Worker runs when configured; no start/stop HTTP API. Health check covers "configured but not cycling." |
 

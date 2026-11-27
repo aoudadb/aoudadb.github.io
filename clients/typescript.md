@@ -246,6 +246,14 @@ principal (the same issuer and subject), and after `signOut({ scope: 'others' })
 WebSocket and long-poll alike — is re-authenticated with the new token. Before, only a refresh over the WebSocket did that: after a repeat
 sign-in or an exchange, and always over long-poll, everything ended when the token the connection was opened with expired.
 
+**An access token that expires on an open connection is renewed** (**BL-1921, next train**). The server ends a realtime session when its
+token expires and nothing re-authenticated it (`auth_error` or a poll's `401` `AUTH_CREDENTIAL_EXPIRED`, remedy `renew`); an application that
+only subscribes makes no call that would refresh the token first. The client now reconnects, refreshing the token before it does (even when the
+token's own expiry says it is still valid: the server's clock decides), and what was open resumes. A credential that cannot renew — a key past its
+expiry, a refresh the server refuses, an OIDC session (no refresh token) — is refused at that reconnect and ends every subscription and stream by
+name, once. A revoke, a sign-out elsewhere or a disabled user still ends everything at once. Before, every subscription and write stream ended
+with `AUTH_CREDENTIAL_EXPIRED` at the access token's lifetime (15 minutes by default). The C# client renews it too (**next train**).
+
 Before this, an open connection was neither replaced by a sign-in nor closed by `signOut()`: the earlier user's subscriptions, and new ones
 made after the next sign-in, delivered the earlier user's rows and their streams wrote as that user, until the connection was lost; then the
 earlier user's subscriptions resumed as the next one. On those versions, `await client.disconnect()` and make a new client when the user changes
@@ -716,11 +724,25 @@ until this train one with a `Retry-After` was; a proxy may answer it after forwa
 diffs sent as a `POST` — are re-sent after any transient failure, as before; a bulk load's `:append` is never re-sent by the retry
 policy — the bulk loader recovers it itself, after asking the server where the job is (below).
 
+**A `5xx` that no retry can satisfy is sent once** (**BL-1956, next train**): `500 BRANCH_SET_DAMAGED`, `500 EXACT_RESTORE_REFUSED`,
+`500 BULK_LOAD_CORRUPTION`, `503 FILE_FORMAT_REFUSED`, `503 DATABASE_QUARANTINED`, `503 LEGACY_WAL_PRESENT`, `503 RESTORE_INCOMPLETE` and
+`503 FORMULA_NOT_MAINTAINED` each wait for an operator (a file restored or repaired, a database unquarantined or restored, a branch made again)
+or for the node's state to change. A `retryPolicy` does not re-send them, even a read, and they do not count toward the circuit breaker —
+before, a branch list over a damaged branch file was sent four times and moved the breaker that guards every other call of the client. The C#
+client's list is the same. `FILE_FORMAT_REFUSED` is typed `AoudaServerError` and
+`AUTH_SESSION_NOT_FOUND` (`404`, a revoke of a session that does not exist) `AoudaNotFoundError`; both were a plain `AoudaApiError`.
+
 **A request no idle server could serve is `400 STATEMENT_TOO_LARGE`**, thrown as `AoudaValidationError` (**BL-1706, next train**; it
 was a plain `AoudaApiError`) and never re-sent: the same request is refused the same way. `details` says what to do — a write: send
 fewer rows in one request, or have the operator raise the database's memory share or the server's memory budget; a read: narrow the
 statement. Before, a write this large waited and was refused `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After`, every time, and a
 `retryPolicy` re-sent it to its bound. See the [error codes](../reference/http-api.md#request-validation-errors-4xx).
+
+**A read whose materialized query's result was replaced while it was starting is `409 MQ_RESULT_REPLACED`**, thrown as
+`AoudaConflictError` (**BL-1932, next train**) and re-sent under a `retryPolicy`: nothing was read, and the next read is bound to the
+query's current result. The server answers it when the query was dropped and re-created with other columns during the read (or its
+result rebuilt more than four times during it); it was `500 INTERNAL_ERROR` on `/query` and `400 INVALID_REQUEST` on
+`materializedQueries.query`, which were not re-sent.
 
 **A realtime message larger than the server reads in one is `MESSAGE_TOO_LARGE`** (**BL-1938, next train**): 64 KiB before
 authentication, `Aouda:WebSocket:MaxMessageBytes` (4 MiB by default) after. On a WebSocket a write stream whose frame is refused this
@@ -923,6 +945,10 @@ arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use 
   member is in [the HTTP reference](../reference/http-api.md#a-table-another-load-holds-bulk_load_table_locked) — and
   `error.retryAfterSeconds` says when to call again. Nothing was committed, and neither `bulkLoad` nor `bulkLoadJobs` sends it again
   by itself. (It was a `500` from the commit.)
+- **A load whose job ended for capacity** (**BL-1897, next train**) — its memory wait ran out after `:begin` — rejects with the
+  server's `503`: an `AoudaApiError` coded `MEMORY_BUDGET_EXCEEDED` (or `WAL_CAPACITY_EXCEEDED`), `retryAfterSeconds` set, as a
+  `:commit` refused for capacity does. Nothing was committed: wait, then run the load again. The SDK learns it with one keyed
+  `:begin`, which now begins a new job (aborted). It was a `BULK_LOAD_INVALID_STATE` that lost the reason.
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
   `409 BULK_LOAD_INVALID_STATE`). (**BL-1649, next train**) Only while the job's rows can be there: after the database is dropped and
@@ -1741,9 +1767,17 @@ Full typed `client.admin.*` surface covering all server management operations.
 ```typescript
 const health = await client.admin.health.check();
 const readiness = await client.admin.health.ready(); // { ready, reasons } (BL-1393, 0.11.0)
-const metrics = await client.admin.metrics();
+const metrics = await client.admin.metrics.snapshot();   // ADR 0073 (BL-851, next train)
 const info = await client.admin.server.info();
 ```
+
+`admin.metrics.snapshot()` is the [admin metrics contract](../reference/http-api.md#admin-metrics-bl-851-next-train) (**BL-851, next train**): an object
+keyed by metric name, each `{ type, unit, points }`. `METRICS` is the catalogue (type, unit, labels and one sentence per metric) and
+`MetricName` names one. `metricValue(snapshot, name, labels?)` sums the matching points — `undefined` when none matches (the server does
+not know it: never `0`), `0` for an absent combination of a sparse counter; `metricIncrease(earlier, later, name)` reads a different
+`server.startedAt`, or a lower value, as a reset; `metricQuantile(snapshot, name, q)` reads a histogram's buckets. `admin.metrics.history()`
+takes `minutes` 1–1440 and `interval` 10–3600 (outside: `400 INVALID_REQUEST`). `summary()`, `subsystem()`, `admin.server.metrics()` and
+`admin.server.databaseMetrics()` are gone with their routes.
 
 `admin.health.ready()` returns every reason the server is not ready (**BL-1393, 0.11.0**). `ReadinessResponse` is
 `{ ready, reasons }`, each reason `{ code, message, subject? }` with a stable `code` (`setup_required`, `database_pending`,
