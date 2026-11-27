@@ -54,7 +54,7 @@ the server's log has one line for the refusal (**BL-1978, next train**): `Reques
 `X-Request-Id` as `requestId` (`-` when it sent none) and the correlation id as `correlationId`, bounded like every refusal line
 ([Logs](../deployment/linux.md#logs): at most ten a second per code at `Warning`, so a fleet of old clients after an upgrade does not
 flood the log). The version the request named is a `Debug` line of the category `Aouda.Server.Middleware.ProtocolVersionCheckMiddleware`,
-off by default; `Logging__LogLevel__Aouda.Server.Middleware.ProtocolVersionCheckMiddleware=Debug` shows it:
+off by default; `Logging__LogLevel__Aouda.Server.Middleware.ProtocolVersionCheckMiddleware=Debug` shows it. The body:
 
 ```json
 {
