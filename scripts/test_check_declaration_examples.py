@@ -107,6 +107,7 @@ class DeclarationExampleTests(unittest.TestCase):
             f'{{ "and": {one} }}',  # not a list
             '{ "and": [] }',
             f'{{ "groups": [ {one} ] }}',  # a group is a row condition, not a condition
+            f'{{ "and": [ {{ "or": [ {one} ] }} ] }}',  # a nested one is in groups
             '{}',
             '"source"',
         ):

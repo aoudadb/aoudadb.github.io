@@ -317,7 +317,7 @@ Two limits per client IP address, each a sliding window of one minute in four se
 | Limit | Per IP and minute | Routes |
 |---|---|---|
 | Sign-up | 5 | `POST /api/databases/{db}/auth/signup` |
-| Sign-in | 20 | `POST /api/databases/{db}/auth/signin`, `POST /api/auth/signin`, `POST …/auth/request-password-reset`, `POST …/auth/reset-password`, `POST …/auth/authorize`, `POST …/auth/token`, `POST /api/auth/oidc/token` |
+| Sign-in | 20 | `POST /api/databases/{db}/auth/signin`, `POST /api/auth/signin`, and on `/api/databases/{db}/auth` only (`_serverauth` has none of these) `POST …/request-password-reset`, `POST …/reset-password`, `POST …/authorize`, `POST …/token`; `POST /api/auth/oidc/token` |
 
 Over the limit: `429 AUTH_RATE_LIMITED` with `Retry-After` in whole seconds (at least 1):
 
