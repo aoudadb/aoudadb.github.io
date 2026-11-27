@@ -71,6 +71,21 @@ class RemovedConceptsTests(unittest.TestCase):
         )
         self.assertEqual(crc.main(["--root", root]), 0)
 
+    def test_a_removal_table_is_allowed_per_page_and_per_name(self) -> None:
+        # Operability S27: a page that must name a removed concept to say what became of it is allowed that name
+        # there and only there. Another name on the same page, and the same name on another page, are hits.
+        page, name = next((p, next(iter(n))) for p, n in crc.REMOVAL_TABLES.items())
+        other = next(n for n in ("authMode", "Keys:File", "RootUser", "create-admin") if n not in crc.REMOVAL_TABLES[page])
+        self.assertEqual(crc.scan_text(page, name + "\n", vocabulary=True), [])
+        self.assertEqual(len(crc.scan_text(page, other + "\n", vocabulary=True)), 1)
+        self.assertEqual(len(crc.scan_text("guides/ok.md", name + "\n", vocabulary=True)), 1)
+
+    def test_no_page_is_allowed_as_a_whole(self) -> None:
+        # The allowance names its words; a page's live prose that teaches another removed concept stays a hit.
+        for page, names in crc.REMOVAL_TABLES.items():
+            self.assertTrue(names, page)
+            self.assertNotIn(page, crc.EXEMPT_FILES)
+
     def test_the_request_members_s20_deleted_are_hits(self) -> None:
         # Operability S20 (aouda BL-1832): a guide that still teaches pinAllInMemory or pkUniquenessOverride is refused, in any case;
         # the live `pkUniqueness` and `hotOnlyBackstop` are not.

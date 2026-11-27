@@ -131,6 +131,30 @@ _PAGES_LIMIT = 3
 EXEMPT_FILES = {"auth/migrating-from-0-14.md", "CHANGELOG.md"}
 EXEMPT_PREFIX = "_review/"
 
+# Pages that must name a removed concept to say what became of it: a refusal table (`SETTING_REMOVED`), an upgrade
+# table, a release-history row. The allowance is **per page and per name**, each with its reason: the same name on
+# another page, and another removed name on the same page, are still hits (Operability S27, aouda BL-1868). A page is
+# never exempt as a whole, so a live paragraph that teaches the removed concept is still found.
+REMOVAL_TABLES: dict[str, dict[str, str]] = {
+    "clients/compatibility.md": {
+        "mk_": "the 0.16.0 row says which surface the train removed",
+        "RLS": "the 0.16.0 row says which surface the train removed",
+    },
+    "guides/keys-that-survive-a-wipe.md": {
+        "ServerKeyFile": "the table of settings the server refuses (`SETTING_REMOVED`) names each",
+        "Keys:File": "the table of settings the server refuses (`SETTING_REMOVED`) names each",
+    },
+    "guides/plan.md": {
+        "RootUser": "the plan's `settings` stage lists the removed settings it reports",
+    },
+    "guides/upgrading.md": {
+        "authMode": "the upgrade table says what an old declaration now gets",
+        "server_admin": "the upgrade table says what an old setup now gets",
+        "create-admin": "the upgrade table says what an old script now gets",
+        "API key": "the upgrade table says what an old setup now gets",
+    },
+}
+
 _BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 _KEY = re.compile(r"aouda_[a-z2-7]{16}_[A-Za-z0-9]{49}")
 
@@ -205,6 +229,8 @@ def scan_text(path: str, text: str, vocabulary: bool) -> list[str]:
     for number, line in enumerate(text.split("\n"), start=1):
         for pattern, name, replacement in rules:
             if pattern.search(line):
+                if name in REMOVAL_TABLES.get(path.replace("\\", "/"), {}):
+                    break
                 findings.append(f"{path}:{number}: {name} — use {replacement}")
                 break
         for match in _KEY.finditer(line):

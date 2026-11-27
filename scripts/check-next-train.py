@@ -70,6 +70,7 @@ _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+t
 _ALLOW = {
     "BL-332",   # Studio Backups page: point-in-time restore / retention / prune UI still pending
     "BL-1472",  # 0.14.0 names it only as unfinished ("Any other failed start is unchanged (BL-1472)"); Operability S16 ships it
+    "BL-1672",  # 0.17.0 names it only as a known limitation (Durability-1 S04); Operability S13 ships the per-root record (aouda Unreleased)
 }
 
 
