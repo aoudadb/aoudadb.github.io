@@ -63,9 +63,10 @@ nothing is lost, a named test in the repository proves it.
   opens the others. Two ways on: restore the database from a backup, or open it past the damaged frame with
   `POST /api/databases/{db}/unquarantine?salvagePastCorruptWal=true` (or `aouda databases unquarantine --salvage-corrupt-wal`), which
   skips the frame and applies the frames after it — the writes of the skipped frame are lost, and the open logs it. The salvaged open
-  closes the damaged segment at its next write; until a checkpoint moves the replay's start past the damaged frame (the rows after it
-  written out of the write buffer), a later open — after a crash, or after a clean close that wrote nothing out — can refuse the
-  database again: salvage it again. **Two cases the check cannot tell from a torn tail**, so "a damaged frame refuses the open" is
+  closes the damaged segment at its next write, and before it serves it writes the rows it replayed out of the write buffer and
+  checkpoints, so the replay's start is past the damaged frame and the next open needs no salvage (**BL-1985, next train**; before,
+  a later open — after a crash, or after a clean close — was refused again, and the database had to be salvaged on every open). If
+  that write-out fails, the open still serves and says so in its log; the next open may then need salvage again. **Two cases the check cannot tell from a torn tail**, so "a damaged frame refuses the open" is
   not absolute: (1) damage in the very last frame written, or a length prefix damaged in more than one bit so that the frame seems to run
   past the last written byte; (2) a damaged frame followed, before the last written byte, by a whole aligned 512-byte block of zeros (a
   payload that holds one, for example), or one that starts one to three bytes before a block boundary and whose length's bytes there are
