@@ -69,7 +69,7 @@ using var client = new AoudaClient("http://localhost:5433", "myapp");
 |---|---|
 | `new AoudaClient(string serverUrl, string databaseName)` | You need nothing but the address and the database. |
 | `new AoudaClient(AoudaClientOptions options)` | You set options: auth, timeouts, retries. The full auth pipeline (a `401` refreshes the token and retries) is available only here. |
-| `new AoudaClient(HttpClient httpClient, AoudaClientOptions? options = null)` | You supply the `HttpClient` (a test server, a custom handler). Its `BaseAddress` is used when `ServerUrl` is not set. Auth is a static header on this client: no refresh on `401`. |
+| `new AoudaClient(HttpClient httpClient, AoudaClientOptions? options = null)` | You supply the `HttpClient` (a test server, a custom handler). Its `BaseAddress` is used when `ServerUrl` is not set. Auth is a static header on this client: no refresh on `401`. A sign-in sets that header; a load, a load sequence or a batch writer made before a sign-in as another user is refused (`AUTH_SESSION_REPLACED`), as on the other constructors (**BL-1919, next train**). |
 
 The client is `IDisposable` and `IAsyncDisposable`. Create one per server and database and keep it for the life of the
 application.
@@ -757,7 +757,11 @@ A handle returned for a key whose job had already committed (nothing sent) has t
 ## 8) What the SDK re-sends, and what it does not
 
 `RetryPolicy` retries transient failures (a connection that failed, a timeout, a `503`) for reads and for writes a repeat
-cannot change, at most `MaxRetries` times (3 by default: four attempts in all), with exponential backoff. A **capacity
+cannot change, at most `MaxRetries` times (3 by default: four attempts in all), with exponential backoff. **Not a `503` that no retry can
+satisfy** (**BL-1956, next train**): `FILE_FORMAT_REFUSED`, `DATABASE_QUARANTINED`, `LEGACY_WAL_PRESENT`, `RESTORE_INCOMPLETE` and
+`FORMULA_NOT_MAINTAINED` wait for an operator or for the node's state to change, so they are sent once and do not count toward the circuit
+breaker (before, a read of a quarantined database was sent four times and moved the breaker that guards every other call). A `500` is never
+retried. `@aouda/client` keeps the same list. A **capacity
 refusal** — `503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` or `429 SERVER_AT_CAPACITY` (`AoudaCapacityException`) —
 is waited out: a `Retry-After` in seconds is the least the SDK waits before the next attempt; without one (or with an HTTP
 date, which is not read) the backoff applies. A write whose repeat is **not** a no-op is treated differently
@@ -1066,7 +1070,12 @@ timeout. **A call is sent in the session it was made in** (**BL-1855, next train
 signed in, and a call the server refused `401` after the session was replaced, are not sent (again) with the new user's token — they throw
 `AoudaSessionReplacedException` with `ErrorCode` `AUTH_REFRESH_SUPERSEDED`, unsent; a retry (`RetryPolicy`) is not repeated once the session
 changed, and the call throws the failure its last attempt got. `SignOutAsync` signs out the session it was called in: it sends that session's
-token and clears only that session, so a sign-in that completed while it was under way stays signed in.
+token and clears only that session, so a sign-in that completed while it was under way stays signed in. **`Auth.RefreshAsync()` refreshes the
+session it was called in** (**BL-1922, next train**): when another user signed in, or the session was signed out, while it was under way, it
+throws `AoudaSessionReplacedException` (`AUTH_REFRESH_SUPERSEDED`) and the session held now is unchanged; before, it returned the other user's
+access and refresh token. A repeat sign-in of the same user meanwhile still answers that session's pair. This holds on a client built on your
+own `HttpClient` too (**BL-1919, next train**): a load, a load sequence and an `IBatchWriter` made before a sign-in as another user send nothing
+with that user's header.
 
 ---
 
