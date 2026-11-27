@@ -913,7 +913,7 @@ This page talks to the **runtime** MQ HTTP API. Schema-file desired state is a d
 **Settings → Access** (`/settings/access`; **BL-1464, 0.16.0**) is the page for the principals, roles, sign-up, credentials and sessions of one auth database at a time. Its menu entry shows for a credential that holds `manage` on `server`; the page itself is the server's to refuse. See [Principals](../auth/principals.md), [Credentials](../auth/credentials.md) and [Declared access](declared-access.md) for the model.
 
 - **Auth database.** *Server* is `_serverauth`; one more button per application auth database (a database of kind `application`). With none, the page says so: choose *Create `auth` and link* when you create a database, or declare one. The auth database and the tab are in the address: `/settings/access?authDatabase=<name>&tab=<id>`.
-- **Tabs.** *Who am I*, *Principals*, *Roles*, *Sign-up* (application auth databases only, `_serverauth` takes no signup), *Sessions* and *Audit log* (*Server* only; **BL-1986, next train**) and *OIDC discovery*. Below, `…` is `/api/auth/{authDatabase}`.
+- **Tabs.** *Who am I*, *Principals*, *Roles*, *Sign-up* (application auth databases only, `_serverauth` takes no signup), *Sessions* and *Audit log* (both *Server* only; **BL-1986, next train**), and *OIDC discovery*. Below, `…` is `/api/auth/{authDatabase}`.
 
 | Tab | Shows, and lets an operator | Server routes | The principal needs `manage` on |
 |---|---|---|---|
