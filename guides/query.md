@@ -535,8 +535,9 @@ What to monitor first:
 - Pruning effectiveness: `Perf.PagesPrunedByMinMax` (row groups skipped by their statistics), `Perf.SegmentsPrunedFully`, bloom counters.
 - Partition pruning and hot-tier hits: `Perf.SegmentsPrunedByPartitionKey`, `Perf.HotSegmentHits` / `HotSegmentMisses`.
 - Parallel execution behavior: `Perf.ParallelSegmentScans`.
-- ⚠️ The `query` subsystem of `/api/admin/metrics` still carries `hotAggregateOps` and `coldAggregateOps`; nothing has
-  moved them since the old scans were deleted (**ColumnarRead, 0.3.0**).
+- On the wire: `aouda.query.rows_scanned_total` (by `tier`), `row_groups_read_total`, `row_groups_pruned_total`,
+  `segments_pruned_total` (by `reason`) and `parallel_scans_total` on [`GET /api/admin/metrics`](../reference/http-api.md#admin-metrics-bl-851-next-train) (**BL-851, next train**;
+  the old `query` subsystem object is gone).
 
 Quick-answer matrix:
 

@@ -1451,8 +1451,9 @@ running now or already dead.
 | `MqRebuildPooledRequests` / `MqRebuildPooledQueries` / `MqRebuildSourceGroups` | Pooled refresh usage. `PooledQueries / SourceGroups` is how many queries each traversal served. |
 
 `MqBuildRunBytesWritten` only goes up. **How much scratch is on disk right now** is
-`mqSpillOutstandingBytes` on `GET /api/server/metrics`, with `mqSpillCeilingBytes`,
-`mqSpillCeilingExceeded`, and `mqPublishBacklog` beside it (**BL-624, 0.1.38**). The ceiling is
+`aouda.materialized.spill_bytes` on `GET /api/admin/metrics`, per database, with `aouda.materialized.spill_ceiling_bytes` and
+`aouda.materialized.pending_jobs_count` (the bulk loads a pass owes) beside it (**BL-851, next train**; they were `mqSpillOutstandingBytes`,
+`mqSpillCeilingBytes` and `mqPublishBacklog` on `GET /api/server/metrics`, gone; **BL-624, 0.1.38**). The ceiling is
 `Aouda:MaterializedQueries:Rebuild:MaxOutstandingSpillBytes` (`-1`, the default, derives 10 % of the volume's free space with a
 1 GiB floor; `0` is unbounded). Crossing it is logged once and counted; it is a report, not a limit — no rebuild is refused and
 none in flight is interrupted. `mqSpillOutstandingBytes` includes the run file a refused or closed chunked rebuild keeps for its

@@ -63,9 +63,10 @@ There is no converter. A `{ "hash": "sha256:<hex>" }` secret has no counterpart:
 
 ### Counting refused keys (**BL-1428, BL-1430, 0.12.0**) {#counting-refused-keys}
 
-`GET /api/server/metrics` (`manage` on `server`) counts the credentials refused since the server started, once per refusal, as two splits of the same
-total: `rejectedApiKeysByTransport`, `{ "http": n, "websocket": n, "longpoll": n }`, and `rejectedApiKeysByReason`,
-`{ "credential": n, "malformed": n, "retired_format": n }` (**BL-1464, 0.16.0**: the reasons; there is no count by kind of key). Each always lists all of its names.
+`aouda.auth.rejected_keys_total` on [`GET /api/admin/metrics`](../reference/http-api.md#admin-metrics-bl-851-next-train) (`manage` on `server`) counts the credentials refused since the server
+started, once per refusal, by `transport` (`http`, `websocket`, `longpoll`) and `reason` (`credential`, `malformed`, `retired_format`): nine
+points, always all of them (**BL-851, next train**: it was `rejectedApiKeysByTransport` and `rejectedApiKeysByReason` on `GET /api/server/metrics`,
+which is gone; **BL-1464, 0.16.0**: the reasons; there is no count by kind of key).
 
 - **Every transport counts**: HTTP, the WebSocket `auth` or `re_auth` message, and a long-poll connect. A rising `websocket` with a flat `http` is
   the signal of a feeder locked out.
