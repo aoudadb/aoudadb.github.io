@@ -50,7 +50,11 @@ listener a route that listener does not serve keeps its own `404`. It is checked
 browser app) reads the refusal; before this change a browser saw a network error. A preflight names no version and is answered as before.
 
 The body is the protocol error envelope with a `remedy` and the request's id (the caller's `X-Request-Id`, else the correlation id);
-the server's log has one warning line with the code and that id:
+the server's log has one line for the refusal (**BL-1978, next train**): `Request refused.` at `Warning`, with the code, the caller's
+`X-Request-Id` as `requestId` (`-` when it sent none) and the correlation id as `correlationId`, bounded like every refusal line
+([Logs](../deployment/linux.md#logs): at most ten a second per code at `Warning`, so a fleet of old clients after an upgrade does not
+flood the log). The version the request named is a `Debug` line of the category `Aouda.Server.Middleware.ProtocolVersionCheckMiddleware`,
+off by default; `Logging__LogLevel__Aouda.Server.Middleware.ProtocolVersionCheckMiddleware=Debug` shows it. The body:
 
 ```json
 {
