@@ -82,7 +82,10 @@ Exit statuses — `dump`: 0 complete, 1 refused or failed, 64 misuse, 69 the ser
 
 **Carried**: every data database with its options, its schema (tables, columns, materialized queries), and every table's rows —
 tabular tables, **edge tables** and **`Vector` columns**. Materialized queries are created on the target and rebuilt;
-`load` waits for them to be `Ready`. The server's declaration is exported beside the data (`declaration/`) with its notes.
+`load` waits for them to be `Ready`. A `Vector` column is read through the [vector export](../reference/http-api.md#get-apidatabasesdbtablesnamevectorscolumnexport),
+which reads the sealed and the still-buffered vectors, each with the embedding-model version it was inserted with, and **flushes nothing**
+(**BL-1733, BL-1735, next train**; before, it first flushed every edge and vector buffer of the database, and `load` flushed the target's
+between two versions of one partition). The server's declaration is exported beside the data (`declaration/`) with its notes.
 
 **Not carried**:
 
@@ -113,6 +116,9 @@ with the dump's declaration first), `LOAD_VERIFY_FAILED` (a loaded table's count
 A table with a **server-time or identity column** is loaded with its stamps as dumped: that needs the **server operator's** key
 (`LOAD_RESTORE_REQUIRES_OPERATOR`, exit 77, nothing written), and the audit log records `bulk_load_restore`. Tables with a `unique` or `references` column, edge tables and
 vector columns are **inserted, not bulk-loaded**, so they are not atomic: if a load of one fails part-way, truncate that table and load again.
+That holds for a table with a `Vector` column too (**BL-1811, next train**): a truncate removes its vectors, sealed and buffered, so the second
+load finds the column empty and loads it. Before, a truncate left them, and the second load was refused `LOAD_TABLE_NOT_EMPTY`. A vector
+deleted on the source (`DeleteVectorAsync`) is not dumped, whether it was buffered or sealed (**BL-1734, next train**).
 Two such tables are refused with `LOAD_TABLE_UNSUPPORTED`, because the insert path would change what they hold: one that also has a server-time or
 identity column (refused before the first write; load the others with `--tables`), and one with a write-time computed column (refused when
 `load` reaches it, after the tables before it were loaded).
