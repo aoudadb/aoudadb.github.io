@@ -219,7 +219,7 @@ If you run server defaults and do not set per-database overrides:
 | Backup manifest + incremental dedup engine | Yes | No | No | P4 EpicD Task1/3 reports, backup engine tests | Engine-level implementation complete |
 | Restore engine, exact restore | Yes | No | No | `RestoreEngine.cs`, restore tests; BL-186 S03 | Re-bases WAL root and catalog directory |
 | PITR replay (local WAL + archive) | Yes | No | No | BL-186 S06/S07; recovery-path replay, HTTP `targetTime` | Transaction-commit granularity; local window is write volume |
-| Backup retention and blob GC | Yes | No | No | `BackupSetPruner` (`BackupSetRetention.cs`), `/admin/backup/retention`, `/admin/backup/prune` | A set is kept or deleted whole; dry run unless `execute`; archived WAL is never collected |
+| Backup retention and blob GC | Yes | No | No | `BackupSetPruner` (`BackupSetRetention.cs`), `/admin/backup/retention`, `/admin/backup/prune` | A set is kept or deleted whole; dry run unless `execute`; the blob GC never collects archived WAL a record names (the archive's own `Aouda:Archive:WalRetentionDays` bounds it) |
 | HRA snapshot (`.hra`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Closes Gap C — rows written since last shutdown are now backed up |
 | Mutable keyed tier (`.mkt`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Cache/UPSERT tier rows covered in backup and restore |
 | Public REST backup/restore operations | Yes | No | No | P16 SA4, `/admin/backup/*`, both SDKs | Exact restore + PITR `targetTime` (BL-186 S07). Studio UI is exact-restore-only |

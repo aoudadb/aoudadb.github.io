@@ -472,4 +472,5 @@ never-sealing mutable table is covered entirely by the snapshot. `memory` tables
 **A mistake at 15:03**: `aouda backup restore --target-time 2026-11-21T15:03:00Z`. The response lists, per database, the transactions and rows replayed.
 
 **Embedded**: `BackupEngine.CreateBackupAsync`, `RestoreEngine.RestoreAsync` (set `TargetTime`, then reopen — the replay happens on open) are available to a host that
-embeds the engine. Retention is the server's (§5); the engine package has no retention manager of its own (**BL-1692, next train**: `BackupLifecycleManager` is deleted).
+embeds the engine. Retention is the server's (§5): the engine's `BackupSetRetentionPlanner` and `BackupSetPruner` are what it runs, with no saved policy or
+schedule of their own (**BL-1692, next train**: `BackupLifecycleManager` is deleted).
