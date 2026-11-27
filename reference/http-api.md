@@ -2151,6 +2151,13 @@ not changed (copy on write). Before, every such write over a row the branch inhe
 edges included — failed with `500`. A branch's vector search finds the vectors the database had at the create (**BL-1799, next
 train**; it found none of the sealed ones).
 
+**A branch keeps the values of its create** (**BL-1991, next train**). What the database rewrites in its stored rows after the
+create — a derived column's changed expression recomputed over its rows, a column's stored pages rewritten for a new type — does not
+reach the branch: the branch reads every segment it inherited as it was at the create, and the database keeps those files while a
+branch still reads them (disk the database frees only once the branch is deleted). Before, the branch read the database's rewritten
+values under its own older schema, with no error, and a column the branch then added or recomputed froze them into the branch's own
+copy.
+
 **A failed create leaves nothing** (**BL-1798, next train**). The branch is listed only once its files are whole: a create that fails,
 or a server that crashes inside one, leaves no branch of that name, and a create of the name succeeds afterwards. A leftover
 directory of the same name is removed by the next create rather than reused. Before, a crash inside a create left a listed branch
