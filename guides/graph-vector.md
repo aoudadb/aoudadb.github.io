@@ -148,9 +148,11 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 - `DataType.Vector` column type with `VectorColumnConfig` (`Dimensions`, `Distance`, `Quantization`, `IvfCells`, `EmbeddingModel`, `EmbeddingModelVersion`, `MatryoshkaDims`)
 - Vector WAL frames: `WalTag.VectorInsertV2`, `WalTag.VectorDelete`; replay produces `VectorHraBuffer` state. (**BL-923, 0.3.0**) Vectors still in the write buffer now survive a crash: before, the open never replayed vector frames and nothing kept the checkpoint from passing them, so every vector not yet flushed was lost. Each vector buffer holds the checkpoint below its oldest unflushed frame, and replay skips what a segment already holds. ⚠️ **Format change (clean cut):** the vector-insert frame is format 2 (`VectorInsertV2`, tag 69; it was `VectorInsert`, tag 50); a format-1 frame past the checkpoint is refused at open as for edges above. A vector segment's catalog entry now records its column (`vectorColumn`) — part of catalog format 6 (**RR-A2-4, 0.3.0**), so a directory an older build wrote is refused at open rather than read with the field absent.
 - **A new branch and the parent's buffers (BL-1760, next train):** a branch create copies the parent's buffered rows (see
-  [`POST …/branches`](../reference/http-api.md#post-apidatabasesdbbranches)) but **not** an edge table's buffered edges and rows, nor
-  buffered vectors: an edge table reads, in a new branch, the edges already sealed into segments. Sealed vectors of the parent are not
-  found by a branch's vector search either (BL-1799; a branch has no vector route over HTTP).
+  [`POST …/branches`](../reference/http-api.md#post-apidatabasesdbbranches)), an edge table's buffered edges and ordinary rows and
+  buffered vectors included: the create seals every edge and vector buffer into segments, as a backup does. A branch's generic
+  `UPDATE` / `DELETE` and `DeleteEdgeAsync` apply to the edges it inherited sealed (**BL-1954, next train**; they failed), and its
+  vector search (embedded; a branch has no vector route over HTTP) finds the parent's vectors as they were at the create, and a vector
+  delete on the branch hides one in the branch only (**BL-1799, next train**; it found none of the sealed ones).
 - **Branches (BL-923, 0.3.0):** a branch's edges and vectors survive a crash and a clean close. A branch's open replays its edge and vector frames, and a branch flushes its edge and vector buffers like the main database. Before, nothing flushed them — not even a clean close — so a branch's edges and vectors were lost on any restart, and its flushed vectors were not searched after a reopen.
 - `VectorHraBuffer` — in-memory hot write area; freeze-and-swap flush per IVF cell
 - `IvfCentroidStore` — persists IVF centroids trained by `KMeansHelper`
