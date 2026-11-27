@@ -932,7 +932,7 @@ arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use 
 - **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129). With
   `validation: "strict"` it also refuses a null in any NOT NULL column, and a key the job holds twice or the table already holds
   fails the job (`409 BULK_LOAD_DUPLICATE_PK`, an `AoudaApiError` with that `code`); `handle.validation` names the level.
-  `pkUniquenessOverride` is gone (**breaking**). See [A load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060).
+  See [A load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060).
 
 ```typescript
 const key = `orders-${day}`;
@@ -1037,8 +1037,8 @@ early expiry), on any other table it is one log record and whole segments retire
 
 (**Lead S26, 0.6.0**) A database's durability level is `options.durability` — `'strict'` (the server's default when
 omitted), `'os'`, `'unlogged'` or `'memory'` (the `DurabilityLevel` type), sent only when set. It replaces `enableWal` (`false` is
-`'unlogged'`) and `dataDurability` (`'MemoryOnly'` is `'memory'`); the client no longer sends either, and the server refuses both with
-`400 INVALID_REQUEST`. `DatabaseOptionsInfo` reads `durability` in place of the boolean `enableWal`; a table's detail carries
+`'unlogged'`) and `dataDurability` (`'MemoryOnly'` is `'memory'`); the client no longer sends either, and the server refuses both as
+members the body does not have, `400 REQUEST_MEMBER_UNKNOWN` (**BL-1832, next train**). `DatabaseOptionsInfo` reads `durability` in place of the boolean `enableWal`; a table's detail carries
 `durability: { level, source }` (`TableDurabilityInfo`) in place of `policy.residency.dataDurability`; and the schema document's
 table `durability` takes `level` (`'strict'`, `'unlogged'` or `'memory'`). See
 [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-060).

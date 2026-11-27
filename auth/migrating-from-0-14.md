@@ -18,11 +18,12 @@ Each row is the exact thing the old input now gets.
 |---|---|
 | A format-18 data directory | Refused at start. The line is `DATA_DIRECTORY_FORMAT_REFUSED: found=18 expected=19 path=<catalog root file>`. |
 | Any key whose text starts with `mk_` | `401 AUTH_KEY_MALFORMED`, remedy `fix-key`, `reason: retired-format`. The message is: `This key is in the retired mk_ format. Create a key in the current format (aouda keys new, or a stored key on a principal) or ask an administrator for one.` No lookup. |
-| A non-empty `X-User-Token` header, a realtime `user_token`, or a long-poll `userToken` | `400 INVALID_REQUEST`. The message is: `X-User-Token is no longer supported. Send the user's own token as the credential, or mint a limited key (POST /api/auth/keys).` The value is not read. |
+| A non-empty `X-User-Token` header | `400 INVALID_REQUEST`. The message is: `X-User-Token is no longer supported. Send the user's own token as the credential, or mint a limited key (POST /api/auth/keys).` The value is not read. |
+| A realtime `user_token` (on `auth` or `re_auth`) or a long-poll `userToken`, with any value — `null` and `""` included | `REQUEST_MEMBER_UNKNOWN` (`400` on the long-poll connect), naming the member: neither message has it (**BL-1664**, **BL-1832, next train**; it was `400 INVALID_REQUEST` for a non-empty value, and an empty one was accepted). The value is not read or shown. |
 | `Aouda:Auth:Keys:File` (the identities file, often `aouda.identities.json`) | `SETTING_REMOVED` at plan and start, naming principals in `aouda.json` as the replacement. The value is never read. |
 | `Aouda:Auth:Bootstrap:ServerKey` and `ServerKeyFile` | `SETTING_REMOVED`, naming a `server.principals` entry. |
 | `Aouda:Auth:RootUser:Email` and `Password` | `SETTING_REMOVED`, naming a `server.principals` entry with a password seed. |
-| `allowSelfSignup`, `selfSignupRole` on a create or link body | `400 INVALID_REQUEST`, naming `PUT /api/auth/{authDatabase}/signup`. |
+| `allowSelfSignup`, `selfSignupRole` on a create or link body | `400 REQUEST_MEMBER_UNKNOWN`, naming the member (**BL-1832, next train**; it was `400 INVALID_REQUEST` naming the route). Set sign-up with `PUT /api/auth/{authDatabase}/signup`. |
 | A schema file or table body carrying `partitionLevelSecurity`, `authMode`, `plsClaimBinding`, `permissionDimension`, `permissionColumn`, `rlsResolverName` | `400 SCHEMA_UNKNOWN_MEMBER`, naming the member. A table carries no security. |
 | `dataPlaneAccess` on a table or a materialized query | `400 SCHEMA_UNKNOWN_MEMBER`. Reach is a statement on `anonymous`. |
 | `aouda create-admin` | Unknown command, exit 64. The first operator is `aouda init`, setup mode, the declaration, or `--dev-admin`. |

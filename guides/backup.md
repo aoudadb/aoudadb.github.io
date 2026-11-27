@@ -73,8 +73,8 @@ server on it with `aouda start --data-path <dir>`.
   cannot read and a point-in-time restore outside its archive window (§4.1), before it stops anything — a refused window changes nothing.
 - **Every blob is checked against its key as it is read** — its SHA-256 and its length, before the file gets its name: a backed-up file,
   the catalog, an archived WAL segment, a branch's files. A blob that does not match refuses the restore with `BACKUP_BLOB_DAMAGED` (409),
-  naming the file and the set; nothing is written under that file's name. `integrityVerified` in a successful
-  response is therefore always `true`.
+  naming the file and the set; nothing is written under that file's name. A successful restore is therefore a verified one, and its
+  answer says nothing more about it (**BL-1748, next train**: the `integrityVerified` it carried, always `true`, is gone).
 - **A restore that stops part-way leaves a database that refuses to open.** From its first change to its last step a restore marks the
   database `restore.incomplete`; a database that holds it is not opened (`RESTORE_INCOMPLETE`) — the server keeps it quarantined, an
   embedded open throws — until a restore of it completes. A refused blob, a cancellation or a crash
@@ -413,6 +413,7 @@ refused key (401 / 403) has the authentication envelope instead, and a `507 DISK
 | The backup could not take its fence | `BACKUP_FENCE_TIMEOUT` 503 | Retry; a less loaded server takes it |
 | A buffer could not be sealed for the backup | `BACKUP_BUFFERS_UNSEALED` 503 | Retry |
 | A branch could not be captured | `BACKUP_BRANCH_UNAVAILABLE` 409 | Repair or delete the branch the message names, retry |
+| A registered database is not open (listed in `Aouda:SkipDatabases`, or quarantined) | `BACKUP_DATABASE_NOT_OPEN` 409, naming it and why; no set is taken (**BL-1953, next train**; it was `400 BACKUP_DESTINATION_UNAVAILABLE`) | Open it — take it out of `Aouda:SkipDatabases` and restart, or resolve its quarantine — or drop it, then retry |
 | Restore of a set taken before this release | `BACKUP_SET_INCOMPLETE` 409: the set has no completion record | Restore it with the build that took it, or take a new backup after the upgrade |
 | A set whose manifest is of another version | `BACKUP_MANIFEST_REFUSED` 400, `found=<n> expected=4 backup=<id> path=<manifest>` | Restore it with the build that took it |
 | Restore of a set one database failed | `BACKUP_SET_INCOMPLETE` 409 | Restore another set; a prune removes it |

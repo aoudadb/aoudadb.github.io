@@ -808,8 +808,8 @@ const handle = await client.table('trades').bulkLoad(batches, { validation: 'str
 - **Reported:** `:begin`, `:commit` and `GET {jobId}` answer `validation`; `BulkLoadJobHandle.Validation` (C#) and
   `handle.validation` (TypeScript) name it. A job answered from its commit record after a restart has none on the wire (the SDKs
   report the level they asked for).
-- `pkUniquenessOverride` is gone (**breaking**): no server applied it, and a `:begin` that sends it is refused naming `validation`.
-  The CLI's `--pk-uniqueness` is refused the same way; use `--validation coerce|strict`.
+- The level is `validation`, and only `validation`: `:begin`'s options take no other key check, and a member they do not have is
+  `400 REQUEST_MEMBER_UNKNOWN` naming it (**BL-1832, next train**). The CLI's `--pk-uniqueness` is refused naming `--validation coerce|strict`.
 
 ### Sizing a session: fewer, longer, one commit
 
@@ -1032,7 +1032,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables: refused at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS` when missing (it failed the job at its first `:append` and `:commit` before). |
 | `BulkLoadOptions.MaxRowsPerSegment` | int? | `TargetRowsPerPage * 16` | positive int | Engine/API/client | Segment sizing knob. |
 | `BulkLoadOptions.ConflictPolicy` | enum | `Block` | `Block`, `FailFast` | Engine/API/client | What this load does when another load holds its table: wait for it (at most `LockAcquisitionTimeout`), or not at all. (**BL-1743, next train**) Either way a load that cannot have it is refused `409 BULK_LOAD_TABLE_LOCKED`, at its first `:append` or its commit. |
-| `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, 0.6.0**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |
+| `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, 0.6.0**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060). A load has no other key check. |
 | `BulkLoadOptions.PrincipalId` | `Guid` | `Guid.Empty` | valid guid | Engine/API | Stamped into bulk-load WAL frames. |
 | `BulkLoadOptions.LockAcquisitionTimeout` | `TimeSpan` | `30s` | positive duration | Engine/API | Lock wait bound. |
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |

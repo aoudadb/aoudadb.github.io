@@ -956,15 +956,15 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `name` | string | Yes | Database name. |
 | `durability` | string | No | The database's durability level (**Lead S26, 0.6.0**): `strict` (default — WAL written through before a write is visible), `os` (WAL written to the operating system, not forced to disk), `unlogged` (no WAL; (**Lead S26c, 0.6.0**) emptied by an open that does not follow a clean close if it was being changed), `memory` (no WAL, no data files). Lower case, exactly these four: anything else — `"Strict"`, `"MemoryOnly"`, `"everysec"` — is **400** `INVALID_REQUEST` naming the four levels. Read at every open; tables that name no level inherit it. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-060). |
 | `replicationMode` | string | No | `Replicate` (default) or `DoNotReplicate`. |
-| `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, 0.4.0:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
+| `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). Responses carry it as `options.maxMemoryShareBytes`. |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
 | `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database; both may include `auth`. `kind: "auth"` together with an `auth` object is rejected (400). |
 | `auth.enabled` | bool | No | Shorthand: link to the single existing auth database (400 if none or more than one). |
 | `auth.database` | string | No | Link to (or create) a named auth database. |
 
-(**Lead S26, 0.6.0**) `enableWal` and `dataDurability` are gone, with no alias: a body carrying either is **400** `INVALID_REQUEST` naming `durability` (`enableWal: false` is `"unlogged"`, `dataDurability: "MemoryOnly"` is `"memory"`).
+A member this body does not have — the retired `enableWal` and `dataDurability` (the level is `durability`: `"unlogged"`, `"memory"`), the old name of the memory cap, and the old signup members among them — is **400** `REQUEST_MEMBER_UNKNOWN`, naming the member, with a `remedy` that lists the members the body takes (**BL-1832, next train**; before, each of those had its own `400 INVALID_REQUEST`, and a `null` was accepted).
 
-Sign-up is not a member of this body. Set it with `PUT /api/auth/{authDatabase}/signup`. A body that still sends a retired signup member is **400** `INVALID_REQUEST`, and the message names that route. Create mints no key (**BL-1464, 0.16.0**).
+Sign-up is not a member of this body. Set it with `PUT /api/auth/{authDatabase}/signup`. Create mints no key (**BL-1464, 0.16.0**).
 
 **Success (201):** the same shape as GET. `auth` is `{ "enabled", "database" }` and has no `keys` member.
 
@@ -2809,7 +2809,8 @@ schema file owns both. Restate them and change only the residency fields, or cha
 | `targetMemoryBytes` | integer? | Per-table hot-byte budget. On a `HotOnly` table this is the **pin's reservation size**; on an `Auto` table it is a demotion target. |
 | `memoryFilter` | string? | JSON predicate naming which rows are preferred-hot. Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`. Affects demotion *ordering* only: a segment whose statistics rule out every row for the filter is demoted first. (**ColumnarRead S14, 0.3.0**: the server now applies it; before, the preference only ever took effect in the engine's tests.) |
 | `hotOnlyBackstop` | string? | What happens when honouring a `HotOnly` pin would breach the ceiling: `RefuseWrites` (default) or `DemoteAnyway`. |
-| `pinAllInMemory` | boolean? | ⚠️ **Retired — sending it is a `400`**, not a no-op. Use `storageTemperature: "HotOnly"`. |
+
+A member the body does not have is `400 REQUEST_MEMBER_UNKNOWN`, naming it; to keep a table resident, set `storageTemperature: "HotOnly"` (**BL-1832, next train**).
 
 ⚠️ **Sentinel convention — omitted is not the same as cleared.** `null` / omitted means *leave
 unchanged*. `0` **clears** a `memoryRowCap` or `targetMemoryBytes`; `""` clears a `memoryFilter`. A
@@ -4253,6 +4254,7 @@ Every error the backup controller raises is a JSON body with `error` (the messag
 | `BACKUP_FENCE_TIMEOUT` | 503 | the backup could not take its fence within 5 seconds |
 | `BACKUP_BUFFERS_UNSEALED` | 503 | a write buffer could not be sealed for the backup |
 | `BACKUP_BRANCH_UNAVAILABLE` | 409 | a branch could not be captured |
+| `BACKUP_DATABASE_NOT_OPEN` | 409 | backup: a registered database is not open — listed in `Aouda:SkipDatabases`, or quarantined; the message names it and why, and no set was taken (**BL-1953, next train**; it was `400 BACKUP_DESTINATION_UNAVAILABLE`) |
 
 #### `POST /admin/backup/trigger`
 
@@ -4296,7 +4298,7 @@ The counts are totals over the members. An incremental backup records its base i
 | Status | When |
 |--------|------|
 | 400 Bad Request | `BACKUP_DESTINATION_UNAVAILABLE`: the destination path cannot be created or accessed |
-| 409 Conflict | `BACKUP_IN_PROGRESS`, or `BACKUP_BRANCH_UNAVAILABLE` |
+| 409 Conflict | `BACKUP_IN_PROGRESS`, `BACKUP_BRANCH_UNAVAILABLE`, or `BACKUP_DATABASE_NOT_OPEN`: the set takes every registered database, and one is not open (in `Aouda:SkipDatabases`, or quarantined) — open it or drop it, then retry (**BL-1953, next train**) |
 | 503 Service Unavailable | `BACKUP_FENCE_TIMEOUT` or `BACKUP_BUFFERS_UNSEALED` (retry); `BACKUP_DESTINATION_UNAVAILABLE` for `azure://` / `gcs://` (**S3 is supported**) or a provider that is not registered; `BACKUP_ENGINE_NOT_READY`; (**BL-944, 0.4.0**) a backup refused for capacity (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, with `Retry-After`) |
 | 500 Internal Server Error | `BACKUP_FAILED` |
 
@@ -4415,7 +4417,6 @@ At least one of `backupId` or `targetTime` is required.
   "restoredUtc": "2026-11-21T15:04:56.1835586+00:00",
   "filesRestored": 62,
   "bytesDownloaded": 105587,
-  "integrityVerified": true,
   "durationSeconds": 0.3148055,
   "notInSet": [],
   "branches": []
@@ -4429,7 +4430,6 @@ At least one of `backupId` or `targetTime` is required.
   "restoredUtc": "2026-11-21T15:10:36.7220017+00:00",
   "filesRestored": 64,
   "bytesDownloaded": 107857,
-  "integrityVerified": true,
   "durationSeconds": 0.2210697,
   "targetTime": "2026-11-21T15:10:34+00:00",
   "pitr": [
@@ -4461,7 +4461,7 @@ PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044
 
 The 400s, the 404, the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE`, `PITR_WINDOW_UNAVAILABLE` and the 507 `DISK_FULL` are decided before any engine stops: nothing was changed. The one exception is the window's last proof: the restore checks every archived segment of the window again as it stages it, and a segment that is not whole is found only then, after that member's backup files were restored — the member is left marked `restore.incomplete`, quarantined with `RESTORE_INCOMPLETE` until a restore of it completes, and the message says so (**Durability-1, next train**). `BACKUP_BLOB_DAMAGED` says in its message which it was: a damaged catalog root, or a damaged first WAL segment a point-in-time restore checks before it starts, changed nothing (`Nothing of '<db>' was changed.` / `Nothing was changed.`); any other damaged blob, the other `PITR_*` codes and the 500s come after a member's files were changed. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on holds `restore.incomplete` and is quarantined with `RESTORE_INCOMPLETE` — it is not opened on a mixture of its old files and the backup's — until a restore of it completes, which clears the quarantine; `POST /api/databases/{db}/unquarantine` on it answers `503 RESTORE_INCOMPLETE` and leaves it quarantined. **The auth databases are the exception**: `_serverauth` and every other auth database of the set are restored each into a copy beside it, and swapped in by rename, last, only once every member has restored — so a restore that fails anywhere, the auth database included, leaves them as they were (the message says so), and the operator's key still signs in to run the restore again. The copies are restored and opened **before** any other member (**BL-1711, next train**): a refusal of an auth database's copy — its replay, `RESTORE_LEAVES_NO_OPERATOR` — comes before anything is changed, and its message lists no restored database. A crash during the swap is finished by the next start: the old auth database before the swap's commit, the restored one from it. Fix the cause the `remedy` names, then restore again.
 
-**`integrityVerified` is always `true` in a 200**: every blob is checked against its SHA-256 and length as it is read, before the file gets its name, and a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`. The field stays for now and will be removed.
+**A `200` is a verified restore**: every blob is checked against its SHA-256 and length as it is read, before the file gets its name, and a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`. The answer has no member that says so (**BL-1748, next train**: the `integrityVerified` it carried was always `true`, and is gone).
 
 #### `POST /admin/backup/prune`
 
@@ -5932,7 +5932,6 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits for it, at most 30 s; `"failFast"` does not wait. A job that cannot have a table is refused `409 BULK_LOAD_TABLE_LOCKED` (**BL-1743, next train**) at its next `:append` or its `:commit` — never at `:begin`, which does not wait for the table: see [a table another load holds](#a-table-another-load-holds-bulk_load_table_locked). Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
 | `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness — except a formula table's (a table with an Expression column), whose keys are checked at every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way — except an absent cell of a column with a default, which takes the default at either level (only a null is refused there) — and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
-| `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |

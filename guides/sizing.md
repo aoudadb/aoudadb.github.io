@@ -43,7 +43,7 @@ A 2 GiB cap is a reasonable **explicit** choice, not a hidden default. Hot data 
 
 ## Large hosts
 
-Set an explicit ceiling so Aouda does not grow into all remaining RAM. Per-database `maxMemoryShareBytes` on HTTP create (config: `MaxMemoryShareBytes`; it was `maxMemoryBytes` over HTTP until 0.3.x — that name is now ignored, **0.4.0**) is a **cap on that database's share** of the one server budget, not a second independent heap.
+Set an explicit ceiling so Aouda does not grow into all remaining RAM. Per-database `maxMemoryShareBytes` on HTTP create (config: `MaxMemoryShareBytes`) is a **cap on that database's share** of the one server budget, not a second independent heap. The old name, `maxMemoryBytes`, is a member the create body does not have: `400 REQUEST_MEMBER_UNKNOWN` (**BL-1832, next train**; from 0.4.0 it was refused with `400 INVALID_REQUEST`).
 
 ## Sizing CPU
 
