@@ -621,10 +621,13 @@ This is used by the future embedded Studio (P35+) to configure itself when serve
 ### Docker
 
 ```bash
+docker login ghcr.io        # the image is private, like the server's: a token with read:packages
 docker run -p 3000:3000 \
   -e AOUDA_STUDIO_DEFAULT_SERVER=http://aouda:5000 \
-  aouda/studio
+  ghcr.io/aoudadb/aouda-studio:<version>
 ```
+
+The image is **`ghcr.io/aoudadb/aouda-studio`** (**BL-1982, next train**; `aouda/studio`, the name older pages carried, was never published), `linux/amd64`. Studio and the server move together (the protocol version): run the Studio image of the server's release.
 
 Fully self-contained: no external CDN, font, or icon dependencies. Works air-gapped.
 

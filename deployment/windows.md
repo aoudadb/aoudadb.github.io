@@ -6,6 +6,12 @@ parent: "Deployment"
 
 # Deploying Aouda as a Windows Service
 
+{: .warning }
+**Windows is not supported for production** (**BL-1982, next train**). The Windows archives are built and published, but no part of the release
+gate runs on Windows, and three Windows items are open (BL-996, BL-353, BL-1465). **Linux is the supported platform for a pilot**
+([Linux (systemd)](linux.md), or [Docker](docker.md)). Read this page to develop against a server on Windows or to evaluate; do not put a
+pilot's data on it. See [Supported platform](index.md#supported-platform-bl-1982-next-train).
+
 Install the server on a Windows host, register it with the Service Control Manager, and know where it differs from Linux — because in one respect that matters, it does.
 
 ---

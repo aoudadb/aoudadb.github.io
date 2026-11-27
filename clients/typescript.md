@@ -1111,6 +1111,13 @@ await client.tables.dropColumn('users', 'phoneNumber');
 await client.tables.deleteTable('users');
 ```
 
+**A refused rename** (**BL-1902, BL-1903, next train**): `renameTable`, `renameColumn` and `alterColumn` with a `newName` reject with an
+`AoudaConflictError` coded `TABLE_RENAME_REFERENCED` or `COLUMN_RENAME_REFERENCED` (409) while a materialized query, a named query or
+mutation, or an access-policy statement names the table or reads the column (a statement also refuses renaming a column to a name its
+`where` reads). The message names each definition and nothing was
+changed; it is not retried. Drop or redefine them, rename, then re-create them by the new name. See
+[the HTTP API](../reference/http-api.md) (`COLUMN_RENAME_REFERENCED`). Before, the same `409` was a plain `AoudaApiError`.
+
 **Retention** (**Horizon, 0.5.0**): `policy.retention` on `createTable` and `retention` on `updatePolicy` declare that a table
 keeps only its recent rows — `{ keep: '90d' }`, a whole number of `m` / `h` / `d` / `w` (`TableRetention`). The first cluster column
 must be a `Timestamp` or `Date`. An `updatePolicy` body that only sets `retention` may omit `storageTemperature`. Once declared it can

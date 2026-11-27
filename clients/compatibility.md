@@ -17,9 +17,11 @@ Aouda ships multiple artifacts from separate repositories. They do **not** share
 | Aouda server | `ghcr.io/aoudadb/aouda-server` (Docker), `Aouda.Server` (binary) | `aouda` | Release train (not npm SemVer) |
 | TypeScript client | `@aouda/client` (npm) | `aouda-client-ts` | SemVer |
 | .NET client | `Aouda.Client` (NuGet) | `aouda` | SemVer |
-| Studio | `aouda/studio` (Docker), hosted app | `aouda-studio` | App version |
+| Studio | `ghcr.io/aoudadb/aouda-studio` (Docker, private; **BL-1982, next train** — `aouda/studio` was never published), hosted app | `aouda-studio` | App version |
 
 **Release order** when APIs change: server → SDKs → Studio → docs.
+
+**Platforms** (**BL-1982, next train**). The supported platform is **Linux** — the server image is `linux/amd64` + `linux/arm64`, the archives `linux-x64` and `linux-arm64` — and the Windows archives are built but **not supported for production** ([Deployment](../deployment/index.md#supported-platform-bl-1982-next-train)). The SDKs run wherever their runtime does: `@aouda/client` on Node and browsers, `Aouda.Client` on .NET 10; the statement is about where a server runs.
 
 **.NET target.** The server and the .NET packages (`Aouda.Client`, `Aouda.Abstractions`, `Aouda.Embedded`,
 `Aouda.Testing`) target **`net10.0`** (**BL-739, 0.2.0**); every earlier release targets `net8.0`. A NuGet
