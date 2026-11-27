@@ -306,7 +306,8 @@ The client drops what it holds below the time. Both SDKs do it for you (`evt.Rem
   `POST /tables`, with the retention declared with it (**Horizon, 0.5.0**).
 - A range delete on a table without retention is replicated as its one log record, and reaches only a replica's **buffered** rows:
   rows below the cutoff in the segments the replica got from its checkpoint image stay visible there until its next image — the same
-  as a `TRUNCATE` and a keyed delete today (**Horizon, 0.5.0**).
+  as a `TRUNCATE` and a range delete today (**Horizon, 0.5.0**); a keyed delete or update of an image row now reaches those segments
+  (**Durability-1, next train**, see [Replication](replication.md)).
 - **An early expiry reaches the replica** as its one logged record: the replica raises its horizon to the cutoff (the higher of the
   two), hides the rows below it at once and expires its segments, as the primary did. One that arrives while a rebuild on the replica
   holds the table's horizon is applied by the replica's next advance round after the rebuild, instead of failing after 30 s
