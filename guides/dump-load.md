@@ -125,8 +125,13 @@ identity column (refused before the first write; load the others with `--tables`
 
 ## Memory, time and secrets
 
-- **Memory is bounded and does not grow with the rows**: one export batch and one append body are in flight. In the repository's test
+- **The CLI's own memory is bounded and does not grow with the rows**: one export batch and one append body are in flight. In the repository's test
   with real processes, a table of 2 million rows kept the peak resident set of `dump` at about 98 MB and of `load` at about 150 MB (bound: 512 MB).
+- **The server's memory is not bounded by that, and a small server can refuse a large table** (**BL-1763**, measured once, no formula). The dump reads each table
+  with one `limit 0` query answered as column-batch frames, and the server holds that read to its read-path ceiling, a fraction (about 0.8 to 1 %) of the memory
+  it governs. In the lab (2026-11-22) a table of 15.3 million rows was refused by a server with 2 GB after about 123,000 rows, and passed on one with 4 GB. A refusal
+  ends the dump with `DUMP_EXPORT_FAILED` and the server's code in its message (`MEMORY_BUDGET_EXCEEDED`); nothing was changed on the server. Dump from a server with more memory (a table is one query and cannot be split;
+  size it with the lab's figure above, not a formula). Streaming the export so its server-side working set is a batch is open as BL-1763.
 - **A dump holds secret-class values** — the stored keys' SHA-256 from the declaration export, and every column value. Its files are
   readable by their owner only (`0600`, directories `0700`). Keep it as you keep the server's keys and your backups; Aouda does not encrypt a
   dump ([Backup and restore](backup.md#9-encryption-and-who-can-read-a-backup)).

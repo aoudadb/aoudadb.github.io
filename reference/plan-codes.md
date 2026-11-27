@@ -55,6 +55,7 @@ The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, 
 | `DATABASE_LINK_NOT_AUTH` | error | `databases` | offline | 78 | Declare the link target with Kind 'auth', or link to an application auth database. |
 | `DATABASE_LINK_UNDECLARED` | warning | `databases` | offline | — | Declare the auth database with Kind 'auth', or make sure it exists in the data directory: the start refuses the link otherwise. |
 | `DATABASE_NOT_OPEN` | error | `databases` | state | 78 | Repair the database, quarantine it as an operator, or list it in Aouda:SkipDatabases to start without it. |
+| `DATABASE_DIRECTORY_NOT_EMPTY` | error | `databases` | state | 78 | Remove or move the directory under Databases/ that holds files no registered database owns (a lost or restored registry, a leftover of an earlier installation), or restore the registry from a backup; a declaration never creates a database over files (**BL-1915, next train**). |
 | `DATABASE_KIND_CONFLICT` | error | `databases` | state | 78 | Declare the database with the kind it has in the data directory, or declare another name. |
 | `DATABASE_LINK_TARGET_ABSENT` | error | `databases` | state | 78 | Declare the auth database with Kind 'auth', or create it first: a declaration never creates an auth database it does not name. |
 | `DATABASE_LINK_TARGET_NOT_OPEN` | error | `databases` | state | 78 | Open the auth database (repair it, or remove it from Aouda:SkipDatabases or its operator quarantine), or remove the link. |

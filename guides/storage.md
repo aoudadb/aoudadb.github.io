@@ -420,7 +420,7 @@ Observability:
 Primary tests:
 - `tests/Aouda.Engine.Storage.Tests/WalReplayDriverTests.cs`
 - `tests/Aouda.Engine.Storage.Tests/WalCheckpointIntegrationTests.cs`
-- `tests/Aouda.Engine.Api.Tests/TableDurabilityTests.cs`
+- `tests/Aouda.Engine.Api.Durability.Tests/TableDurabilityTests.cs`
 
 ### Walk-through C: Backup engine full/incremental backup flow
 
@@ -535,7 +535,7 @@ Observability: `aouda.wal.archived_bytes_total`, `aouda.wal.archive_errors_total
 
 Primary tests:
 - `tests/Aouda.Engine.Storage.Tests/WalIntegration/WalArchiveWorkerTests.cs`
-- `tests/Aouda.Engine.Api.Tests/Bl186S05ArchiveWorkerLifecycleTests.cs`
+- `tests/Aouda.Engine.Api.Durability.Tests/Bl186S05ArchiveWorkerLifecycleTests.cs`
 - `tests/Aouda.Server.Tests/Startup/Bl186S05ArchiveWorkerWiringTests.cs`
 
 ## 2.9 Why Aouda is different (differentiators)
