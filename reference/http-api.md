@@ -2367,6 +2367,8 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 
 `configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000). AggregateConfig's `groupByColumns` entries are objects — `{ "column": "region" }`, or `{ "column": "time", "function": "TruncateToHour" }` for a time bucket. (**BL-980, 0.4.0**) The v1 plain-string form (`"groupByColumns": ["region"]`) is `400 INVALID_REQUEST`, and a stored definition in that form is refused when it is read; up to 0.3.x both were read.
 
+(**BL-1990, next train**) A **FilterConfig** condition on a `Timestamp` or `Date` column compares its `value` as a time of the column, as a `where` does: ISO-8601 text (an instant with any offset for a `Timestamp`, `yyyy-MM-dd` for a `Date`) or a number (100-ns ticks since 0001-01-01; days since 1970-01-01). Up to 0.17.1 an ISO value was compared with the stored ticks or days as a value of another type and the result held no row, with no error; a value that is no time of the column is refused at create (`400`, BL-1969). A result created before keeps the rows it held: refresh it once (`:refresh`).
+
 **Query response** (`POST .../query`) — column arrays (**Lead S12, 0.6.0; breaking**: it was `"rows": [{…}]`, one object per
 row):
 
