@@ -147,7 +147,7 @@ If you do nothing:
 | Server `Aouda:WebSocket:IdleTimeout` | `5m` | Idle WebSocket auto-close threshold |
 | Server `Aouda:WebSocket:LongPollWaitTimeout` | `25s` | Default long-poll wait horizon |
 | Server `Aouda:WebSocket:LongPollSessionIdleTimeout` | `2m` | Long-poll session expiry window: a session no request has touched for this long is removed, with its connection slot, its identity's slot and its subscriptions, within a quarter of the window more (at most 30 s); a poll in flight holds it. Its next request is `404` (**BL-1842, next train**) |
-| Server `Aouda:WebSocket:LongPollMaxQueuedMessages` | `1000` | Queue bound per long-poll session. A message that finds it full is not queued: the session ends with `SLOW_CONSUMER` after everything already queued, and the poll after it is `404`; the client reconnects and subscribes fresh (**BL-1633, next train**). Up to 0.17 the oldest queued message was dropped without a word |
+| Server `Aouda:WebSocket:LongPollMaxQueuedMessages` | `1000` | Queue bound per long-poll session. A message that finds it full is not queued: the session ends with `SLOW_CONSUMER` after everything already queued, and the poll after it is `404`; the client reconnects and subscribes fresh (**BL-1633, next train**). Up to 0.17 the oldest queued message was dropped without a word. A snapshot's pages and its `snapshot_complete` are counted apart, against `MaxSubscriptionsPerConnection` × (`MaxSnapshotRows` / `SnapshotPageSize`, rounded up, + 1) messages, so resubscribing every subscription after a reconnect does not fill it (**BL-1981, next train**) |
 | Server `Aouda:WebSocket:LongPollMaxBatchSize` | `128` | Max messages returned per long-poll poll response |
 | Server `Aouda:WebSocket:StreamingWrites:AckInterval` | `500ms` | Periodic write-stream ack cadence |
 | Server `Aouda:WebSocket:StreamingWrites:SoftPendingRows` | `5000` | Above this threshold, rows can be rejected as `STREAM_PAUSED` |
@@ -684,7 +684,7 @@ Primary proving tests:
 | `Aouda:WebSocket:IdleTimeout` | timespan | `00:05:00` | positive | server config | Idle close threshold |
 | `Aouda:WebSocket:LongPollWaitTimeout` | timespan | `00:00:25` | positive | server config | Max long-poll block |
 | `Aouda:WebSocket:LongPollSessionIdleTimeout` | timespan | `00:02:00` | positive | server config | Session expiry threshold; an abandoned session is swept (**BL-1842, next train**) |
-| `Aouda:WebSocket:LongPollMaxQueuedMessages` | int | `1000` | `>=1` | server config | Queue size per long-poll session; past it `SLOW_CONSUMER` and the session ends (**BL-1633, next train**) |
+| `Aouda:WebSocket:LongPollMaxQueuedMessages` | int | `1000` | `>=1` | server config | Queue size per long-poll session; past it `SLOW_CONSUMER` and the session ends (**BL-1633, next train**). Snapshot pages are not counted in it (**BL-1981, next train**) |
 | `Aouda:WebSocket:LongPollMaxBatchSize` | int | `128` | `>=1` | server config | Max messages per poll response |
 | `Aouda:WebSocket:StreamingWrites:SoftPendingRows` | int | `5000` | positive | server config | Soft row backpressure threshold |
 | `Aouda:WebSocket:StreamingWrites:ResumePendingRows` | int | `2500` | positive | server config | Unpause row threshold |
