@@ -51,7 +51,10 @@ the SDKs and Studio's `@aouda/client` pin together. A request that names no vers
 | `@aouda/client` `0.17.0` and before, Studio `0.16.0` and before | send `1` | The same |
 
 The protocol version moves by one for every release whose wire contract changed since the last, additive or not; every change
-between two releases shares that one bump.
+between two releases shares that one bump. The server's own build holds it to that (**BL-1172, next train**): a generated
+description of every route, body and realtime message is compared with the one the last release recorded, and a change while the
+version is still the released one fails the build — so a wire change cannot ship under an old number. Error codes are not part of
+that description: a new refusal code is not a protocol change.
 
 ---
 
