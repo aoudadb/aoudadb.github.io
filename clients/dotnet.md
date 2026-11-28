@@ -1009,6 +1009,14 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   land (after 0, 250, 500, 1000 and 2000 ms), then the `AoudaRequestException` with the code ends it. A consumer that joins a shared
   subscription meanwhile waits for the new snapshot. `DATABASE_QUARANTINED` and `DATABASE_NOT_FOUND` end it with their code. See
   [When the database is replaced](../guides/real-time.md#when-the-database-is-replaced-bl-1818-next-train).
+- **A subscription whose materialized query is not ready, or whose result was replaced, subscribes again** (**BL-1971, next train**). A
+  subscribe refused `MQ_NOT_READY` (the query is still building) or `MQ_RESULT_REPLACED` (its result was replaced while the snapshot was
+  starting; nothing was read) is sent again, fresh, after 250, 500, 1000, 2000 and 4000 ms — five times for each code between two
+  snapshots that land —, then the `AoudaRequestException` with the code ends it. Before, the first refusal ended the subscription.
+- **A long-poll reconnect never stalls on its own resubscribe** (**BL-1970, next train**): when the session the reconnect opened is gone
+  again before a subscription is resubscribed (the server restarted, or released it), the transport reconnects once more and resubscribes it
+  there. Before, that resubscribe waited for a reconnect only the waiting transport could make, and every subscription and write stream on
+  it waited until the client was disposed.
 - **`client.ServerLimits`** holds what the server sent in `auth_ok`: `MaxSubscriptionsPerConnection`, `MaxSubscriptionsPerIdentity`,
   `MaxConnectionsPerIdentity`, `SubscribeBurst`, `SubscribeRefillPerSecond`, `ProtocolVersion` (`3`, the same number as the HTTP header's;
   an `auth_ok` of another version, or none, ends the connect with `AoudaProtocolVersionException` — **BL-1830, next train**) and `Capabilities`. It is `null` before the
