@@ -41,7 +41,8 @@ Version](../reference/http-api.md#protocol-version)).
 HTTP, `auth_error` of that code on the socket — and both SDKs end for good on it (`AoudaProtocolVersionException` in C#,
 `AoudaProtocolVersionError` in TypeScript): no retry, no reconnect, no fallback to long poll. An SDK also refuses a server whose
 `auth_ok` names another version, or none. **There is no window**: use the SDK release published with the server, and move the server,
-the SDKs and Studio's `@aouda/client` pin together. A request that names no version — `curl`, a probe, the CLI, Hub — is served.
+the SDKs and Studio's `@aouda/client` pin together. A request that names no version — `curl`, a probe, Hub — is served. The `aouda` CLI and the installer name `3` (**BL-1962, next train**), so a
+CLI talks to a server of its own release: against another, a command prints the server's refusal and exits `1`.
 
 | Release | Protocol version | What a client of another release gets |
 |---|---|---|

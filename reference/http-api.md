@@ -40,7 +40,7 @@ X-Aouda-Protocol-Version: 3
 
 | The request names | Server behavior |
 |---|---|
-| Nothing (no header) | Served. `curl`, probes, a browser's OIDC redirect, the CLI and a replica join name none. |
+| Nothing (no header) | Served. `curl`, probes, a browser's OIDC redirect and a replica join name none. The `aouda` CLI and the installer name `3` (**BL-1962, next train**): against a server of another version a command prints the server's refusal and exits `1`. |
 | `3` exactly | Served. |
 | Anything else — another number (`1`, `2`, `4`), an empty value, `+3`, `03`, `3.0`, text, two values (`3, 3`) or two header lines | `400 Bad Request`, code `PROTOCOL_VERSION_UNSUPPORTED`, no `Retry-After`: no retry can succeed. |
 
@@ -5796,7 +5796,9 @@ message must arrive within `Aouda:WebSocket:IdleTimeout` (5 minutes; the auth ti
 `connect` at most 64 KiB and `…/send` at most `MaxMessageBytes`, past it `413 MESSAGE_TOO_LARGE`, a memory refusal `503` +
 `Retry-After` (or `400 STATEMENT_TOO_LARGE`), each in `{ "code", "message" }` and before anything is handled. A `…/send` whose
 session id names no long-poll session of the database is answered `404 SESSION_NOT_FOUND` (or `400 INVALID_SESSION_TYPE`) before a byte
-of its body is read: the session id is its only credential. Up to 0.17 a message
+of its body is read: the session id is its only credential. A `…/send` or `…/poll` on a session idle past
+`Aouda:WebSocket:LongPollSessionIdleTimeout` (2 minutes), or one the idle sweep removed while the request looked it up (**BL-1842, next train**), is
+answered `404 SESSION_EXPIRED` and the session is gone: connect again (both SDKs do on any `404`). Up to 0.17 a message
 of any size was read whole — the first one before authentication — and nothing asked the memory budget for it.
 
 ---
