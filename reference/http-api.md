@@ -484,7 +484,7 @@ answered `Cache-Control: no-store`; neither writes anything, takes the reload's 
 
 | Method | Path | Result |
 |--------|------|--------|
-| GET | `/api/admin/declaration` | The declaration the server runs on: `source` (`file`, `code` for databases an embedding host set in code, `none`), `file`, `overlay`, `environment`, `planHash` (the same as `aouda plan` prints for the same files), `declaration` (the canonical document the plan hash is the hash of: a credential by its public id, a password seed only as set, never a key, hash, root or secret), `databases` (`name`, `kind`, `authDatabase`, `declaresSchema`, `pointer`), and `last` — the last start or reload: `origin` (`start` or `reload`), `at`, `outcome`, `applied` (a boolean, **BL-1987, next train**), `summary`, and every `finding` in the plan's shape |
+| GET | `/api/admin/declaration` | The declaration the server runs on: `source` (`file`, `code` for databases an embedding host set in code, `none`), `file`, `overlay`, `environment`, `planHash` (the same as `aouda plan` prints for the same files), `declaration` (the canonical document the plan hash is the hash of: a credential by its public id, a password seed only as set, never a key, hash, root or secret), `databases` (`name`, `kind`, `authDatabase`, `declaresSchema`, `pointer`), and `last` — the last start or reload: `origin` (`start` or `reload`), `at`, `outcome`, `applied` (a boolean, **BL-1987, next train**), `failedStep` (**BL-1993, next train**: `{ "step", "entry" }` for a reload that stopped part-way — it wrote its earlier steps, so `applied` is `true` — and `null` for a whole reload and for the start; as on `GET /api/admin/reload`), `summary`, and every `finding` in the plan's shape |
 | GET | `/api/admin/declaration/export` | The server's state as declaration text: `{ "declaration": "<aouda.json>", "schemaFiles": { "schema/<db>.aouda.schema.json": "<text>" }, "origins": { "<pointer>": "declared" \| "runtime" }, "notes": [ { "code", "pointer", "message" } ] }` |
 
 `last` moves only when the declaration does: a reload that writes replaces it (and `declaration` and `planHash`); a dry run, a reload
@@ -840,7 +840,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `COLUMN_NOT_FOUND` | 404 / 400 | The specified column does not exist: `404` on a column route (`PATCH` / `DELETE …/tables/{name}/columns/{column}`), `400` when a read (`/query`, a join's key, a named query's column — execute, batch and a batch slot alike) or a `rows/batch` operation names a column the table does not have (**BL-1937, next train**: a column found missing while a batch operation runs, with the `failedOperation` line) |
 | `FILE_FORMAT_REFUSED` | 503 | (**BL-1744, next train**) A table cannot be read or written because one of its files is of another version or is damaged: the answer names the file (`Table <id> cannot be read: FILE_FORMAT_REFUSED: found=<n> expected=<m> file=<name>.`; the path is not shown), is `503` with **no `Retry-After`** (a retry meets the same file), and stays until the directory is restored from a backup or opened by the build that wrote it ([Upgrading](../guides/upgrading.md#other-refusals)). The server has not changed anything. Before, such a table answered `500 INTERNAL_ERROR` with the refusal in `details` |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
-| `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
+| `COLUMN_EXISTS` | 409 | A column with the specified name already exists. (**BL-1977, next train**) Names are compared without case: `region` exists in a table that has `Region`, so `POST …/columns` with `region` and a rename (`PATCH …/columns/{c}` with `newName`) of another column to `REGION` are refused, the message naming the spelling the table holds; a column renamed to its own name in another case is not. A schema apply's add of such a name is a failed entry. Before, only an exact match was refused, and a grant whose `where` read `region` (matched without case) silently read the new, empty column |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
 | `PARTITION_KEY_FIXED` | 400 | (**BL-1199, 0.9.0**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
@@ -985,7 +985,6 @@ Auth errors use the shape of [the auth error envelope](#auth-error-envelope), wh
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable. (**BL-944, 0.4.0**) Also the answer to a refusal no other code names: a request the server refused for capacity with no more specific code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `WRITE_CONFLICT`) is `503 SERVICE_UNAVAILABLE` with `Retry-After: 10`, never a `500` — nothing was applied; retry after `Retry-After`. One `503 SERVICE_UNAVAILABLE` carries **no** `Retry-After`: a `DELETE`, `PATCH` or batch on an edge table whose buffered edges could not be sealed first (a flush failed; **BL-838, next train**) — nothing was changed, the server log names the failure, and no wait heals it |
 | `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log, then the auth bootstrap, the declared schema files, roles, keys and replication) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this). (**BL-1462, 0.14.0**) The port is open for the whole start, and this answers every caller but the health probes, loopback included |
 | `SETUP_REQUIRED` | 503 | The server's data directory has never been set up and nothing is declared (no server key, no `a declared principal`), so it is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, 0.14.0**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
-| `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred. Also the answer to a read of a cold segment whose column file is missing or short: it is refused instead of answered with nulls, and the server log carries `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> found=<missing | n bytes | no pages> expected=<…>`; restore the database from a backup ([Backup and restore](../guides/backup.md)) |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out — and, for an update, a delete, a truncate or a merge, a failure to write its deletion masks (a full disk) **after** it committed: the write is durable and visible, and the next open replays its log frame — and, for an insert through an insert transform (**BL-1850, next train**), a `tee`'s copy (or a route's second or later target) that failed after the ingress rows were committed: the ingress rows are stored, the copy may not be (`guides/insert-transforms.md`, "Failure semantics"); on `stream_rows` the error frame carries this code. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice. Also the answer when the request timeout fires after the write was applied — a `504 REQUEST_TIMEOUT` there said "not applied" — including a `rows/batch` whose timeout fired after some of its operations were applied (read the data to see which), and an edge or vector insert (`…/edges`, `…/vectors/{column}`), which this code now covers too |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. A statement that alone exceeds the read path's ceiling — one no retry can satisfy — is `400 STATEMENT_TOO_LARGE` instead, with no `Retry-After`; this code is the transient refusal, which a retry can satisfy once other work releases its memory. (**BL-1706, next train**) So is any request larger than the memory room itself (a write, a body, a bulk load's frame or opening grant): `STATEMENT_TOO_LARGE` at once, never this code. (**BL-1698, next train**) A request body that carries rows — `POST`, `PATCH` and `DELETE …/rows`, `rows/batch`, a named mutation, a branch insert, `schema/seed`, `…/edges`, `…/vectors/{column}` — is read under the memory budget **before it is parsed** (its buffer, and a JSON body's parse by its tokens, as an `:append` body is): with too little memory now it is this `503` + `Retry-After` before the body is decoded, nothing applied; a body of at most 64 KiB is asked for nothing, so a one-row write is still admitted from the reserve. It was parsed whole first, whatever its size. |
@@ -2115,6 +2114,26 @@ document rules (column types, a `partitionKey` or `clusterColumns` entry that is
 the error were created and the bad one came back as a `Failed` entry in a `200`. What needs the catalog (a named query that names a
 missing column, a reference to another table) is still found per change during the apply.
 
+(**BL-1977, next train**) A table of the document whose `columns` hold two names equal without case (`Region` and `region`) is a
+document-level error (`400 INVALID_REQUEST`, nothing applied, `dryRun` too); adding a column whose name the live table holds in another
+case is that change's failed entry (`COLUMN_EXISTS`'s message).
+
+**The response names its enums** (**BL-1974, next train**). Each of `result.entries` is `{ "changeType", "tableName", "columnName",
+"status", "reason" }`; `changeType` is the change's name (`"AddColumn"`, `"UpdatePkUniqueness"`, … — the names `schema/diff` answers as a
+change's `type`), and `status` is `"Applied"`, `"Skipped"`, `"Failed"` or, in a dry run, `"Planned"`. `result.summary` counts them
+(`totalChanges`, `applied`, `skipped`, `failed`, `planned`); `historyId` is the migration recorded, or `null`.
+
+```json
+{ "result": { "entries": [ { "changeType": "AddColumn", "tableName": "orders", "columnName": "note", "status": "Applied", "reason": null } ],
+              "summary": { "totalChanges": 1, "applied": 1, "skipped": 0, "failed": 0, "planned": 0 } },
+  "historyId": 7, "warnings": null }
+```
+
+`GET …/schema/history?limit=&offset=` answers the recorded migrations, newest first: `{ "id", "timestamp", "source", "schemaHash",
+"changes", "appliedBy" }`, `source` one of `"ApiApply"`, `"ManualDdl"`, `"Inference"`, `"BranchMerge"`, `"DeclaredApply"` (the [migration sources](../guides/schema.md#migrationsource)), and each change `{ "changeType", "tableName",
+"columnName", "status", "reason" }` by the same names. Before, the apply's `changeType` and `status`, a diff change's `type` and the
+history's `source` were the enums' integers (`"status": 2` for a failed entry); a client that read those numbers reads names now.
+
 `GET …/schema/export` writes the document as `schema apply` reads it: no `null` members (it used to write `"or": null` in a `where`),
 so an export applies back as no change.
 
@@ -2934,7 +2953,8 @@ export type TableName = 'orders' | 'customers';
 
 #### `POST /api/databases/{db}/tables`
 
-Create a new table.
+Create a new table. (**BL-1977, next train**) Its column names are unique without case: `Region` and `region` in one request are
+`400 INVALID_REQUEST` (`Columns 'Region' and 'region' of table 'orders' differ only in case: …`), as a name given twice is.
 
 **Request:**
 
@@ -3165,6 +3185,12 @@ add-column carries a vector configuration, so the column could hold no vector (a
 A vector column is declared with its table (`POST …/tables/{name}:create-vector-column`, or a schema document, whose add-column of a vector
 column is a failed entry). Before, it was added.
 
+(**BL-1977, next train**) **No two columns of a table are equal without case.** A write matches column names without case, and so does
+an access-policy statement's `where`, so a second column `region` beside `Region` would be the same column to them and another to the
+catalog. A name the table holds in any case is refused `409 COLUMN_EXISTS`, the message naming the spelling it holds:
+`Column 'region' already exists in table 'orders' as 'Region': column names are unique without regard to case.` A data directory whose
+catalog holds such a pair (made before this rule) is refused at open, naming the table and both columns.
+
 **Response:** `201 Created` with column detail
 
 #### `PATCH /api/databases/{db}/tables/{name}/columns/{columnName}`
@@ -3211,8 +3237,9 @@ the rows written since.
   resource reaches the table (`*`, `<db>/*`, `<db>/table/<name or *>`, or a query or mutation of the database) — a role's, a
   principal's, a limited key's (one that has not expired or been revoked) or the signup setting's,
   in the auth database that governs the database. Names are compared without case: a `where` spelled `region` reads a column named
-  `Region`, and renaming another column to `region` (or to a name the table lacks that a statement reads) would make the statement read
-  that column instead, so it is refused. If that auth database exists and is not open, the rename is refused too: its
+  `Region`, and renaming another column to a name the table lacks that a statement reads would make the statement read that column
+  instead, so it is refused. (Renaming another column to `region` beside `Region` is refused first, `409 COLUMN_EXISTS`: column names
+  are unique without case, **BL-1977, next train**.) If that auth database exists and is not open, the rename is refused too: its
   statements cannot be checked.
 
 The message names each definition (a statement by its holder, never its `where` values). A rename rewrites the table's own definitions
@@ -4021,6 +4048,10 @@ write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtables
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
 | `rlsColumn` | string? | No | Adds a nullable `String` column (for example `org`), for a statement's `where` to compare. |
 
+(**BL-1977, next train**) The column names (`srcColumn`, `dstColumn`, `rlsColumn`) are unique without case: two equal without case are
+`400 INVALID_REQUEST`, naming both, and no table is made. Before, the table was made with both, which a write and a policy
+statement read as one column.
+
 Needs an unconditional `write` statement on `<db>/table/*` (the table is named in the body, so a statement on that one table does not cover it). `400 INVALID_REQUEST` for a missing field, `400 REQUEST_MEMBER_UNKNOWN` for a security
 member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the name is taken.
 
@@ -4108,6 +4139,9 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
 | `embeddingModel` | string? | No | The embedding model's name. |
 | `rlsColumn` | string? | No | As for an edge table. |
+
+(**BL-1977, next train**) `columnName` and `rlsColumn` are unique without case, beside each other and beside `RowKey`: `rowkey` is
+`400 INVALID_REQUEST`, naming both, and no table is made.
 
 Needs an unconditional `write` statement on the table it creates. `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance` or
 `quantization`, `400 REQUEST_MEMBER_UNKNOWN` for a security member (**BL-1464, 0.16.0**; the code since **BL-1659, next train**); `409 TABLE_EXISTS` when the table exists.
