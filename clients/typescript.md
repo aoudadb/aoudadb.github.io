@@ -742,7 +742,9 @@ statement. Before, a write this large waited and was refused `503 MEMORY_BUDGET_
 `AoudaConflictError` (**BL-1932, next train**) and re-sent under a `retryPolicy`: nothing was read, and the next read is bound to the
 query's current result. The server answers it when the query was dropped and re-created with other columns during the read (or its
 result rebuilt more than four times during it); it was `500 INTERNAL_ERROR` on `/query` and `400 INVALID_REQUEST` on
-`materializedQueries.query`, which were not re-sent.
+`materializedQueries.query`, which were not re-sent. A subscription whose subscribe is refused it subscribes again, fresh, as it does on
+`MQ_NOT_READY` — five times between two snapshots that land, after 250, 500, 1000, 2000 and 4000 ms, on a budget of its own — and the
+sixth refusal goes to `onError` (**BL-1971, next train**; before, the first ended the subscription).
 
 **A realtime message larger than the server reads in one is `MESSAGE_TOO_LARGE`** (**BL-1938, next train**): 64 KiB before
 authentication, `Aouda:WebSocket:MaxMessageBytes` (4 MiB by default) after. On a WebSocket a write stream whose frame is refused this
