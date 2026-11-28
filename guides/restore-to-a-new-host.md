@@ -77,7 +77,7 @@ aouda start --data-path /srv/aouda-new
 ```bash
 aouda backup list                                  # the sets the new server can see
 curl -s -X POST http://localhost:5000/api/databases/shop/query -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-     -d '{"database":"shop","table":"orders","columns":["id","item"]}'       # a row count you know
+     -d '{"database":"shop","table":"orders","select":["id","item"]}'        # a row count you know
 aouda db inspect --name shop
 ```
 

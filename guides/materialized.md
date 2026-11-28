@@ -1093,8 +1093,9 @@ POST /api/databases/appdb/bulk-load:begin
 Content-Type: application/json
 
 {
-  "table": "quotes",
-  "postLoadMqBehavior": "skip"
+  "database": "appdb",
+  "tables": ["quotes"],
+  "options": { "postLoadMqBehavior": "skip" }
 }
 ```
 

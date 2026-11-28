@@ -725,7 +725,7 @@ diffs sent as a `POST` — are re-sent after any transient failure, as before; a
 policy — the bulk loader recovers it itself, after asking the server where the job is (below).
 
 **A `5xx` that no retry can satisfy is sent once** (**BL-1956, next train**): `500 BRANCH_SET_DAMAGED`, `500 EXACT_RESTORE_REFUSED`,
-`500 BULK_LOAD_CORRUPTION`, `503 FILE_FORMAT_REFUSED`, `503 DATABASE_QUARANTINED`, `503 LEGACY_WAL_PRESENT`, `503 RESTORE_INCOMPLETE` and
+`503 FILE_FORMAT_REFUSED`, `503 DATABASE_QUARANTINED`, `503 LEGACY_WAL_PRESENT`, `503 RESTORE_INCOMPLETE` and
 `503 FORMULA_NOT_MAINTAINED` each wait for an operator (a file restored or repaired, a database unquarantined or restored, a branch made again)
 or for the node's state to change. A `retryPolicy` does not re-send them, even a read, and they do not count toward the circuit breaker —
 before, a branch list over a damaged branch file was sent four times and moved the breaker that guards every other call of the client. The C#
