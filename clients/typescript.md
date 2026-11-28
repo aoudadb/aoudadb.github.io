@@ -750,7 +750,11 @@ sixth refusal goes to `onError` (**BL-1971, next train**; before, the first ende
 authentication, `Aouda:WebSocket:MaxMessageBytes` (4 MiB by default) after. On a WebSocket a write stream whose frame is refused this
 way ends with `AoudaWriteStreamError` of that `code`, and the frame is not sent again; on long-poll the `/send` is `413` and rejects
 with `AoudaValidationError` of that `code` (a send that did nothing, never retried), so the write rejects alone. The code is exported
-(`MESSAGE_TOO_LARGE`) and typed `AoudaValidationError` on an HTTP answer too. Send fewer rows in one frame.
+(`MESSAGE_TOO_LARGE`) and typed `AoudaValidationError` on an HTTP answer too. Send fewer rows in one frame. **A handshake refused
+this way ends the client** (**BL-2010, next train**): the first message carries the token, and every reconnect would send it again, so
+a socket's `auth_error` `MESSAGE_TOO_LARGE` or a long-poll `connect` answered `413` stops the transport after that one refusal, as a
+refused protocol version does — no reconnect and no fallback to long poll. The connect (or `reconnectAbandonedBy`, and each
+subscription's `onError`) gets `AoudaValidationError` with that `code` and `statusCode` 413. A token that large is the thing to fix.
 
 **`expiredRows`** (**Horizon, 0.5.0**): on a table with [retention](../guides/retention.md), a row whose time lies below the
 table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`

@@ -607,7 +607,11 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
   than `Aouda:WebSocket:MaxMessageBytes` (4 MiB by default) is refused `MESSAGE_TOO_LARGE` before it is read (**BL-1938, next train**):
   the stream ends, its `WriteAsync` and `CloseAsync` throw `AoudaRequestException` with that `ErrorCode`, and nothing of the frame is
   written. Over long-poll the `…/send` is `413` and that `WriteAsync` throws `AoudaRequestException` (`StatusCode` 413) with the same
-  `ErrorCode`, not `AoudaConnectionException`: the same frame is refused the same way, so it is not retried.
+  `ErrorCode`, not `AoudaConnectionException`: the same frame is refused the same way, so it is not retried. **A handshake refused
+  this way ends the client** (**BL-2010, next train**): the first message (the socket's `auth`, a long-poll `connect`) carries the
+  token, which every reconnect sends again, so after that one refusal the transport stops — no reconnect, no fallback to long poll —
+  and the connect, or `ReconnectAbandonedBy`, is `AoudaRequestException` (`StatusCode` 413, `ErrorCode` `MESSAGE_TOO_LARGE`; the
+  socket's `auth_error` was an `AoudaAuthenticationException`).
 - **The C# named-client generator** (`aouda generate csharp`, [Build apps](../guides/build-apps.md)) writes `double[]`, `float[]`, `int[]`, `long[]`, `byte[]` and `string[]` for
   array columns and parameters (a non-optional property defaults to `System.Array.Empty<T>()`).
 

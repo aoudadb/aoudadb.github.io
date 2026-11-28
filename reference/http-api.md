@@ -5789,7 +5789,8 @@ stay lenient on the client side: an older SDK still reads a newer server's frame
 `auth` — may be at most **64 KiB**; every message after authentication at most `Aouda:WebSocket:MaxMessageBytes` (default
 **4 MiB**: a `stream_rows` frame's `data` is at most `StreamingWrites:MaxBatchBytes`, 1 MiB, besides — raise both together). The
 server reads no further than the bound: a message past it is `MESSAGE_TOO_LARGE` — before authentication `auth_error` and the socket
-closed with status `1009` (Message Too Big); after it an `error` frame carrying the message's own `id` (read from its first bytes, so
+closed with status `1009` (Message Too Big) — terminal for the client, since every reconnect sends the same first message: both SDKs
+stop after it, with no fallback to long poll (**BL-2010, next train**); after it an `error` frame carrying the message's own `id` (read from its first bytes, so
 put `type` and `id` first, as both SDKs do), its remaining bytes read and dropped, and the connection stays open. Every fragment of one
 message must arrive within `Aouda:WebSocket:IdleTimeout` (5 minutes; the auth timeout, 10 s, for the first). A message larger than
 64 KiB is read under the database's memory budget, as an HTTP row body is: with too little memory now it is answered `error`
