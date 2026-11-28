@@ -76,7 +76,9 @@ anything else — `2`, `4`, `"3"`, `null`, `3.0`, a MessagePack float — is ans
 and the server's `protocol_version`, then the close (`1008`), before the database, the wire mode or the credential are looked at (no
 failed key is counted for it). The check reads the raw message, so an `auth` that also has a member the server does not take is told
 its version first. `auth_ok.protocol.version` is the same number; an SDK refuses a server whose `auth_ok` names another, or none. Long
-poll is HTTP and carries the header.
+poll is HTTP and carries the header. The server logs each such refusal on one line (the code, the version named and its own), at
+`Warning` for at most ten a second and at `Information` past that, the next `Warning` line saying how many went below
+(`Suppressed=`), as it does for an HTTP refusal: a fleet that keeps reconnecting with another version does not flood the log (**BL-1989, next train**).
 
 ### Database context
 
@@ -838,7 +840,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `COLUMN_NOT_FOUND` | 404 / 400 | The specified column does not exist: `404` on a column route (`PATCH` / `DELETE …/tables/{name}/columns/{column}`), `400` when a read (`/query`, a join's key, a named query's column — execute, batch and a batch slot alike) or a `rows/batch` operation names a column the table does not have (**BL-1937, next train**: a column found missing while a batch operation runs, with the `failedOperation` line) |
 | `FILE_FORMAT_REFUSED` | 503 | (**BL-1744, next train**) A table cannot be read or written because one of its files is of another version or is damaged: the answer names the file (`Table <id> cannot be read: FILE_FORMAT_REFUSED: found=<n> expected=<m> file=<name>.`; the path is not shown), is `503` with **no `Retry-After`** (a retry meets the same file), and stays until the directory is restored from a backup or opened by the build that wrote it ([Upgrading](../guides/upgrading.md#other-refusals)). The server has not changed anything. Before, such a table answered `500 INTERNAL_ERROR` with the refusal in `details` |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
-| `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
+| `COLUMN_EXISTS` | 409 | A column with the specified name already exists. (**BL-1977, next train**) Names are compared without case: `region` exists in a table that has `Region`, so `POST …/columns` with `region` and a rename (`PATCH …/columns/{c}` with `newName`) of another column to `REGION` are refused, the message naming the spelling the table holds; a column renamed to its own name in another case is not. A schema apply's add of such a name is a failed entry. Before, only an exact match was refused, and a grant whose `where` read `region` (matched without case) silently read the new, empty column |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
 | `PARTITION_KEY_FIXED` | 400 | (**BL-1199, 0.9.0**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
@@ -972,7 +974,7 @@ Auth errors use the shape of [the auth error envelope](#auth-error-envelope), wh
 | `TABLE_RENAME_REFERENCED` | 409 | (**BL-1929, next train**) A table rename (`PATCH …/tables/{name}`, Embedded's `RenameTableAsync`) is refused while a definition stored outside the catalog names the table: a materialized query that reads it or whose result it is, a named query that reads it (as its table or a join's), a named mutation of it, or an access-policy statement whose resource is `<db>/table/<name>` (a wildcard resource does not count). Nothing was changed. The message names each definition, a statement by its holder. A table rename rewrites other tables' `references` and transforms' `to`, not these definitions: drop or redefine each, rename the table, then re-create them by the new name. |
 | `DECLARED_IN_CONFIGURATION` | 409 | (**BL-1463, 0.16.0**) The call would change an object the declaration file declares — a declared database, the schema of a database that declares one, a declared principal, role, credential or `signup` setting. Nothing was changed; the message names the file and the JSON pointer. Change the declaration, then run `aouda reload`. See [One writer per declared object](#one-writer-per-declared-object) |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
-| `MQ_RESULT_REPLACED` | 409 | (**BL-1932, next train**) A read of a materialized query's result (`/query` naming it, `POST …/materialized-queries/{name}/query`, a subscribe's snapshot as an `error` message) whose result was replaced while the read was starting and which could not follow it: the query was dropped and re-created with other columns, or its result was rebuilt more often than one read re-binds (four times). Nothing was read. Read again: the next read is bound to the query's current result. `@aouda/client` (`AoudaConflictError`) and `Aouda.Client` retry it under their retry policy. Before, `/query` answered it `500 INTERNAL_ERROR` and the materialized endpoint `400 INVALID_REQUEST` |
+| `MQ_RESULT_REPLACED` | 409 | (**BL-1932, next train**) A read of a materialized query's result (`/query` naming it, `POST …/materialized-queries/{name}/query`, a subscribe's snapshot as an `error` message) whose result was replaced while the read was starting and which could not follow it: the query was dropped and re-created with other columns, or its result was rebuilt more often than one read re-binds (four times). Nothing was read. Read again: the next read is bound to the query's current result. `@aouda/client` (`AoudaConflictError`) and `Aouda.Client` retry it under their retry policy. A subscription whose subscribe is refused it subscribes again, fresh, in both SDKs — five times (250 ms doubling) between two snapshots, then the code reaches the caller (**BL-1971, next train**; before, the subscription ended). A query dropped and re-created under a subscription is another table: that subscription ends `TABLE_NOT_FOUND`, and is not subscribed again. Before, `/query` answered it `500 INTERNAL_ERROR` and the materialized endpoint `400 INVALID_REQUEST` |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
 
@@ -1050,9 +1052,9 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `DATABASE_NOT_FOUND` | WS error | At a `subscribe`: refused, the database is not open. On a live subscription (**BL-1818, next train**): it ended — its database was dropped, or (a replica's checkpoint) did not open again within 60 seconds. The connection stays open |
 | `TABLE_NOT_FOUND` | WS error | At a `subscribe`: refused, the table does not exist. On a live subscription (**BL-1824, next train**): it ended — its table was dropped or renamed, or its materialized query dropped. Sent once, after the last snapshot page; the connection stays open. A table made again under the name is another table: subscribe again once it exists. A materialized query's publication never sends it |
 | `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
-| `SLOW_CONSUMER` | WS close / long-poll `error` | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`). The frame has no `id`: it ends the connection, and every subscription on it. Over long-poll (**BL-1633, next train**) it is the last message a poll hands over when the session's queue (`LongPollMaxQueuedMessages`) is full, after everything queued before it; the next poll is `404 SESSION_NOT_FOUND`, and a message sent to `…/send` once the session has ended is answered `202` and not handled (a write stream's frame is not written). Both SDKs reconnect and subscribe fresh. Up to 0.17 a full long-poll queue dropped its oldest message silently |
+| `SLOW_CONSUMER` | WS close / long-poll `error` | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`). The frame has no `id`: it ends the connection, and every subscription on it. Over long-poll (**BL-1633, next train**) it is the last message a poll hands over when the session's queue (`LongPollMaxQueuedMessages`) is full, after everything queued before it; the next poll is `404 SESSION_NOT_FOUND`, and a message sent to `…/send` once the session has ended is answered `202` and not handled (a write stream's frame is not written). Both SDKs reconnect and subscribe fresh. Up to 0.17 a full long-poll queue dropped its oldest message silently. A snapshot's pages and its `snapshot_complete` are not what fills that queue (**BL-1981, next train**): they are counted apart, against what the session's subscriptions may need at once (`MaxSubscriptionsPerConnection` × (`MaxSnapshotRows` / `SnapshotPageSize`, rounded up, + 1) messages), so resubscribing every subscription after a reconnect, or a small `SnapshotPageSize`, no longer ends the session; changes, acks and errors are still bounded by `LongPollMaxQueuedMessages` |
 | `CONFLATE_NOOP` | `snapshot_complete` warning | `conflate` is set without `collapse_inserts` and the key is not the table PK (insert-only no-op). Subscribe still registers. |
-| `MQ_NOT_READY` | 409 / WS error | Materialized query is not `Ready`; watermark cannot satisfy a token. Retry; do not treat as a dead token. |
+| `MQ_NOT_READY` | 409 / WS error | Materialized query is not `Ready`; watermark cannot satisfy a token. Retry; do not treat as a dead token. A subscription refused it subscribes again by itself in both SDKs, five times (250 ms doubling) between two snapshots, then the code reaches the caller (`Aouda.Client` since **BL-1971, next train**; `@aouda/client` before). |
 
 #### Protocol Errors
 
@@ -2112,6 +2114,26 @@ document rules (column types, a `partitionKey` or `clusterColumns` entry that is
 the error were created and the bad one came back as a `Failed` entry in a `200`. What needs the catalog (a named query that names a
 missing column, a reference to another table) is still found per change during the apply.
 
+(**BL-1977, next train**) A table of the document whose `columns` hold two names equal without case (`Region` and `region`) is a
+document-level error (`400 INVALID_REQUEST`, nothing applied, `dryRun` too); adding a column whose name the live table holds in another
+case is that change's failed entry (`COLUMN_EXISTS`'s message).
+
+**The response names its enums** (**BL-1974, next train**). Each of `result.entries` is `{ "changeType", "tableName", "columnName",
+"status", "reason" }`; `changeType` is the change's name (`"AddColumn"`, `"UpdatePkUniqueness"`, … — the names `schema/diff` answers as a
+change's `type`), and `status` is `"Applied"`, `"Skipped"`, `"Failed"` or, in a dry run, `"Planned"`. `result.summary` counts them
+(`totalChanges`, `applied`, `skipped`, `failed`, `planned`); `historyId` is the migration recorded, or `null`.
+
+```json
+{ "result": { "entries": [ { "changeType": "AddColumn", "tableName": "orders", "columnName": "note", "status": "Applied", "reason": null } ],
+              "summary": { "totalChanges": 1, "applied": 1, "skipped": 0, "failed": 0, "planned": 0 } },
+  "historyId": 7, "warnings": null }
+```
+
+`GET …/schema/history?limit=&offset=` answers the recorded migrations, newest first: `{ "id", "timestamp", "source", "schemaHash",
+"changes", "appliedBy" }`, `source` one of `"ApiApply"`, `"ManualDdl"`, `"Inference"`, `"BranchMerge"`, `"DeclaredApply"` (the [migration sources](../guides/schema.md#migrationsource)), and each change `{ "changeType", "tableName",
+"columnName", "status", "reason" }` by the same names. Before, the apply's `changeType` and `status`, a diff change's `type` and the
+history's `source` were the enums' integers (`"status": 2` for a failed entry); a client that read those numbers reads names now.
+
 `GET …/schema/export` writes the document as `schema apply` reads it: no `null` members (it used to write `"or": null` in a `where`),
 so an export applies back as no change.
 
@@ -2931,7 +2953,8 @@ export type TableName = 'orders' | 'customers';
 
 #### `POST /api/databases/{db}/tables`
 
-Create a new table.
+Create a new table. (**BL-1977, next train**) Its column names are unique without case: `Region` and `region` in one request are
+`400 INVALID_REQUEST` (`Columns 'Region' and 'region' of table 'orders' differ only in case: …`), as a name given twice is.
 
 **Request:**
 
@@ -3162,6 +3185,12 @@ add-column carries a vector configuration, so the column could hold no vector (a
 A vector column is declared with its table (`POST …/tables/{name}:create-vector-column`, or a schema document, whose add-column of a vector
 column is a failed entry). Before, it was added.
 
+(**BL-1977, next train**) **No two columns of a table are equal without case.** A write matches column names without case, and so does
+an access-policy statement's `where`, so a second column `region` beside `Region` would be the same column to them and another to the
+catalog. A name the table holds in any case is refused `409 COLUMN_EXISTS`, the message naming the spelling it holds:
+`Column 'region' already exists in table 'orders' as 'Region': column names are unique without regard to case.` A data directory whose
+catalog holds such a pair (made before this rule) is refused at open, naming the table and both columns.
+
 **Response:** `201 Created` with column detail
 
 #### `PATCH /api/databases/{db}/tables/{name}/columns/{columnName}`
@@ -3208,8 +3237,9 @@ the rows written since.
   resource reaches the table (`*`, `<db>/*`, `<db>/table/<name or *>`, or a query or mutation of the database) — a role's, a
   principal's, a limited key's (one that has not expired or been revoked) or the signup setting's,
   in the auth database that governs the database. Names are compared without case: a `where` spelled `region` reads a column named
-  `Region`, and renaming another column to `region` (or to a name the table lacks that a statement reads) would make the statement read
-  that column instead, so it is refused. If that auth database exists and is not open, the rename is refused too: its
+  `Region`, and renaming another column to a name the table lacks that a statement reads would make the statement read that column
+  instead, so it is refused. (Renaming another column to `region` beside `Region` is refused first, `409 COLUMN_EXISTS`: column names
+  are unique without case, **BL-1977, next train**.) If that auth database exists and is not open, the rename is refused too: its
   statements cannot be checked.
 
 The message names each definition (a statement by its holder, never its `where` values). A rename rewrites the table's own definitions
@@ -4018,6 +4048,10 @@ write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtables
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
 | `rlsColumn` | string? | No | Adds a nullable `String` column (for example `org`), for a statement's `where` to compare. |
 
+(**BL-1977, next train**) The column names (`srcColumn`, `dstColumn`, `rlsColumn`) are unique without case: two equal without case are
+`400 INVALID_REQUEST`, naming both, and no table is made. Before, the table was made with both, which a write and a policy
+statement read as one column.
+
 Needs an unconditional `write` statement on `<db>/table/*` (the table is named in the body, so a statement on that one table does not cover it). `400 INVALID_REQUEST` for a missing field, `400 REQUEST_MEMBER_UNKNOWN` for a security
 member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the name is taken.
 
@@ -4105,6 +4139,9 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
 | `embeddingModel` | string? | No | The embedding model's name. |
 | `rlsColumn` | string? | No | As for an edge table. |
+
+(**BL-1977, next train**) `columnName` and `rlsColumn` are unique without case, beside each other and beside `RowKey`: `rowkey` is
+`400 INVALID_REQUEST`, naming both, and no table is made.
 
 Needs an unconditional `write` statement on the table it creates. `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance` or
 `quantization`, `400 REQUEST_MEMBER_UNKNOWN` for a security member (**BL-1464, 0.16.0**; the code since **BL-1659, next train**); `409 TABLE_EXISTS` when the table exists.
