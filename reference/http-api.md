@@ -2129,7 +2129,7 @@ change's `type`), and `status` is `"Applied"`, `"Skipped"`, `"Failed"` or, in a 
 ```
 
 `GET …/schema/history?limit=&offset=` answers the recorded migrations, newest first: `{ "id", "timestamp", "source", "schemaHash",
-"changes", "appliedBy" }`, `source` one of `"ApiApply"`, `"ManualDdl"`, `"Inference"`, and each change `{ "changeType", "tableName",
+"changes", "appliedBy" }`, `source` one of `"ApiApply"`, `"ManualDdl"`, `"Inference"`, `"BranchMerge"`, `"DeclaredApply"` (the [migration sources](../guides/schema.md#migrationsource)), and each change `{ "changeType", "tableName",
 "columnName", "status", "reason" }` by the same names. Before, the apply's `changeType` and `status`, a diff change's `type` and the
 history's `source` were the enums' integers (`"status": 2` for a failed entry); a client that read those numbers reads names now.
 
@@ -4045,6 +4045,10 @@ write path stores in them is under [`POST …/edges`](#post-apidatabasesdbtables
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
 | `rlsColumn` | string? | No | Adds a nullable `String` column (for example `org`), for a statement's `where` to compare. |
 
+(**BL-1977, next train**) The column names (`srcColumn`, `dstColumn`, `rlsColumn`) are unique without case: two equal without case are
+`400 INVALID_REQUEST`, naming both, and no table is made. Before, the table was made with both, which a write and a policy
+statement read as one column.
+
 Needs an unconditional `write` statement on `<db>/table/*` (the table is named in the body, so a statement on that one table does not cover it). `400 INVALID_REQUEST` for a missing field, `400 REQUEST_MEMBER_UNKNOWN` for a security
 member (**BL-1464, 0.16.0**); `409 TABLE_EXISTS` when the name is taken.
 
@@ -4132,6 +4136,9 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
 | `embeddingModel` | string? | No | The embedding model's name. |
 | `rlsColumn` | string? | No | As for an edge table. |
+
+(**BL-1977, next train**) `columnName` and `rlsColumn` are unique without case, beside each other and beside `RowKey`: `rowkey` is
+`400 INVALID_REQUEST`, naming both, and no table is made.
 
 Needs an unconditional `write` statement on the table it creates. `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance` or
 `quantization`, `400 REQUEST_MEMBER_UNKNOWN` for a security member (**BL-1464, 0.16.0**; the code since **BL-1659, next train**); `409 TABLE_EXISTS` when the table exists.
