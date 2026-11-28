@@ -838,7 +838,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `COLUMN_NOT_FOUND` | 404 / 400 | The specified column does not exist: `404` on a column route (`PATCH` / `DELETE …/tables/{name}/columns/{column}`), `400` when a read (`/query`, a join's key, a named query's column — execute, batch and a batch slot alike) or a `rows/batch` operation names a column the table does not have (**BL-1937, next train**: a column found missing while a batch operation runs, with the `failedOperation` line) |
 | `FILE_FORMAT_REFUSED` | 503 | (**BL-1744, next train**) A table cannot be read or written because one of its files is of another version or is damaged: the answer names the file (`Table <id> cannot be read: FILE_FORMAT_REFUSED: found=<n> expected=<m> file=<name>.`; the path is not shown), is `503` with **no `Retry-After`** (a retry meets the same file), and stays until the directory is restored from a backup or opened by the build that wrote it ([Upgrading](../guides/upgrading.md#other-refusals)). The server has not changed anything. Before, such a table answered `500 INTERNAL_ERROR` with the refusal in `details` |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
-| `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
+| `COLUMN_EXISTS` | 409 | A column with the specified name already exists. (**BL-1977, next train**) Names are compared without case: `region` exists in a table that has `Region`, so `POST …/columns` with `region` and a rename (`PATCH …/columns/{c}` with `newName`) of another column to `REGION` are refused, the message naming the spelling the table holds; a column renamed to its own name in another case is not. A schema apply's add of such a name is a failed entry. Before, only an exact match was refused, and a grant whose `where` read `region` (matched without case) silently read the new, empty column |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
 | `PARTITION_KEY_FIXED` | 400 | (**BL-1199, 0.9.0**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
@@ -2113,6 +2113,26 @@ document rules (column types, a `partitionKey` or `clusterColumns` entry that is
 the error were created and the bad one came back as a `Failed` entry in a `200`. What needs the catalog (a named query that names a
 missing column, a reference to another table) is still found per change during the apply.
 
+(**BL-1977, next train**) A table of the document whose `columns` hold two names equal without case (`Region` and `region`) is a
+document-level error (`400 INVALID_REQUEST`, nothing applied, `dryRun` too); adding a column whose name the live table holds in another
+case is that change's failed entry (`COLUMN_EXISTS`'s message).
+
+**The response names its enums** (**BL-1974, next train**). Each of `result.entries` is `{ "changeType", "tableName", "columnName",
+"status", "reason" }`; `changeType` is the change's name (`"AddColumn"`, `"UpdatePkUniqueness"`, … — the names `schema/diff` answers as a
+change's `type`), and `status` is `"Applied"`, `"Skipped"`, `"Failed"` or, in a dry run, `"Planned"`. `result.summary` counts them
+(`totalChanges`, `applied`, `skipped`, `failed`, `planned`); `historyId` is the migration recorded, or `null`.
+
+```json
+{ "result": { "entries": [ { "changeType": "AddColumn", "tableName": "orders", "columnName": "note", "status": "Applied", "reason": null } ],
+              "summary": { "totalChanges": 1, "applied": 1, "skipped": 0, "failed": 0, "planned": 0 } },
+  "historyId": 7, "warnings": null }
+```
+
+`GET …/schema/history?limit=&offset=` answers the recorded migrations, newest first: `{ "id", "timestamp", "source", "schemaHash",
+"changes", "appliedBy" }`, `source` one of `"ApiApply"`, `"ManualDdl"`, `"Inference"`, and each change `{ "changeType", "tableName",
+"columnName", "status", "reason" }` by the same names. Before, the apply's `changeType` and `status`, a diff change's `type` and the
+history's `source` were the enums' integers (`"status": 2` for a failed entry); a client that read those numbers reads names now.
+
 `GET …/schema/export` writes the document as `schema apply` reads it: no `null` members (it used to write `"or": null` in a `where`),
 so an export applies back as no change.
 
@@ -2930,7 +2950,8 @@ export type TableName = 'orders' | 'customers';
 
 #### `POST /api/databases/{db}/tables`
 
-Create a new table.
+Create a new table. (**BL-1977, next train**) Its column names are unique without case: `Region` and `region` in one request are
+`400 INVALID_REQUEST` (`Columns 'Region' and 'region' of table 'orders' differ only in case: …`), as a name given twice is.
 
 **Request:**
 
@@ -3161,6 +3182,12 @@ add-column carries a vector configuration, so the column could hold no vector (a
 A vector column is declared with its table (`POST …/tables/{name}:create-vector-column`, or a schema document, whose add-column of a vector
 column is a failed entry). Before, it was added.
 
+(**BL-1977, next train**) **No two columns of a table are equal without case.** A write matches column names without case, and so does
+an access-policy statement's `where`, so a second column `region` beside `Region` would be the same column to them and another to the
+catalog. A name the table holds in any case is refused `409 COLUMN_EXISTS`, the message naming the spelling it holds:
+`Column 'region' already exists in table 'orders' as 'Region': column names are unique without regard to case.` A data directory whose
+catalog holds such a pair (made before this rule) is refused at open, naming the table and both columns.
+
 **Response:** `201 Created` with column detail
 
 #### `PATCH /api/databases/{db}/tables/{name}/columns/{columnName}`
@@ -3207,8 +3234,9 @@ the rows written since.
   resource reaches the table (`*`, `<db>/*`, `<db>/table/<name or *>`, or a query or mutation of the database) — a role's, a
   principal's, a limited key's (one that has not expired or been revoked) or the signup setting's,
   in the auth database that governs the database. Names are compared without case: a `where` spelled `region` reads a column named
-  `Region`, and renaming another column to `region` (or to a name the table lacks that a statement reads) would make the statement read
-  that column instead, so it is refused. If that auth database exists and is not open, the rename is refused too: its
+  `Region`, and renaming another column to a name the table lacks that a statement reads would make the statement read that column
+  instead, so it is refused. (Renaming another column to `region` beside `Region` is refused first, `409 COLUMN_EXISTS`: column names
+  are unique without case, **BL-1977, next train**.) If that auth database exists and is not open, the rename is refused too: its
   statements cannot be checked.
 
 The message names each definition (a statement by its holder, never its `where` values). A rename rewrites the table's own definitions
